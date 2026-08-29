@@ -1,0 +1,40 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Core", "src\RhinoDB.Core\RhinoDB.Core.csproj", "{93234058-4908-4BDC-B8DA-8C0C2B7DF79C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Lib", "src\RhinoDB.Lib\RhinoDB.Lib.csproj", "{2447E99B-18E3-41D7-ACC3-BBE1BA730686}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Run.Server", "src\RhinoDB.Run.Server\RhinoDB.Run.Server.csproj", "{CFADF0E3-76A5-45A6-A52F-2D512527B3EE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Test.Core", "src\RhinoDB.Test.Core\RhinoDB.Test.Core.csproj", "{E47D973F-ABE2-4099-B824-E0FE4DDCC6A8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Test.Lib", "src\RhinoDB.Test.Lib\RhinoDB.Test.Lib.csproj", "{B5830303-66C8-4768-BE8B-E0368D64AE32}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{93234058-4908-4BDC-B8DA-8C0C2B7DF79C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{93234058-4908-4BDC-B8DA-8C0C2B7DF79C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{93234058-4908-4BDC-B8DA-8C0C2B7DF79C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{93234058-4908-4BDC-B8DA-8C0C2B7DF79C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2447E99B-18E3-41D7-ACC3-BBE1BA730686}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2447E99B-18E3-41D7-ACC3-BBE1BA730686}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2447E99B-18E3-41D7-ACC3-BBE1BA730686}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2447E99B-18E3-41D7-ACC3-BBE1BA730686}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CFADF0E3-76A5-45A6-A52F-2D512527B3EE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CFADF0E3-76A5-45A6-A52F-2D512527B3EE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CFADF0E3-76A5-45A6-A52F-2D512527B3EE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CFADF0E3-76A5-45A6-A52F-2D512527B3EE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E47D973F-ABE2-4099-B824-E0FE4DDCC6A8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E47D973F-ABE2-4099-B824-E0FE4DDCC6A8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E47D973F-ABE2-4099-B824-E0FE4DDCC6A8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E47D973F-ABE2-4099-B824-E0FE4DDCC6A8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B5830303-66C8-4768-BE8B-E0368D64AE32}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B5830303-66C8-4768-BE8B-E0368D64AE32}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B5830303-66C8-4768-BE8B-E0368D64AE32}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B5830303-66C8-4768-BE8B-E0368D64AE32}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

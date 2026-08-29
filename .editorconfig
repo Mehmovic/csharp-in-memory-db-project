@@ -1,0 +1,61 @@
+
+[*]
+
+# Microsoft .NET properties
+csharp_indent_braces = false
+csharp_new_line_before_catch = false
+csharp_new_line_before_else = false
+csharp_new_line_before_finally = false
+csharp_new_line_before_open_brace = none
+csharp_preferred_modifier_order = static, private, protected, public, file, new, internal, abstract, virtual, sealed, readonly, override, extern, unsafe, volatile, async, required:suggestion
+csharp_preserve_single_line_blocks = true
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_style_var_for_built_in_types = false:suggestion
+dotnet_separate_import_directive_groups = true
+
+# ReSharper properties
+resharper_blank_lines_after_block_statements = 0
+resharper_blank_lines_around_local_method = 0
+resharper_blank_lines_around_single_line_type = 0
+resharper_blank_lines_before_block_statements = 0
+resharper_braces_for_ifelse = required_for_multiline_statement
+resharper_csharp_allow_comment_after_lbrace = true
+resharper_csharp_blank_lines_around_invocable = 0
+resharper_csharp_blank_lines_inside_region = 0
+resharper_csharp_case_block_braces = end_of_line
+resharper_csharp_empty_block_style = do_not_change
+resharper_csharp_insert_final_newline = true
+resharper_csharp_max_line_length = 198
+resharper_csharp_wrap_after_invocation_lpar = true
+resharper_csharp_wrap_arguments_style = chop_if_long
+resharper_csharp_wrap_before_binary_opsign = true
+resharper_csharp_wrap_before_first_type_parameter_constraint = true
+resharper_csharp_wrap_before_invocation_rpar = true
+resharper_csharp_wrap_extends_list_style = chop_if_long
+resharper_for_built_in_types = use_explicit_type
+resharper_for_other_types = use_var_when_evident
+resharper_instance_members_qualify_declared_in = base_class
+resharper_keep_existing_attribute_arrangement = true
+resharper_keep_existing_declaration_block_arrangement = false
+resharper_keep_existing_primary_constructor_declaration_parens_arrangement = true
+resharper_method_or_operator_body = expression_body
+resharper_nested_ternary_style = autodetect
+resharper_object_creation_when_type_evident = explicitly_typed
+resharper_parentheses_redundancy_style = remove
+resharper_place_accessorholder_attribute_on_same_line = true
+resharper_place_accessor_attribute_on_same_line = true
+resharper_place_expr_accessor_on_single_line = true
+resharper_place_expr_method_on_single_line = true
+resharper_place_expr_property_on_single_line = true
+resharper_place_field_attribute_on_same_line = false
+resharper_place_simple_accessorholder_on_single_line = false
+resharper_place_simple_accessor_on_single_line = false
+resharper_place_simple_embedded_block_on_same_line = false
+resharper_place_simple_embedded_statement_on_same_line = if_owner_is_single_line
+resharper_place_simple_enum_on_single_line = true
+resharper_place_simple_method_on_single_line = false
+resharper_place_simple_switch_expression_on_single_line = true
+resharper_wrap_before_primary_constructor_declaration_lpar = true
+resharper_wrap_before_primary_constructor_declaration_rpar = true
+resharper_wrap_chained_binary_expressions = chop_if_long
+resharper_wrap_enum_declaration = chop_if_long
