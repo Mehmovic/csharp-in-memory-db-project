@@ -1,5 +1,7 @@
 using System.Numerics;
 
+using RhinoDB.Core.Storage;
+
 namespace RhinoDB.Lib.Storage;
 
 public class DenseArray<T>
@@ -44,7 +46,7 @@ public class DenseArray<T>
         return values[chunkIndex][index & chunkMask];
     }
 
-    public void Delete(int index) {
+    public DeleteType Delete(int index) {
         var lastIndex = Count - 1;
         var lastIndexInChunk = lastIndex & chunkMask;
 
@@ -52,17 +54,18 @@ public class DenseArray<T>
             Count -= 1;
             RemoveEmptyChunkIfRequired();
             MoveChunkCursorIfApplicable(lastIndexInChunk);
-            return;
+            return DeleteType.Deleted;
         }
 
         var targetChunk = index >> chunkShift;
         var indexInChunk = index & chunkMask;
         T lastItem = values[currentChunk][lastIndexInChunk];
         values[targetChunk][indexInChunk] = lastItem;
-        
+
         Count -= 1;
         RemoveEmptyChunkIfRequired();
         MoveChunkCursorIfApplicable(lastIndexInChunk);
+        return DeleteType.DeletedWithSwap;
     }
 
     private void MoveChunkCursorIfApplicable(int lastIndexInChunk) {
