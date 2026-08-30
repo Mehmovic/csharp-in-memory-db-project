@@ -9,7 +9,7 @@ public class DenseArrayTests
     [Test]
     public void Insert_ReturnsSequentialIndices()
     {
-        var store = new DenseArray<TestRow>();
+        var store = new DenseArray<TestRow>(chunkSize: 1);
 
         var first = store.Insert(new TestRow(1, "Alice"));
         var second = store.Insert(new TestRow(2, "Bob"));
@@ -24,7 +24,7 @@ public class DenseArrayTests
     [Test]
     public void Insert_ValueIsRetrievableByReturnedIndex()
     {
-        var store = new DenseArray<TestRow>();
+        var store = new DenseArray<TestRow>(chunkSize: 1);
 
         var index = store.Insert(new TestRow(42, "Dana"));
 
@@ -34,7 +34,7 @@ public class DenseArrayTests
     [Test]
     public void Delete_OfNonLastElement_SwapsLastElementIntoItsSlot()
     {
-        var store = new DenseArray<TestRow>();
+        var store = new DenseArray<TestRow>(chunkSize: 1);
         var a = store.Insert(new TestRow(1, "A"));
         var b = store.Insert(new TestRow(2, "B"));
         var c = store.Insert(new TestRow(3, "C"));
@@ -50,7 +50,7 @@ public class DenseArrayTests
     [Test]
     public void Delete_OfLastElement_JustShrinksWithoutMovingAnything()
     {
-        var store = new DenseArray<TestRow>();
+        var store = new DenseArray<TestRow>(chunkSize: 1);
         var a = store.Insert(new TestRow(1, "A"));
         var b = store.Insert(new TestRow(2, "B"));
         var c = store.Insert(new TestRow(3, "C"));
@@ -65,7 +65,7 @@ public class DenseArrayTests
     [Test]
     public void Delete_OnlyElement_EmptiesTheStore()
     {
-        var store = new DenseArray<TestRow>();
+        var store = new DenseArray<TestRow>(chunkSize: 1);
         var a = store.Insert(new TestRow(1, "A"));
 
         store.Delete(a);
@@ -76,7 +76,7 @@ public class DenseArrayTests
     [Test]
     public void InsertAfterDelete_AppendsPastCurrentCount_NoGapReused()
     {
-        var store = new DenseArray<TestRow>();
+        var store = new DenseArray<TestRow>(chunkSize: 1);
         var a = store.Insert(new TestRow(1, "A"));
         store.Insert(new TestRow(2, "B"));
 
