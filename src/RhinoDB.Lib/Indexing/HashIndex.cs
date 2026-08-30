@@ -26,13 +26,14 @@ public class HashIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey> ke
     }
 
     public Result Delete(TKey key) {
-        if (hashMap.Remove(key, out var index)) {
-            if (storage.Delete(index) == DeleteType.DeletedWithSwap) {
-                TRow swapped = storage.Get(index);
-                hashMap[keySelector(swapped)] = index;
-            }
+        if (!hashMap.Remove(key, out var index))
+            return Result.Error(new KeyNotFoundException($"Key {key} does not exist"));
+        
+        if (storage.Delete(index) != DeleteType.DeletedWithSwap)
             return Result.Ok();
-        }
-        return Result.Error(new KeyNotFoundException($"Key {key} does not exist"));
+        
+        TRow swapped = storage.Get(index);
+        hashMap[keySelector(swapped)] = index;
+        return Result.Ok();
     }
 }
