@@ -215,4 +215,43 @@ public class OrderedIndexTests
 
         Assert.That(rows.Select(r => r.Id), Is.EqualTo(new[] { 1, 3 }));
     }
+
+    [Test]
+    public void Delete_ThenInsertSameKeyAgain_Succeeds()
+    {
+        var index = NewIndex();
+        index.Insert(new TestRow(1, "Alice"));
+        index.Delete(1);
+
+        var result = index.Insert(new TestRow(1, "Alicia"));
+
+        Assert.That(result.IsOk(), Is.True);
+        Assert.That(index.Get(1).Unwrap(), Is.EqualTo(new TestRow(1, "Alicia")));
+        Assert.That(index.Count, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void Range_FromEqualsTo_OnExistingKey_ReturnsThatSingleRow()
+    {
+        var index = NewIndex();
+        index.Insert(new TestRow(1, "Alice"));
+        index.Insert(new TestRow(2, "Bob"));
+
+        var rows = index.Range(2, 2);
+
+        Assert.That(rows, Is.EqualTo(new[] { new TestRow(2, "Bob") }));
+    }
+
+    [Test]
+    public void InsertAndRange_AcrossChunkBoundary_MaintainsAscendingOrder()
+    {
+        // chunkSize is 4, so 6 inserts force a second chunk allocation partway through.
+        var index = NewIndex();
+        foreach (var id in new[] { 5, 1, 6, 3, 2, 4 }) // out of order on purpose
+            index.Insert(new TestRow(id, $"Row{id}"));
+
+        var rows = index.Range(1, 6);
+
+        Assert.That(rows.Select(r => r.Id), Is.EqualTo(new[] { 1, 2, 3, 4, 5, 6 }));
+    }
 }

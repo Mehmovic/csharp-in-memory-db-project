@@ -147,4 +147,52 @@ public class HashIndexTests
         Assert.That(index.Get(2).Unwrap(), Is.EqualTo(new TestRow(2, "Bob")));
         Assert.That(index.Get(3).Unwrap(), Is.EqualTo(new TestRow(3, "Carol")));
     }
+
+    [Test]
+    public void Delete_ThenInsertSameKeyAgain_Succeeds()
+    {
+        var index = NewIndex();
+        index.Insert(new TestRow(1, "Alice"));
+        index.Delete(1);
+
+        var result = index.Insert(new TestRow(1, "Alicia"));
+
+        Assert.That(result.IsOk(), Is.True);
+        Assert.That(index.Get(1).Unwrap(), Is.EqualTo(new TestRow(1, "Alicia")));
+        Assert.That(index.Count, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void InsertAndDelete_AcrossChunkBoundary_AllRemainingRowsStayConsistent()
+    {
+        // chunkSize is 4, so 6 inserts force a second chunk allocation partway through.
+        var index = NewIndex();
+        for (var i = 1; i <= 6; i++)
+            index.Insert(new TestRow(i, $"Row{i}"));
+
+        index.Delete(2); // triggers a swap from the second chunk into the first
+
+        Assert.That(index.Count, Is.EqualTo(5));
+        Assert.That(index.Get(2).IsError(), Is.True);
+        foreach (var id in new[] { 1, 3, 4, 5, 6 })
+            Assert.That(index.Get(id).Unwrap(), Is.EqualTo(new TestRow(id, $"Row{id}")));
+    }
+
+    [Test]
+    public void Delete_EveryRow_LeavesIndexEmptyAndAllKeysUnreachable()
+    {
+        var index = NewIndex();
+        index.Insert(new TestRow(1, "Alice"));
+        index.Insert(new TestRow(2, "Bob"));
+        index.Insert(new TestRow(3, "Carol"));
+
+        index.Delete(1);
+        index.Delete(2);
+        index.Delete(3);
+
+        Assert.That(index.Count, Is.EqualTo(0));
+        Assert.That(index.Get(1).IsError(), Is.True);
+        Assert.That(index.Get(2).IsError(), Is.True);
+        Assert.That(index.Get(3).IsError(), Is.True);
+    }
 }
