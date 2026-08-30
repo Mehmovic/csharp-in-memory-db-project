@@ -44,6 +44,11 @@ public class DenseArray<T>
         return values[chunkIndex][index & chunkMask];
     }
 
+    public void Set(int index, T value) {
+        var chunkIndex = index >> chunkShift;
+        values[chunkIndex][index & chunkMask] = value;
+    }
+
     public DeleteType Delete(int index) {
         var lastIndex = Count - 1;
         var lastIndexInChunk = lastIndex & chunkMask;

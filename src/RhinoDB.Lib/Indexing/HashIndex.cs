@@ -36,4 +36,18 @@ public class HashIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey> ke
         hashMap[keySelector(swapped)] = index;
         return Result.Ok();
     }
+
+    public Result Register(TKey key, int offset) {
+        return hashMap.TryAdd(key, offset)
+            ? Result.Ok()
+            : Result.Error(new ArgumentException("Duplicate key"));
+    }
+
+    public void Deregister(TKey key, int offset) {
+        var storedOffset = hashMap[key];
+        if (storedOffset != offset)
+            throw new ArgumentException($"Key {key} is registered at offset {storedOffset}, not {offset}");
+
+        hashMap.Remove(key);
+    }
 }

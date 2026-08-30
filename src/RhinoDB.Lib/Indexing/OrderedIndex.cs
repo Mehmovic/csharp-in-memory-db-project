@@ -43,6 +43,22 @@ public class OrderedIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey>
         return Result.Ok();
     }
 
+    public Result Register(TKey key, int offset) {
+        return sortedSet.Add((key, offset))
+            ? Result.Ok()
+            : Result.Error(new ArgumentException("Duplicate key"));
+    }
+
+    public void Deregister(TKey key, int offset) {
+        if (!sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry))
+            throw new KeyNotFoundException($"Key {key} does not exist");
+
+        if (entry.Offset != offset)
+            throw new ArgumentException($"Key {key} is registered at offset {entry.Offset}, not {offset}");
+
+        sortedSet.Remove(entry);
+    }
+
     public List<TRow> Range(TKey from, TKey to) {
         if (Comparer<TKey>.Default.Compare(from, to) > 0) return [];
 
