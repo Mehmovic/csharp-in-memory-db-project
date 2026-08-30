@@ -156,7 +156,7 @@ public class OrderedIndexTests
         index.Insert(new TestRow(4, "Dave"));
         index.Insert(new TestRow(2, "Bob"));
 
-        var rows = index.Range(2, 4).ToList();
+        var rows = index.Range(2, 4);
 
         Assert.That(rows, Is.EqualTo(new[]
         {
@@ -174,7 +174,7 @@ public class OrderedIndexTests
         index.Insert(new TestRow(2, "Bob"));
         index.Insert(new TestRow(3, "Carol"));
 
-        var rows = index.Range(1, 3).ToList();
+        var rows = index.Range(1, 3);
 
         Assert.That(rows.Select(r => r.Id), Is.EqualTo(new[] { 1, 2, 3 }));
     }
@@ -185,7 +185,7 @@ public class OrderedIndexTests
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
 
-        var rows = index.Range(100, 200).ToList();
+        var rows = index.Range(100, 200);
 
         Assert.That(rows, Is.Empty);
     }
@@ -197,7 +197,7 @@ public class OrderedIndexTests
         index.Insert(new TestRow(1, "Alice"));
         index.Insert(new TestRow(2, "Bob"));
 
-        var rows = index.Range(2, 1).ToList();
+        var rows = index.Range(2, 1);
 
         Assert.That(rows, Is.Empty);
     }
@@ -211,7 +211,7 @@ public class OrderedIndexTests
         index.Insert(new TestRow(3, "Carol"));
 
         index.Delete(2);
-        var rows = index.Range(1, 3).ToList();
+        var rows = index.Range(1, 3);
 
         Assert.That(rows.Select(r => r.Id), Is.EqualTo(new[] { 1, 3 }));
     }
