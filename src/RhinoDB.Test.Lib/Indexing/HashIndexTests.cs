@@ -7,16 +7,18 @@ public class HashIndexTests
 {
     private readonly record struct TestRow(int Id, string Name);
 
-    private static HashIndex<int, TestRow> NewIndex() => new(new DenseArray<TestRow>(chunkSize: 4), row => row.Id);
+    static private HashIndex<int, TestRow> NewIndex() => new HashIndex<int, TestRow>(
+        new DenseArray<TestRow>(chunkSize: 4), row => row.Id);
 
     [Test]
     public void Insert_ThenGet_ReturnsTheInsertedRow()
     {
         var index = NewIndex();
 
-        index.Insert(new TestRow(1, "Alice"));
+        var insertResult = index.Insert(new TestRow(1, "Alice"));
 
-        Assert.That(index.Get(1), Is.EqualTo(new TestRow(1, "Alice")));
+        Assert.That(insertResult.IsOk(), Is.True);
+        Assert.That(index.Get(1).Unwrap(), Is.EqualTo(new TestRow(1, "Alice")));
         Assert.That(index.Count, Is.EqualTo(1));
     }
 
@@ -29,19 +31,22 @@ public class HashIndexTests
         index.Insert(new TestRow(2, "Bob"));
         index.Insert(new TestRow(3, "Carol"));
 
-        Assert.That(index.Get(1), Is.EqualTo(new TestRow(1, "Alice")));
-        Assert.That(index.Get(2), Is.EqualTo(new TestRow(2, "Bob")));
-        Assert.That(index.Get(3), Is.EqualTo(new TestRow(3, "Carol")));
+        Assert.That(index.Get(1).Unwrap(), Is.EqualTo(new TestRow(1, "Alice")));
+        Assert.That(index.Get(2).Unwrap(), Is.EqualTo(new TestRow(2, "Bob")));
+        Assert.That(index.Get(3).Unwrap(), Is.EqualTo(new TestRow(3, "Carol")));
         Assert.That(index.Count, Is.EqualTo(3));
     }
 
     [Test]
-    public void Insert_DuplicateKey_Throws()
+    public void Insert_DuplicateKey_ReturnsFailureWithArgumentException()
     {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
 
-        Assert.Throws<ArgumentException>(() => index.Insert(new TestRow(1, "Impostor")));
+        var result = index.Insert(new TestRow(1, "Impostor"));
+
+        Assert.That(result.IsError, Is.True);
+        Assert.That(result.GetException(), Is.InstanceOf<ArgumentException>());
     }
 
     [Test]
@@ -52,37 +57,45 @@ public class HashIndexTests
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
 
-        Assert.Throws<ArgumentException>(() => index.Insert(new TestRow(1, "Impostor")));
+        var result = index.Insert(new TestRow(1, "Impostor"));
 
+        Assert.That(result.IsError(), Is.True);
         Assert.That(index.Count, Is.EqualTo(1));
     }
 
     [Test]
-    public void Get_UnknownKey_ThrowsKeyNotFoundException()
+    public void Get_UnknownKey_ReturnsFailureWithKeyNotFoundException()
     {
         var index = NewIndex();
 
-        Assert.Throws<KeyNotFoundException>(() => index.Get(999));
+        var result = index.Get(999);
+
+        Assert.That(result.IsError(), Is.True);
+        Assert.That(result.GetException(), Is.InstanceOf<KeyNotFoundException>());
     }
 
     [Test]
-    public void Delete_RemovesTheKey_SubsequentGetThrows()
+    public void Delete_RemovesTheKey_SubsequentGetReturnsFailure()
     {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
 
-        index.Delete(1);
+        var deleteResult = index.Delete(1);
 
+        Assert.That(deleteResult.IsOk(), Is.True);
         Assert.That(index.Count, Is.EqualTo(0));
-        Assert.Throws<KeyNotFoundException>(() => index.Get(1));
+        Assert.That(index.Get(1).IsError(), Is.True);
     }
 
     [Test]
-    public void Delete_UnknownKey_ThrowsKeyNotFoundException()
+    public void Delete_UnknownKey_ReturnsFailureWithKeyNotFoundException()
     {
         var index = NewIndex();
 
-        Assert.Throws<KeyNotFoundException>(() => index.Delete(999));
+        var result = index.Delete(999);
+
+        Assert.That(result.IsError, Is.True);
+        Assert.That(result.GetException(), Is.InstanceOf<KeyNotFoundException>());
     }
 
     [Test]
@@ -99,9 +112,9 @@ public class HashIndexTests
         index.Delete(1); // Carol (physically last) moves into Alice's old slot
 
         Assert.That(index.Count, Is.EqualTo(2));
-        Assert.That(index.Get(3), Is.EqualTo(new TestRow(3, "Carol")), "moved row must still be reachable by its key");
-        Assert.That(index.Get(2), Is.EqualTo(new TestRow(2, "Bob")), "untouched row must be unaffected");
-        Assert.Throws<KeyNotFoundException>(() => index.Get(1));
+        Assert.That(index.Get(3).Unwrap(), Is.EqualTo(new TestRow(3, "Carol")), "moved row must still be reachable by its key");
+        Assert.That(index.Get(2).Unwrap(), Is.EqualTo(new TestRow(2, "Bob")), "untouched row must be unaffected");
+        Assert.That(index.Get(1).IsError(), Is.True);
     }
 
     [Test]
@@ -115,9 +128,9 @@ public class HashIndexTests
         index.Delete(3); // Carol was already physically last; nothing moves
 
         Assert.That(index.Count, Is.EqualTo(2));
-        Assert.That(index.Get(1), Is.EqualTo(new TestRow(1, "Alice")));
-        Assert.That(index.Get(2), Is.EqualTo(new TestRow(2, "Bob")));
-        Assert.Throws<KeyNotFoundException>(() => index.Get(3));
+        Assert.That(index.Get(1).Unwrap(), Is.EqualTo(new TestRow(1, "Alice")));
+        Assert.That(index.Get(2).Unwrap(), Is.EqualTo(new TestRow(2, "Bob")));
+        Assert.That(index.Get(3).IsError(), Is.True);
     }
 
     [Test]
@@ -131,7 +144,7 @@ public class HashIndexTests
         index.Insert(new TestRow(3, "Carol")); // appended into the now-freed slot 1
 
         Assert.That(index.Count, Is.EqualTo(2));
-        Assert.That(index.Get(2), Is.EqualTo(new TestRow(2, "Bob")));
-        Assert.That(index.Get(3), Is.EqualTo(new TestRow(3, "Carol")));
+        Assert.That(index.Get(2).Unwrap(), Is.EqualTo(new TestRow(2, "Bob")));
+        Assert.That(index.Get(3).Unwrap(), Is.EqualTo(new TestRow(3, "Carol")));
     }
 }

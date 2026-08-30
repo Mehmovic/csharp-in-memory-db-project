@@ -1,7 +1,5 @@
 using System.Numerics;
 
-using RhinoDB.Core.Storage;
-
 namespace RhinoDB.Lib.Storage;
 
 public class DenseArray<T>

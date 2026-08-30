@@ -1,4 +1,3 @@
-using RhinoDB.Core.Storage;
 using RhinoDB.Lib.Storage;
 
 namespace RhinoDB.Lib.Indexing;
@@ -10,29 +9,30 @@ public class HashIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey> ke
 
     public int Count => storage.Count;
 
-    public void Insert(TRow row) {
+    public Result Insert(TRow row) {
         TKey key = keySelector(row);
 
         var index = storage.Insert(row);
-        if (hashMap.TryAdd(key, index)) return;
-        
+        if (hashMap.TryAdd(key, index)) return Result.Ok();
+
         storage.Delete(index);
-        throw new ArgumentException("Duplicate key");
+        return Result.Error(new ArgumentException("Duplicate key"));
     }
 
-    public TRow Get(TKey key) {
+    public Result<TRow> Get(TKey key) {
         return hashMap.TryGetValue(key, out var index)
             ? storage.Get(index)
-            : throw new KeyNotFoundException($"Key {key} does not exist");
+            : Result.Error(new KeyNotFoundException($"Key {key} does not exist"));
     }
 
-    public void Delete(TKey key) {
+    public Result Delete(TKey key) {
         if (hashMap.Remove(key, out var index)) {
-            if (storage.Delete(index) != DeleteType.DeletedWithSwap) return;
-            TRow swapped = storage.Get(index);
-            hashMap[keySelector(swapped)] = index;
-            return;
+            if (storage.Delete(index) == DeleteType.DeletedWithSwap) {
+                TRow swapped = storage.Get(index);
+                hashMap[keySelector(swapped)] = index;
+            }
+            return Result.Ok();
         }
-        throw new KeyNotFoundException($"Key {key} does not exist");
+        return Result.Error(new KeyNotFoundException($"Key {key} does not exist"));
     }
 }
