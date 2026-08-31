@@ -18,8 +18,12 @@ public class NonUniqueHashIndex<TKey, TRow>(DenseArray<TRow> storage)
     }
 
     public Result Deregister(TKey key, int offset) {
-        var offsets = hashMap[key];
+        if (!hashMap.TryGetValue(key, out var offsets))
+            return Result.Error(new IndexKeyNotFoundException(key));
+
         var position = offsets.IndexOf(offset);
+        if (position == -1)
+            return Result.Error(new OffsetNotRegisteredException(key, offset));
 
         var lastIndex = offsets.Count - 1;
         offsets[position] = offsets[lastIndex];

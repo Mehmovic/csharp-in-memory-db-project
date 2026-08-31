@@ -21,7 +21,7 @@ public class NonUniqueOrderedIndex<TKey, TRow>(DenseArray<TRow> storage)
     public Result Deregister(TKey key, int offset) {
         return sortedSet.Remove((key, offset))
             ? Result.Ok()
-            : Result.Error(new KeyNotFoundException($"Key {key} with offset {offset} does not exist"));
+            : Result.Error(new OffsetNotRegisteredException(key, offset));
     }
 
     public List<TRow> Get(TKey key) => Range(key, key);

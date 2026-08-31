@@ -19,18 +19,24 @@ public class OrderedIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey>
         if (sortedSet.Add((key, index))) return Result.Ok();
 
         storage.Delete(index);
-        return Result.Error(new ArgumentException("Duplicate key"));
+        return Result.Error(new DuplicateKeyException(key));
     }
 
     public Result<TRow> Get(TKey key) {
         return sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry)
             ? storage.Get(entry.Offset)
-            : Result.Error(new KeyNotFoundException($"Key {key} does not exist"));
+            : Result.Error(new IndexKeyNotFoundException(key));
+    }
+
+    public Result<int> GetOffset(TKey key) {
+        return sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry)
+            ? entry.Offset
+            : Result.Error(new IndexKeyNotFoundException(key));
     }
 
     public Result Delete(TKey key) {
         if (!sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry))
-            return Result.Error(new KeyNotFoundException($"Key {key} does not exist"));
+            return Result.Error(new IndexKeyNotFoundException(key));
 
         sortedSet.Remove(entry);
 
@@ -47,15 +53,15 @@ public class OrderedIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey>
     public Result Register(TKey key, int offset) {
         return sortedSet.Add((key, offset))
             ? Result.Ok()
-            : Result.Error(new ArgumentException("Duplicate key"));
+            : Result.Error(new DuplicateKeyException(key));
     }
 
     public Result Deregister(TKey key, int offset) {
         if (!sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry))
-            return Result.Error(new KeyNotFoundException($"Key {key} does not exist"));
+            return Result.Error(new IndexKeyNotFoundException(key));
 
         if (entry.Offset != offset)
-            return Result.Error(new ArgumentException($"Key {key} is registered at offset {entry.Offset}, not {offset}"));
+            return Result.Error(new OffsetNotRegisteredException(key, offset));
 
         sortedSet.Remove(entry);
         return Result.Ok();

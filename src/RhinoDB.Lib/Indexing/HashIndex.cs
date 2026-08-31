@@ -16,18 +16,24 @@ public class HashIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey> ke
         if (hashMap.TryAdd(key, index)) return Result.Ok();
 
         storage.Delete(index);
-        return Result.Error(new ArgumentException("Duplicate key"));
+        return Result.Error(new DuplicateKeyException(key));
     }
 
     public Result<TRow> Get(TKey key) {
         return hashMap.TryGetValue(key, out var index)
             ? storage.Get(index)
-            : Result.Error(new KeyNotFoundException($"Key {key} does not exist"));
+            : Result.Error(new IndexKeyNotFoundException(key));
+    }
+
+    public Result<int> GetOffset(TKey key) {
+        return hashMap.TryGetValue(key, out var index)
+            ? index
+            : Result.Error(new IndexKeyNotFoundException(key));
     }
 
     public Result Delete(TKey key) {
         if (!hashMap.Remove(key, out var index))
-            return Result.Error(new KeyNotFoundException($"Key {key} does not exist"));
+            return Result.Error(new IndexKeyNotFoundException(key));
 
         if (storage.Delete(index) != DeleteType.DeletedWithSwap)
             return Result.Ok();
@@ -40,13 +46,15 @@ public class HashIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey> ke
     public Result Register(TKey key, int offset) {
         return hashMap.TryAdd(key, offset)
             ? Result.Ok()
-            : Result.Error(new ArgumentException("Duplicate key"));
+            : Result.Error(new DuplicateKeyException(key));
     }
 
     public Result Deregister(TKey key, int offset) {
-        var storedOffset = hashMap[key];
+        if (!hashMap.TryGetValue(key, out var storedOffset))
+            return Result.Error(new IndexKeyNotFoundException(key));
+
         if (storedOffset != offset)
-            return Result.Error(new ArgumentException($"Key {key} is registered at offset {storedOffset}, not {offset}"));
+            return Result.Error(new OffsetNotRegisteredException(key, offset));
 
         hashMap.Remove(key);
         return Result.Ok();

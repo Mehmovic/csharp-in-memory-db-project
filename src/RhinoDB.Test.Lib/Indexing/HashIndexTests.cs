@@ -1,3 +1,4 @@
+using RhinoDB.Core.Exceptions;
 using RhinoDB.Lib.Indexing;
 using RhinoDB.Lib.Storage;
 
@@ -42,14 +43,14 @@ public class HashIndexTests {
     }
 
     [Test]
-    public void Insert_DuplicateKey_ReturnsFailureWithArgumentException() {
+    public void Insert_DuplicateKey_ReturnsFailureWithDuplicateKeyException() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
 
         var result = index.Insert(new TestRow(1, "Impostor"));
 
         Assert.That(result.IsError, Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<ArgumentException>());
+        Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
     }
 
     [Test]
@@ -66,13 +67,65 @@ public class HashIndexTests {
     }
 
     [Test]
-    public void Get_UnknownKey_ReturnsFailureWithKeyNotFoundException() {
+    public void Get_UnknownKey_ReturnsFailureWithIndexKeyNotFoundException() {
         var index = NewIndex();
 
         var result = index.Get(999);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<KeyNotFoundException>());
+        Assert.That(result.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
+    }
+
+    [Test]
+    public void GetOffset_ExistingKey_ReturnsItsPhysicalOffset() {
+        var index = NewIndex();
+        index.Insert(new TestRow(1, "Alice"));
+        index.Insert(new TestRow(2, "Bob"));
+
+        Assert.That(index.GetOffset(2).Unwrap(), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void GetOffset_UnknownKey_ReturnsFailureWithIndexKeyNotFoundException() {
+        var index = NewIndex();
+
+        var result = index.GetOffset(999);
+
+        Assert.That(result.IsError(), Is.True);
+        Assert.That(result.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
+    }
+
+    [Test]
+    public void GetOffset_AfterSwapDelete_ReflectsTheRepointedOffset() {
+        var index = NewIndex();
+        index.Insert(new TestRow(1, "Alice"));
+        index.Insert(new TestRow(2, "Bob"));
+        index.Insert(new TestRow(3, "Carol")); // physically last, at offset 2
+
+        index.Delete(1); // Carol swaps into Alice's old slot (offset 0)
+
+        Assert.That(index.GetOffset(3).Unwrap(), Is.EqualTo(0));
+    }
+
+    [Test]
+    public void GetOffset_AfterRegister_ReturnsTheRegisteredOffset() {
+        var (storage, index) = NewIndexWithStorage();
+        var offset = storage.Insert(new TestRow(1, "Alice"));
+
+        index.Register(1, offset);
+
+        Assert.That(index.GetOffset(1).Unwrap(), Is.EqualTo(offset));
+    }
+
+    [Test]
+    public void GetOffset_AfterDeregister_ReturnsFailureWithIndexKeyNotFoundException() {
+        var (storage, index) = NewIndexWithStorage();
+        var offset = storage.Insert(new TestRow(1, "Alice"));
+        index.Register(1, offset);
+
+        index.Deregister(1, offset);
+
+        Assert.That(index.GetOffset(1).IsError(), Is.True);
     }
 
     [Test]
@@ -88,13 +141,13 @@ public class HashIndexTests {
     }
 
     [Test]
-    public void Delete_UnknownKey_ReturnsFailureWithKeyNotFoundException() {
+    public void Delete_UnknownKey_ReturnsFailureWithIndexKeyNotFoundException() {
         var index = NewIndex();
 
         var result = index.Delete(999);
 
         Assert.That(result.IsError, Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<KeyNotFoundException>());
+        Assert.That(result.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
@@ -201,7 +254,7 @@ public class HashIndexTests {
     }
 
     [Test]
-    public void Register_DuplicateKey_ReturnsFailureWithArgumentException() {
+    public void Register_DuplicateKey_ReturnsFailureWithDuplicateKeyException() {
         var (storage, index) = NewIndexWithStorage();
         var a = storage.Insert(new TestRow(1, "Alice"));
         var b = storage.Insert(new TestRow(1, "Impostor"));
@@ -210,7 +263,7 @@ public class HashIndexTests {
         var result = index.Register(1, b);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<ArgumentException>());
+        Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
     }
 
     [Test]
@@ -237,14 +290,17 @@ public class HashIndexTests {
     }
 
     [Test]
-    public void Deregister_UnknownKey_Throws() {
+    public void Deregister_UnknownKey_ReturnsFailureWithIndexKeyNotFoundException() {
         var (_, index) = NewIndexWithStorage();
 
-        Assert.Throws<KeyNotFoundException>(() => index.Deregister(1, 0));
+        var res = index.Deregister(1, 0);
+
+        Assert.That(res.IsError(), Is.True);
+        Assert.That(res.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
-    public void Deregister_OffsetMismatch_Throws() {
+    public void Deregister_OffsetMismatch_ReturnsFailureWithOffsetNotRegisteredException() {
         var (storage, index) = NewIndexWithStorage();
         var offset = storage.Insert(new TestRow(1, "Alice"));
         index.Register(1, offset);
@@ -252,7 +308,7 @@ public class HashIndexTests {
         var res = index.Deregister(1, offset + 999);
 
         Assert.That(res.IsError(), Is.True);
-        Assert.That(res.GetException(), Is.InstanceOf<ArgumentException>());
+        Assert.That(res.GetException(), Is.InstanceOf<OffsetNotRegisteredException>());
     }
 
     [Test]

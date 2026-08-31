@@ -1,3 +1,4 @@
+using RhinoDB.Core.Exceptions;
 using RhinoDB.Lib.Indexing;
 using RhinoDB.Lib.Storage;
 
@@ -96,13 +97,13 @@ public class NonUniqueOrderedIndexTests {
     }
 
     [Test]
-    public void Deregister_UnknownPair_Throws() {
+    public void Deregister_UnknownPair_ReturnsFailureWithOffsetNotRegisteredException() {
         var (_, index) = NewIndex();
 
         var res = index.Deregister(30, 0);
 
         Assert.That(res.IsError(), Is.True);
-        Assert.That(res.GetException(), Is.InstanceOf<KeyNotFoundException>());
+        Assert.That(res.GetException(), Is.InstanceOf<OffsetNotRegisteredException>());
     }
 
     [Test]

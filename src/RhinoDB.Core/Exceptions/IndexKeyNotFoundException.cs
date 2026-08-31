@@ -1,10 +1,6 @@
 namespace RhinoDB.Core.Exceptions;
 
-public sealed class IndexKeyNotFoundException : Exception {
-    public object Key { get; }
-
-    public IndexKeyNotFoundException(object key)
-        : base($"Key '{key}' does not exist") {
-        Key = key;
-    }
+public sealed class IndexKeyNotFoundException(object key)
+    : Exception($"Key '{key}' does not exist") {
+    public object Key { get; } = key;
 }

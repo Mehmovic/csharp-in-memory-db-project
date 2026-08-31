@@ -1,3 +1,4 @@
+using RhinoDB.Core.Exceptions;
 using RhinoDB.Lib.Indexing;
 using RhinoDB.Lib.Storage;
 
@@ -78,21 +79,27 @@ public class NonUniqueHashIndexTests
     }
 
     [Test]
-    public void Deregister_UnknownKey_Throws()
+    public void Deregister_UnknownKey_ReturnsFailureWithIndexKeyNotFoundException()
     {
         var (_, index) = NewIndex();
 
-        Assert.Throws<KeyNotFoundException>(() => index.Deregister("Red", 0));
+        var res = index.Deregister("Red", 0);
+
+        Assert.That(res.IsError(), Is.True);
+        Assert.That(res.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
-    public void Deregister_OffsetNotUnderTheGivenKey_Throws()
+    public void Deregister_OffsetNotUnderTheGivenKey_ReturnsFailureWithOffsetNotRegisteredException()
     {
         var (storage, index) = NewIndex();
         var offset = storage.Insert(new TestRow(1, "Red"));
         index.Register("Red", offset);
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => index.Deregister("Red", 999));
+        var res = index.Deregister("Red", 999);
+
+        Assert.That(res.IsError(), Is.True);
+        Assert.That(res.GetException(), Is.InstanceOf<OffsetNotRegisteredException>());
     }
 
     [Test]

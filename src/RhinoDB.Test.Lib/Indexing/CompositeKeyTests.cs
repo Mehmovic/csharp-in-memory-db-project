@@ -1,3 +1,4 @@
+using RhinoDB.Core.Exceptions;
 using RhinoDB.Lib.Indexing;
 using RhinoDB.Lib.Storage;
 
@@ -49,7 +50,7 @@ public class HashIndex_CompositeKeyTests
         var result = index.Insert(new Position(2, 5, 10));
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<ArgumentException>());
+        Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
     }
 
     [Test]
@@ -87,7 +88,7 @@ public class OrderedIndex_CompositeKeyTests
         var result = index.Insert(new Position(2, 5, 10));
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<ArgumentException>());
+        Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
     }
 
     [Test]
