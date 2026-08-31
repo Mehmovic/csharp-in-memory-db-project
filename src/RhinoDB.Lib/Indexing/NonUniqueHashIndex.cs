@@ -7,16 +7,17 @@ public class NonUniqueHashIndex<TKey, TRow>(DenseArray<TRow> storage)
     where TRow : struct {
     private readonly Dictionary<TKey, List<int>> hashMap = new Dictionary<TKey, List<int>>();
 
-    public void Register(TKey key, int offset) {
+    public Result Register(TKey key, int offset) {
         if (!hashMap.TryGetValue(key, out var offsets)) {
             offsets = [];
             hashMap[key] = offsets;
         }
 
         offsets.Add(offset);
+        return Result.Ok();
     }
 
-    public void Deregister(TKey key, int offset) {
+    public Result Deregister(TKey key, int offset) {
         var offsets = hashMap[key];
         var position = offsets.IndexOf(offset);
 
@@ -25,6 +26,7 @@ public class NonUniqueHashIndex<TKey, TRow>(DenseArray<TRow> storage)
         offsets.RemoveAt(lastIndex);
 
         if (offsets.Count == 0) hashMap.Remove(key);
+        return Result.Ok();
     }
 
     public List<TRow> Get(TKey key) {

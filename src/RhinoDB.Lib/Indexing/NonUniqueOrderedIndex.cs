@@ -13,11 +13,15 @@ public class NonUniqueOrderedIndex<TKey, TRow>(DenseArray<TRow> storage)
         )
     );
 
-    public void Register(TKey key, int offset) => sortedSet.Add((key, offset));
+    public Result Register(TKey key, int offset) {
+        sortedSet.Add((key, offset));
+        return Result.Ok();
+    }
 
-    public void Deregister(TKey key, int offset) {
-        if (!sortedSet.Remove((key, offset)))
-            throw new KeyNotFoundException($"Key {key} with offset {offset} does not exist");
+    public Result Deregister(TKey key, int offset) {
+        return sortedSet.Remove((key, offset))
+            ? Result.Ok()
+            : Result.Error(new KeyNotFoundException($"Key {key} with offset {offset} does not exist"));
     }
 
     public List<TRow> Get(TKey key) => Range(key, key);

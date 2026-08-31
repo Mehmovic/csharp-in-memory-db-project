@@ -3,8 +3,7 @@ using RhinoDB.Lib.Storage;
 
 namespace RhinoDB.Test.Lib.Indexing;
 
-public class NonUniqueOrderedIndexTests
-{
+public class NonUniqueOrderedIndexTests {
     private readonly record struct TestRow(int Id, int Age);
 
     static private (DenseArray<TestRow> Storage, NonUniqueOrderedIndex<int, TestRow> Index) NewIndex() {
@@ -13,16 +12,14 @@ public class NonUniqueOrderedIndexTests
     }
 
     [Test]
-    public void Range_WithNoMatches_ReturnsEmpty()
-    {
+    public void Range_WithNoMatches_ReturnsEmpty() {
         var (_, index) = NewIndex();
 
         Assert.That(index.Range(1, 10), Is.Empty);
     }
 
     [Test]
-    public void Register_ThenRange_ReturnsTheRegisteredRow()
-    {
+    public void Register_ThenRange_ReturnsTheRegisteredRow() {
         var (storage, index) = NewIndex();
         var offset = storage.Insert(new TestRow(1, 30));
 
@@ -32,8 +29,7 @@ public class NonUniqueOrderedIndexTests
     }
 
     [Test]
-    public void Register_MultipleRowsSameKey_RangeReturnsAllOfThem()
-    {
+    public void Register_MultipleRowsSameKey_RangeReturnsAllOfThem() {
         var (storage, index) = NewIndex();
         var a = storage.Insert(new TestRow(1, 30));
         var b = storage.Insert(new TestRow(2, 30));
@@ -45,8 +41,7 @@ public class NonUniqueOrderedIndexTests
     }
 
     [Test]
-    public void Range_ReturnsRowsAcrossMultipleKeysInAscendingKeyOrder_DuplicatesGroupedByKey()
-    {
+    public void Range_ReturnsRowsAcrossMultipleKeysInAscendingKeyOrder_DuplicatesGroupedByKey() {
         var (storage, index) = NewIndex();
         // Inserted out of key order on purpose - ordering must come from the index
         // itself, not from insertion order or physical array position.
@@ -68,8 +63,7 @@ public class NonUniqueOrderedIndexTests
     }
 
     [Test]
-    public void Range_WhenFromIsGreaterThanTo_ReturnsEmpty()
-    {
+    public void Range_WhenFromIsGreaterThanTo_ReturnsEmpty() {
         var (storage, index) = NewIndex();
         var offset = storage.Insert(new TestRow(1, 30));
         index.Register(30, offset);
@@ -78,8 +72,7 @@ public class NonUniqueOrderedIndexTests
     }
 
     [Test]
-    public void Deregister_RemovesOnlyTheGivenOffset_OtherRowsWithSameKeyRemain()
-    {
+    public void Deregister_RemovesOnlyTheGivenOffset_OtherRowsWithSameKeyRemain() {
         var (storage, index) = NewIndex();
         var a = storage.Insert(new TestRow(1, 30));
         var b = storage.Insert(new TestRow(2, 30));
@@ -92,8 +85,7 @@ public class NonUniqueOrderedIndexTests
     }
 
     [Test]
-    public void Deregister_LastOffsetUnderAKey_KeyNoLongerAppearsInRange()
-    {
+    public void Deregister_LastOffsetUnderAKey_KeyNoLongerAppearsInRange() {
         var (storage, index) = NewIndex();
         var offset = storage.Insert(new TestRow(1, 30));
         index.Register(30, offset);
@@ -104,16 +96,17 @@ public class NonUniqueOrderedIndexTests
     }
 
     [Test]
-    public void Deregister_UnknownPair_Throws()
-    {
+    public void Deregister_UnknownPair_Throws() {
         var (_, index) = NewIndex();
 
-        Assert.Throws<KeyNotFoundException>(() => index.Deregister(30, 0));
+        var res = index.Deregister(30, 0);
+
+        Assert.That(res.IsError(), Is.True);
+        Assert.That(res.GetException(), Is.InstanceOf<KeyNotFoundException>());
     }
 
     [Test]
-    public void Get_ReturnsAllRowsForKey()
-    {
+    public void Get_ReturnsAllRowsForKey() {
         var (storage, index) = NewIndex();
         var a = storage.Insert(new TestRow(1, 30));
         var b = storage.Insert(new TestRow(2, 30));
@@ -124,16 +117,14 @@ public class NonUniqueOrderedIndexTests
     }
 
     [Test]
-    public void Get_UnknownKey_ReturnsEmpty()
-    {
+    public void Get_UnknownKey_ReturnsEmpty() {
         var (_, index) = NewIndex();
 
         Assert.That(index.Get(30), Is.Empty);
     }
 
     [Test]
-    public void Range_BoundaryKeysHaveMultipleEntries_AllOfThemIncluded()
-    {
+    public void Range_BoundaryKeysHaveMultipleEntries_AllOfThemIncluded() {
         var (storage, index) = NewIndex();
         var a1 = storage.Insert(new TestRow(1, 20));
         var a2 = storage.Insert(new TestRow(2, 20));
@@ -153,8 +144,7 @@ public class NonUniqueOrderedIndexTests
     }
 
     [Test]
-    public void Deregister_ThenRegisterAgainUnderSameKey_Succeeds()
-    {
+    public void Deregister_ThenRegisterAgainUnderSameKey_Succeeds() {
         var (storage, index) = NewIndex();
         var a = storage.Insert(new TestRow(1, 30));
         index.Register(30, a);
@@ -167,8 +157,7 @@ public class NonUniqueOrderedIndexTests
     }
 
     [Test]
-    public void Register_AcrossChunkBoundary_MaintainsAscendingOrder()
-    {
+    public void Register_AcrossChunkBoundary_MaintainsAscendingOrder() {
         // chunkSize is 4, so 6 inserts force a second chunk allocation partway through.
         var (storage, index) = NewIndex();
         var ages = new[] { 50, 10, 60, 30, 20, 40 }; // out of order on purpose

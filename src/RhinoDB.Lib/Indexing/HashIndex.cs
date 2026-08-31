@@ -28,10 +28,10 @@ public class HashIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey> ke
     public Result Delete(TKey key) {
         if (!hashMap.Remove(key, out var index))
             return Result.Error(new KeyNotFoundException($"Key {key} does not exist"));
-        
+
         if (storage.Delete(index) != DeleteType.DeletedWithSwap)
             return Result.Ok();
-        
+
         TRow swapped = storage.Get(index);
         hashMap[keySelector(swapped)] = index;
         return Result.Ok();
@@ -43,11 +43,12 @@ public class HashIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey> ke
             : Result.Error(new ArgumentException("Duplicate key"));
     }
 
-    public void Deregister(TKey key, int offset) {
+    public Result Deregister(TKey key, int offset) {
         var storedOffset = hashMap[key];
         if (storedOffset != offset)
-            throw new ArgumentException($"Key {key} is registered at offset {storedOffset}, not {offset}");
+            return Result.Error(new ArgumentException($"Key {key} is registered at offset {storedOffset}, not {offset}"));
 
         hashMap.Remove(key);
+        return Result.Ok();
     }
 }

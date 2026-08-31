@@ -3,12 +3,13 @@ using RhinoDB.Lib.Storage;
 
 namespace RhinoDB.Test.Lib.Indexing;
 
-public class OrderedIndexTests
-{
+public class OrderedIndexTests {
     private readonly record struct TestRow(int Id, string Name);
 
     static private OrderedIndex<int, TestRow> NewIndex() => new OrderedIndex<int, TestRow>(
-        new DenseArray<TestRow>(chunkSize: 4), row => row.Id);
+        new DenseArray<TestRow>(chunkSize: 4),
+        row => row.Id
+    );
 
     static private (DenseArray<TestRow> Storage, OrderedIndex<int, TestRow> Index) NewIndexWithStorage() {
         var storage = new DenseArray<TestRow>(chunkSize: 4);
@@ -16,8 +17,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Insert_ThenGet_ReturnsTheInsertedRow()
-    {
+    public void Insert_ThenGet_ReturnsTheInsertedRow() {
         var index = NewIndex();
 
         var insertResult = index.Insert(new TestRow(1, "Alice"));
@@ -28,8 +28,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Insert_MultipleRows_AllRetrievableByKey()
-    {
+    public void Insert_MultipleRows_AllRetrievableByKey() {
         var index = NewIndex();
 
         index.Insert(new TestRow(1, "Alice"));
@@ -43,8 +42,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Insert_DuplicateKey_ReturnsFailureWithArgumentException()
-    {
+    public void Insert_DuplicateKey_ReturnsFailureWithArgumentException() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
 
@@ -55,8 +53,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Insert_DuplicateKey_RollsBackTheStorageInsert()
-    {
+    public void Insert_DuplicateKey_RollsBackTheStorageInsert() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
 
@@ -66,8 +63,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Get_UnknownKey_ReturnsFailureWithKeyNotFoundException()
-    {
+    public void Get_UnknownKey_ReturnsFailureWithKeyNotFoundException() {
         var index = NewIndex();
 
         var result = index.Get(999);
@@ -77,8 +73,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Delete_RemovesTheKey_SubsequentGetReturnsFailure()
-    {
+    public void Delete_RemovesTheKey_SubsequentGetReturnsFailure() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
 
@@ -90,8 +85,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Delete_UnknownKey_ReturnsFailureWithKeyNotFoundException()
-    {
+    public void Delete_UnknownKey_ReturnsFailureWithKeyNotFoundException() {
         var index = NewIndex();
 
         var result = index.Delete(999);
@@ -101,8 +95,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Delete_OfNonLastRow_RepointsTheMovedRowsIndex()
-    {
+    public void Delete_OfNonLastRow_RepointsTheMovedRowsIndex() {
         // Same underlying DenseArray swap-remove concern as HashIndex: the physically
         // last row moves into the deleted row's slot and must stay reachable by key.
         var index = NewIndex();
@@ -119,8 +112,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Delete_OfThePhysicallyLastRow_NeedsNoRepointing()
-    {
+    public void Delete_OfThePhysicallyLastRow_NeedsNoRepointing() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
         index.Insert(new TestRow(2, "Bob"));
@@ -135,8 +127,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void InsertAfterDelete_ReusesTheFreedSlot_AndIndexStaysConsistent()
-    {
+    public void InsertAfterDelete_ReusesTheFreedSlot_AndIndexStaysConsistent() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
         index.Insert(new TestRow(2, "Bob"));
@@ -150,8 +141,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Range_ReturnsRowsWithinBoundsInclusive_InAscendingKeyOrder()
-    {
+    public void Range_ReturnsRowsWithinBoundsInclusive_InAscendingKeyOrder() {
         var index = NewIndex();
         // Inserted out of key order on purpose - ordering must come from the index
         // itself, not from insertion order or physical array position.
@@ -163,17 +153,20 @@ public class OrderedIndexTests
 
         var rows = index.Range(2, 4);
 
-        Assert.That(rows, Is.EqualTo(new[]
-        {
-            new TestRow(2, "Bob"),
-            new TestRow(3, "Carol"),
-            new TestRow(4, "Dave"),
-        }));
+        Assert.That(
+            rows,
+            Is.EqualTo(
+                new[] {
+                    new TestRow(2, "Bob"),
+                    new TestRow(3, "Carol"),
+                    new TestRow(4, "Dave"),
+                }
+            )
+        );
     }
 
     [Test]
-    public void Range_BoundsAreInclusive()
-    {
+    public void Range_BoundsAreInclusive() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
         index.Insert(new TestRow(2, "Bob"));
@@ -185,8 +178,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Range_WithNoMatches_ReturnsEmpty()
-    {
+    public void Range_WithNoMatches_ReturnsEmpty() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
 
@@ -196,8 +188,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Range_WhenFromIsGreaterThanTo_ReturnsEmpty()
-    {
+    public void Range_WhenFromIsGreaterThanTo_ReturnsEmpty() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
         index.Insert(new TestRow(2, "Bob"));
@@ -208,8 +199,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Range_ReflectsStateAfterADelete()
-    {
+    public void Range_ReflectsStateAfterADelete() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
         index.Insert(new TestRow(2, "Bob"));
@@ -222,8 +212,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Delete_ThenInsertSameKeyAgain_Succeeds()
-    {
+    public void Delete_ThenInsertSameKeyAgain_Succeeds() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
         index.Delete(1);
@@ -236,8 +225,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Range_FromEqualsTo_OnExistingKey_ReturnsThatSingleRow()
-    {
+    public void Range_FromEqualsTo_OnExistingKey_ReturnsThatSingleRow() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
         index.Insert(new TestRow(2, "Bob"));
@@ -248,8 +236,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void InsertAndRange_AcrossChunkBoundary_MaintainsAscendingOrder()
-    {
+    public void InsertAndRange_AcrossChunkBoundary_MaintainsAscendingOrder() {
         // chunkSize is 4, so 6 inserts force a second chunk allocation partway through.
         var index = NewIndex();
         foreach (var id in new[] { 5, 1, 6, 3, 2, 4 }) // out of order on purpose
@@ -261,8 +248,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Register_ThenGet_ReturnsTheRow()
-    {
+    public void Register_ThenGet_ReturnsTheRow() {
         var (storage, index) = NewIndexWithStorage();
         var offset = storage.Insert(new TestRow(1, "Alice"));
 
@@ -273,8 +259,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Register_DuplicateKey_ReturnsFailureWithArgumentException()
-    {
+    public void Register_DuplicateKey_ReturnsFailureWithArgumentException() {
         var (storage, index) = NewIndexWithStorage();
         var a = storage.Insert(new TestRow(1, "Alice"));
         var b = storage.Insert(new TestRow(1, "Impostor"));
@@ -287,8 +272,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Register_MultipleKeysOutOfOrder_RangeStillReturnsAscendingOrder()
-    {
+    public void Register_MultipleKeysOutOfOrder_RangeStillReturnsAscendingOrder() {
         var (storage, index) = NewIndexWithStorage();
         var c = storage.Insert(new TestRow(3, "Carol"));
         var a = storage.Insert(new TestRow(1, "Alice"));
@@ -303,8 +287,7 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Deregister_RemovesTheKey_SubsequentGetFails()
-    {
+    public void Deregister_RemovesTheKey_SubsequentGetFails() {
         var (storage, index) = NewIndexWithStorage();
         var offset = storage.Insert(new TestRow(1, "Alice"));
         index.Register(1, offset);
@@ -315,26 +298,29 @@ public class OrderedIndexTests
     }
 
     [Test]
-    public void Deregister_UnknownKey_Throws()
-    {
+    public void Deregister_UnknownKey_Throws() {
         var (_, index) = NewIndexWithStorage();
 
-        Assert.Throws<KeyNotFoundException>(() => index.Deregister(1, 0));
+        var res = index.Deregister(1, 0);
+
+        Assert.That(res.IsError(), Is.True);
+        Assert.That(res.GetException(), Is.InstanceOf<KeyNotFoundException>());
     }
 
     [Test]
-    public void Deregister_OffsetMismatch_Throws()
-    {
+    public void Deregister_OffsetMismatch_Throws() {
         var (storage, index) = NewIndexWithStorage();
         var offset = storage.Insert(new TestRow(1, "Alice"));
         index.Register(1, offset);
 
-        Assert.Throws<ArgumentException>(() => index.Deregister(1, offset + 999));
+        var res = index.Deregister(1, offset + 999);
+
+        Assert.That(res.IsError(), Is.True);
+        Assert.That(res.GetException(), Is.InstanceOf<ArgumentException>());
     }
 
     [Test]
-    public void Deregister_ThenRegisterNewKey_SupportsRekeying()
-    {
+    public void Deregister_ThenRegisterNewKey_SupportsRekeying() {
         // The Update use case: same physical row, key changes, offset stays the same.
         var (storage, index) = NewIndexWithStorage();
         var offset = storage.Insert(new TestRow(1, "Alice"));

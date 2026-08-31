@@ -7,7 +7,8 @@ public class OrderedIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey>
     where TRow : struct {
     private readonly SortedSet<(TKey Key, int Offset)> sortedSet =
         new SortedSet<(TKey Key, int Offset)>(
-            Comparer<(TKey Key, int _)>.Create((a, b) => Comparer<TKey>.Default.Compare(a.Key, b.Key)));
+            Comparer<(TKey Key, int _)>.Create((a, b) => Comparer<TKey>.Default.Compare(a.Key, b.Key))
+        );
 
     public int Count => storage.Count;
 
@@ -49,14 +50,15 @@ public class OrderedIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey>
             : Result.Error(new ArgumentException("Duplicate key"));
     }
 
-    public void Deregister(TKey key, int offset) {
+    public Result Deregister(TKey key, int offset) {
         if (!sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry))
-            throw new KeyNotFoundException($"Key {key} does not exist");
+            return Result.Error(new KeyNotFoundException($"Key {key} does not exist"));
 
         if (entry.Offset != offset)
-            throw new ArgumentException($"Key {key} is registered at offset {entry.Offset}, not {offset}");
+            return Result.Error(new ArgumentException($"Key {key} is registered at offset {entry.Offset}, not {offset}"));
 
         sortedSet.Remove(entry);
+        return Result.Ok();
     }
 
     public List<TRow> Range(TKey from, TKey to) {

@@ -3,12 +3,13 @@ using RhinoDB.Lib.Storage;
 
 namespace RhinoDB.Test.Lib.Indexing;
 
-public class HashIndexTests
-{
+public class HashIndexTests {
     private readonly record struct TestRow(int Id, string Name);
 
     static private HashIndex<int, TestRow> NewIndex() => new HashIndex<int, TestRow>(
-        new DenseArray<TestRow>(chunkSize: 4), row => row.Id);
+        new DenseArray<TestRow>(chunkSize: 4),
+        row => row.Id
+    );
 
     static private (DenseArray<TestRow> Storage, HashIndex<int, TestRow> Index) NewIndexWithStorage() {
         var storage = new DenseArray<TestRow>(chunkSize: 4);
@@ -16,8 +17,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Insert_ThenGet_ReturnsTheInsertedRow()
-    {
+    public void Insert_ThenGet_ReturnsTheInsertedRow() {
         var index = NewIndex();
 
         var insertResult = index.Insert(new TestRow(1, "Alice"));
@@ -28,8 +28,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Insert_MultipleRows_AllRetrievableByKey()
-    {
+    public void Insert_MultipleRows_AllRetrievableByKey() {
         var index = NewIndex();
 
         index.Insert(new TestRow(1, "Alice"));
@@ -43,8 +42,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Insert_DuplicateKey_ReturnsFailureWithArgumentException()
-    {
+    public void Insert_DuplicateKey_ReturnsFailureWithArgumentException() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
 
@@ -55,8 +53,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Insert_DuplicateKey_RollsBackTheStorageInsert()
-    {
+    public void Insert_DuplicateKey_RollsBackTheStorageInsert() {
         // Insert always appends, so a rejected duplicate must not leave an orphaned,
         // unreachable row sitting in storage inflating Count.
         var index = NewIndex();
@@ -69,8 +66,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Get_UnknownKey_ReturnsFailureWithKeyNotFoundException()
-    {
+    public void Get_UnknownKey_ReturnsFailureWithKeyNotFoundException() {
         var index = NewIndex();
 
         var result = index.Get(999);
@@ -80,8 +76,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Delete_RemovesTheKey_SubsequentGetReturnsFailure()
-    {
+    public void Delete_RemovesTheKey_SubsequentGetReturnsFailure() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
 
@@ -93,8 +88,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Delete_UnknownKey_ReturnsFailureWithKeyNotFoundException()
-    {
+    public void Delete_UnknownKey_ReturnsFailureWithKeyNotFoundException() {
         var index = NewIndex();
 
         var result = index.Delete(999);
@@ -104,8 +98,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Delete_OfNonLastRow_RepointsTheMovedRowsIndex()
-    {
+    public void Delete_OfNonLastRow_RepointsTheMovedRowsIndex() {
         // The underlying DenseArray swap-removes: the last row physically moves into
         // the deleted row's slot. The index must repoint that row's dictionary entry
         // to its new slot, or its key becomes unreachable / points at stale data.
@@ -123,8 +116,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Delete_OfThePhysicallyLastRow_NeedsNoRepointing()
-    {
+    public void Delete_OfThePhysicallyLastRow_NeedsNoRepointing() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
         index.Insert(new TestRow(2, "Bob"));
@@ -139,8 +131,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void InsertAfterDelete_ReusesTheFreedSlot_AndIndexStaysConsistent()
-    {
+    public void InsertAfterDelete_ReusesTheFreedSlot_AndIndexStaysConsistent() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
         index.Insert(new TestRow(2, "Bob"));
@@ -154,8 +145,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Delete_ThenInsertSameKeyAgain_Succeeds()
-    {
+    public void Delete_ThenInsertSameKeyAgain_Succeeds() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
         index.Delete(1);
@@ -168,8 +158,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void InsertAndDelete_AcrossChunkBoundary_AllRemainingRowsStayConsistent()
-    {
+    public void InsertAndDelete_AcrossChunkBoundary_AllRemainingRowsStayConsistent() {
         // chunkSize is 4, so 6 inserts force a second chunk allocation partway through.
         var index = NewIndex();
         for (var i = 1; i <= 6; i++)
@@ -184,8 +173,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Delete_EveryRow_LeavesIndexEmptyAndAllKeysUnreachable()
-    {
+    public void Delete_EveryRow_LeavesIndexEmptyAndAllKeysUnreachable() {
         var index = NewIndex();
         index.Insert(new TestRow(1, "Alice"));
         index.Insert(new TestRow(2, "Bob"));
@@ -202,8 +190,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Register_ThenGet_ReturnsTheRow()
-    {
+    public void Register_ThenGet_ReturnsTheRow() {
         var (storage, index) = NewIndexWithStorage();
         var offset = storage.Insert(new TestRow(1, "Alice"));
 
@@ -214,8 +201,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Register_DuplicateKey_ReturnsFailureWithArgumentException()
-    {
+    public void Register_DuplicateKey_ReturnsFailureWithArgumentException() {
         var (storage, index) = NewIndexWithStorage();
         var a = storage.Insert(new TestRow(1, "Alice"));
         var b = storage.Insert(new TestRow(1, "Impostor"));
@@ -228,8 +214,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Register_DuplicateKey_DoesNotOverwriteTheExistingEntry()
-    {
+    public void Register_DuplicateKey_DoesNotOverwriteTheExistingEntry() {
         var (storage, index) = NewIndexWithStorage();
         var a = storage.Insert(new TestRow(1, "Alice"));
         var b = storage.Insert(new TestRow(1, "Impostor"));
@@ -241,8 +226,7 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Deregister_RemovesTheKey_SubsequentGetFails()
-    {
+    public void Deregister_RemovesTheKey_SubsequentGetFails() {
         var (storage, index) = NewIndexWithStorage();
         var offset = storage.Insert(new TestRow(1, "Alice"));
         index.Register(1, offset);
@@ -253,26 +237,26 @@ public class HashIndexTests
     }
 
     [Test]
-    public void Deregister_UnknownKey_Throws()
-    {
+    public void Deregister_UnknownKey_Throws() {
         var (_, index) = NewIndexWithStorage();
 
         Assert.Throws<KeyNotFoundException>(() => index.Deregister(1, 0));
     }
 
     [Test]
-    public void Deregister_OffsetMismatch_Throws()
-    {
+    public void Deregister_OffsetMismatch_Throws() {
         var (storage, index) = NewIndexWithStorage();
         var offset = storage.Insert(new TestRow(1, "Alice"));
         index.Register(1, offset);
 
-        Assert.Throws<ArgumentException>(() => index.Deregister(1, offset + 999));
+        var res = index.Deregister(1, offset + 999);
+
+        Assert.That(res.IsError(), Is.True);
+        Assert.That(res.GetException(), Is.InstanceOf<ArgumentException>());
     }
 
     [Test]
-    public void Deregister_ThenRegisterNewKey_SupportsRekeying()
-    {
+    public void Deregister_ThenRegisterNewKey_SupportsRekeying() {
         // The Update use case: same physical row, key changes, offset stays the same.
         var (storage, index) = NewIndexWithStorage();
         var offset = storage.Insert(new TestRow(1, "Alice"));
