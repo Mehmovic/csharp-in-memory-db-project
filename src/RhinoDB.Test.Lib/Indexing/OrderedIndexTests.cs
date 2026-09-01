@@ -1,85 +1,55 @@
 using RhinoDB.Core.Exceptions;
 using RhinoDB.Lib.Indexing;
-using RhinoDB.Lib.Storage;
 
 namespace RhinoDB.Test.Lib.Indexing;
 
 public class OrderedIndexTests {
-    private readonly record struct TestRow(int Id, string Name);
-
-    static private OrderedIndex<int, TestRow> NewIndex() => new OrderedIndex<int, TestRow>(
-        new DenseArray<TestRow>(chunkSize: 4),
-        row => row.Id
-    );
-
-    static private (DenseArray<TestRow> Storage, OrderedIndex<int, TestRow> Index) NewIndexWithStorage() {
-        var storage = new DenseArray<TestRow>(chunkSize: 4);
-        return (storage, new OrderedIndex<int, TestRow>(storage, row => row.Id));
-    }
+    static private OrderedIndex<int> NewIndex() => new OrderedIndex<int>();
 
     [Test]
-    public void Insert_ThenGet_ReturnsTheInsertedRow() {
+    public void Insert_ThenGetOffset_ReturnsTheOffset() {
         var index = NewIndex();
 
-        var insertResult = index.Insert(new TestRow(1, "Alice"));
+        var insertResult = index.Insert(1, 0);
 
         Assert.That(insertResult.IsOk(), Is.True);
-        Assert.That(index.Get(1).Unwrap(), Is.EqualTo(new TestRow(1, "Alice")));
+        Assert.That(index.GetOffset(1).Unwrap(), Is.EqualTo(0));
         Assert.That(index.Count, Is.EqualTo(1));
     }
 
     [Test]
-    public void Insert_MultipleRows_AllRetrievableByKey() {
+    public void Insert_MultipleKeys_AllRetrievableByKey() {
         var index = NewIndex();
 
-        index.Insert(new TestRow(1, "Alice"));
-        index.Insert(new TestRow(2, "Bob"));
-        index.Insert(new TestRow(3, "Carol"));
+        index.Insert(1, 0);
+        index.Insert(2, 1);
+        index.Insert(3, 2);
 
-        Assert.That(index.Get(1).Unwrap(), Is.EqualTo(new TestRow(1, "Alice")));
-        Assert.That(index.Get(2).Unwrap(), Is.EqualTo(new TestRow(2, "Bob")));
-        Assert.That(index.Get(3).Unwrap(), Is.EqualTo(new TestRow(3, "Carol")));
+        Assert.That(index.GetOffset(1).Unwrap(), Is.EqualTo(0));
+        Assert.That(index.GetOffset(2).Unwrap(), Is.EqualTo(1));
+        Assert.That(index.GetOffset(3).Unwrap(), Is.EqualTo(2));
         Assert.That(index.Count, Is.EqualTo(3));
     }
 
     [Test]
     public void Insert_DuplicateKey_ReturnsFailureWithDuplicateKeyException() {
         var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
+        index.Insert(1, 0);
 
-        var result = index.Insert(new TestRow(1, "Impostor"));
+        var result = index.Insert(1, 99);
 
         Assert.That(result.IsError(), Is.True);
         Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
     }
 
     [Test]
-    public void Insert_DuplicateKey_RollsBackTheStorageInsert() {
+    public void Insert_DuplicateKey_DoesNotOverwriteTheExistingEntry() {
         var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
+        index.Insert(1, 0);
 
-        index.Insert(new TestRow(1, "Impostor"));
+        index.Insert(1, 99);
 
-        Assert.That(index.Count, Is.EqualTo(1));
-    }
-
-    [Test]
-    public void Get_UnknownKey_ReturnsFailureWithIndexKeyNotFoundException() {
-        var index = NewIndex();
-
-        var result = index.Get(999);
-
-        Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
-    }
-
-    [Test]
-    public void GetOffset_ExistingKey_ReturnsItsPhysicalOffset() {
-        var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-        index.Insert(new TestRow(2, "Bob"));
-
-        Assert.That(index.GetOffset(2).Unwrap(), Is.EqualTo(1));
+        Assert.That(index.GetOffset(1).Unwrap(), Is.EqualTo(0));
     }
 
     [Test]
@@ -93,298 +63,147 @@ public class OrderedIndexTests {
     }
 
     [Test]
-    public void GetOffset_AfterSwapDelete_ReflectsTheRepointedOffset() {
+    public void Delete_RemovesTheKey_SubsequentGetOffsetFails() {
         var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-        index.Insert(new TestRow(2, "Bob"));
-        index.Insert(new TestRow(3, "Carol")); // physically last, at offset 2
+        index.Insert(1, 0);
 
-        index.Delete(1); // Carol swaps into Alice's old slot (offset 0)
-
-        Assert.That(index.GetOffset(3).Unwrap(), Is.EqualTo(0));
-    }
-
-    [Test]
-    public void GetOffset_AfterRegister_ReturnsTheRegisteredOffset() {
-        var (storage, index) = NewIndexWithStorage();
-        var offset = storage.Insert(new TestRow(1, "Alice"));
-
-        index.Register(1, offset);
-
-        Assert.That(index.GetOffset(1).Unwrap(), Is.EqualTo(offset));
-    }
-
-    [Test]
-    public void GetOffset_AfterDeregister_ReturnsFailureWithIndexKeyNotFoundException() {
-        var (storage, index) = NewIndexWithStorage();
-        var offset = storage.Insert(new TestRow(1, "Alice"));
-        index.Register(1, offset);
-
-        index.Deregister(1, offset);
-
-        Assert.That(index.GetOffset(1).IsError(), Is.True);
-    }
-
-    [Test]
-    public void Delete_RemovesTheKey_SubsequentGetReturnsFailure() {
-        var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-
-        var deleteResult = index.Delete(1);
+        var deleteResult = index.Delete(1, 0);
 
         Assert.That(deleteResult.IsOk(), Is.True);
         Assert.That(index.Count, Is.EqualTo(0));
-        Assert.That(index.Get(1).IsError(), Is.True);
+        Assert.That(index.GetOffset(1).IsError(), Is.True);
     }
 
     [Test]
     public void Delete_UnknownKey_ReturnsFailureWithIndexKeyNotFoundException() {
         var index = NewIndex();
 
-        var result = index.Delete(999);
+        var result = index.Delete(999, 0);
 
         Assert.That(result.IsError(), Is.True);
         Assert.That(result.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
-    public void Delete_OfNonLastRow_RepointsTheMovedRowsIndex() {
-        // Same underlying DenseArray swap-remove concern as HashIndex: the physically
-        // last row moves into the deleted row's slot and must stay reachable by key.
+    public void Delete_OffsetMismatch_ReturnsFailureWithOffsetNotRegisteredException() {
         var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-        index.Insert(new TestRow(2, "Bob"));
-        index.Insert(new TestRow(3, "Carol"));
+        index.Insert(1, 0);
 
-        index.Delete(1); // Carol (physically last) moves into Alice's old slot
+        var result = index.Delete(1, 999);
 
-        Assert.That(index.Count, Is.EqualTo(2));
-        Assert.That(index.Get(3).Unwrap(), Is.EqualTo(new TestRow(3, "Carol")), "moved row must still be reachable by its key");
-        Assert.That(index.Get(2).Unwrap(), Is.EqualTo(new TestRow(2, "Bob")), "untouched row must be unaffected");
-        Assert.That(index.Get(1).IsError(), Is.True);
-    }
-
-    [Test]
-    public void Delete_OfThePhysicallyLastRow_NeedsNoRepointing() {
-        var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-        index.Insert(new TestRow(2, "Bob"));
-        index.Insert(new TestRow(3, "Carol"));
-
-        index.Delete(3);
-
-        Assert.That(index.Count, Is.EqualTo(2));
-        Assert.That(index.Get(1).Unwrap(), Is.EqualTo(new TestRow(1, "Alice")));
-        Assert.That(index.Get(2).Unwrap(), Is.EqualTo(new TestRow(2, "Bob")));
-        Assert.That(index.Get(3).IsError(), Is.True);
-    }
-
-    [Test]
-    public void InsertAfterDelete_ReusesTheFreedSlot_AndIndexStaysConsistent() {
-        var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-        index.Insert(new TestRow(2, "Bob"));
-
-        index.Delete(1); // Bob moves into slot 0
-        index.Insert(new TestRow(3, "Carol")); // appended into the now-freed slot 1
-
-        Assert.That(index.Count, Is.EqualTo(2));
-        Assert.That(index.Get(2).Unwrap(), Is.EqualTo(new TestRow(2, "Bob")));
-        Assert.That(index.Get(3).Unwrap(), Is.EqualTo(new TestRow(3, "Carol")));
-    }
-
-    [Test]
-    public void Range_ReturnsRowsWithinBoundsInclusive_InAscendingKeyOrder() {
-        var index = NewIndex();
-        // Inserted out of key order on purpose - ordering must come from the index
-        // itself, not from insertion order or physical array position.
-        index.Insert(new TestRow(5, "Eve"));
-        index.Insert(new TestRow(1, "Alice"));
-        index.Insert(new TestRow(3, "Carol"));
-        index.Insert(new TestRow(4, "Dave"));
-        index.Insert(new TestRow(2, "Bob"));
-
-        var rows = index.Range(2, 4);
-
-        Assert.That(
-            rows,
-            Is.EqualTo(
-                new[] {
-                    new TestRow(2, "Bob"),
-                    new TestRow(3, "Carol"),
-                    new TestRow(4, "Dave"),
-                }
-            )
-        );
-    }
-
-    [Test]
-    public void Range_BoundsAreInclusive() {
-        var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-        index.Insert(new TestRow(2, "Bob"));
-        index.Insert(new TestRow(3, "Carol"));
-
-        var rows = index.Range(1, 3);
-
-        Assert.That(rows.Select(r => r.Id), Is.EqualTo(new[] { 1, 2, 3 }));
-    }
-
-    [Test]
-    public void Range_WithNoMatches_ReturnsEmpty() {
-        var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-
-        var rows = index.Range(100, 200);
-
-        Assert.That(rows, Is.Empty);
-    }
-
-    [Test]
-    public void Range_WhenFromIsGreaterThanTo_ReturnsEmpty() {
-        var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-        index.Insert(new TestRow(2, "Bob"));
-
-        var rows = index.Range(2, 1);
-
-        Assert.That(rows, Is.Empty);
-    }
-
-    [Test]
-    public void Range_ReflectsStateAfterADelete() {
-        var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-        index.Insert(new TestRow(2, "Bob"));
-        index.Insert(new TestRow(3, "Carol"));
-
-        index.Delete(2);
-        var rows = index.Range(1, 3);
-
-        Assert.That(rows.Select(r => r.Id), Is.EqualTo(new[] { 1, 3 }));
+        Assert.That(result.IsError(), Is.True);
+        Assert.That(result.GetException(), Is.InstanceOf<OffsetNotRegisteredException>());
     }
 
     [Test]
     public void Delete_ThenInsertSameKeyAgain_Succeeds() {
         var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-        index.Delete(1);
+        index.Insert(1, 0);
+        index.Delete(1, 0);
 
-        var result = index.Insert(new TestRow(1, "Alicia"));
+        var result = index.Insert(1, 5);
 
         Assert.That(result.IsOk(), Is.True);
-        Assert.That(index.Get(1).Unwrap(), Is.EqualTo(new TestRow(1, "Alicia")));
+        Assert.That(index.GetOffset(1).Unwrap(), Is.EqualTo(5));
         Assert.That(index.Count, Is.EqualTo(1));
     }
 
     [Test]
-    public void Range_FromEqualsTo_OnExistingKey_ReturnsThatSingleRow() {
+    public void DeleteThenInsertNewKey_SameOffset_SupportsRekeying() {
         var index = NewIndex();
-        index.Insert(new TestRow(1, "Alice"));
-        index.Insert(new TestRow(2, "Bob"));
+        index.Insert(1, 0);
 
-        var rows = index.Range(2, 2);
-
-        Assert.That(rows, Is.EqualTo(new[] { new TestRow(2, "Bob") }));
-    }
-
-    [Test]
-    public void InsertAndRange_AcrossChunkBoundary_MaintainsAscendingOrder() {
-        // chunkSize is 4, so 6 inserts force a second chunk allocation partway through.
-        var index = NewIndex();
-        foreach (var id in new[] { 5, 1, 6, 3, 2, 4 }) // out of order on purpose
-            index.Insert(new TestRow(id, $"Row{id}"));
-
-        var rows = index.Range(1, 6);
-
-        Assert.That(rows.Select(r => r.Id), Is.EqualTo(new[] { 1, 2, 3, 4, 5, 6 }));
-    }
-
-    [Test]
-    public void Register_ThenGet_ReturnsTheRow() {
-        var (storage, index) = NewIndexWithStorage();
-        var offset = storage.Insert(new TestRow(1, "Alice"));
-
-        var result = index.Register(1, offset);
+        index.Delete(1, 0);
+        var result = index.Insert(2, 0);
 
         Assert.That(result.IsOk(), Is.True);
-        Assert.That(index.Get(1).Unwrap(), Is.EqualTo(new TestRow(1, "Alice")));
+        Assert.That(index.GetOffset(1).IsError(), Is.True);
+        Assert.That(index.GetOffset(2).Unwrap(), Is.EqualTo(0));
     }
 
     [Test]
-    public void Register_DuplicateKey_ReturnsFailureWithDuplicateKeyException() {
-        var (storage, index) = NewIndexWithStorage();
-        var a = storage.Insert(new TestRow(1, "Alice"));
-        var b = storage.Insert(new TestRow(1, "Impostor"));
-        index.Register(1, a);
+    public void Range_ReturnsOffsetsWithinBoundsInclusive_InAscendingKeyOrder() {
+        var index = NewIndex();
+        // Inserted out of key order on purpose - ordering must come from the index
+        // itself, not from insertion order.
+        index.Insert(5, 50);
+        index.Insert(1, 10);
+        index.Insert(3, 30);
+        index.Insert(4, 40);
+        index.Insert(2, 20);
 
-        var result = index.Register(1, b);
+        var offsets = index.Range(2, 4);
 
-        Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
+        Assert.That(offsets, Is.EqualTo(new[] { 20, 30, 40 }));
     }
 
     [Test]
-    public void Register_MultipleKeysOutOfOrder_RangeStillReturnsAscendingOrder() {
-        var (storage, index) = NewIndexWithStorage();
-        var c = storage.Insert(new TestRow(3, "Carol"));
-        var a = storage.Insert(new TestRow(1, "Alice"));
-        var b = storage.Insert(new TestRow(2, "Bob"));
-        index.Register(3, c);
-        index.Register(1, a);
-        index.Register(2, b);
+    public void Range_BoundsAreInclusive() {
+        var index = NewIndex();
+        index.Insert(1, 10);
+        index.Insert(2, 20);
+        index.Insert(3, 30);
 
-        var rows = index.Range(1, 3);
+        var offsets = index.Range(1, 3);
 
-        Assert.That(rows.Select(r => r.Id), Is.EqualTo(new[] { 1, 2, 3 }));
+        Assert.That(offsets, Is.EqualTo(new[] { 10, 20, 30 }));
     }
 
     [Test]
-    public void Deregister_RemovesTheKey_SubsequentGetFails() {
-        var (storage, index) = NewIndexWithStorage();
-        var offset = storage.Insert(new TestRow(1, "Alice"));
-        index.Register(1, offset);
+    public void Range_WithNoMatches_ReturnsEmpty() {
+        var index = NewIndex();
+        index.Insert(1, 10);
 
-        index.Deregister(1, offset);
+        var offsets = index.Range(100, 200);
 
-        Assert.That(index.Get(1).IsError(), Is.True);
+        Assert.That(offsets, Is.Empty);
     }
 
     [Test]
-    public void Deregister_UnknownKey_ReturnsFailureWithIndexKeyNotFoundException() {
-        var (_, index) = NewIndexWithStorage();
+    public void Range_WhenFromIsGreaterThanTo_ReturnsEmpty() {
+        var index = NewIndex();
+        index.Insert(1, 10);
+        index.Insert(2, 20);
 
-        var res = index.Deregister(1, 0);
+        var offsets = index.Range(2, 1);
 
-        Assert.That(res.IsError(), Is.True);
-        Assert.That(res.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
+        Assert.That(offsets, Is.Empty);
     }
 
     [Test]
-    public void Deregister_OffsetMismatch_ReturnsFailureWithOffsetNotRegisteredException() {
-        var (storage, index) = NewIndexWithStorage();
-        var offset = storage.Insert(new TestRow(1, "Alice"));
-        index.Register(1, offset);
+    public void Range_ReflectsStateAfterADelete() {
+        var index = NewIndex();
+        index.Insert(1, 10);
+        index.Insert(2, 20);
+        index.Insert(3, 30);
 
-        var res = index.Deregister(1, offset + 999);
+        index.Delete(2, 20);
+        var offsets = index.Range(1, 3);
 
-        Assert.That(res.IsError(), Is.True);
-        Assert.That(res.GetException(), Is.InstanceOf<OffsetNotRegisteredException>());
+        Assert.That(offsets, Is.EqualTo(new[] { 10, 30 }));
     }
 
     [Test]
-    public void Deregister_ThenRegisterNewKey_SupportsRekeying() {
-        // The Update use case: same physical row, key changes, offset stays the same.
-        var (storage, index) = NewIndexWithStorage();
-        var offset = storage.Insert(new TestRow(1, "Alice"));
-        index.Register(1, offset);
+    public void Range_FromEqualsTo_OnExistingKey_ReturnsThatSingleOffset() {
+        var index = NewIndex();
+        index.Insert(1, 10);
+        index.Insert(2, 20);
 
-        index.Deregister(1, offset);
-        var result = index.Register(2, offset);
-        storage.Set(offset, new TestRow(2, "Alice"));
+        var offsets = index.Range(2, 2);
 
-        Assert.That(result.IsOk(), Is.True);
-        Assert.That(index.Get(1).IsError(), Is.True);
-        Assert.That(index.Get(2).Unwrap(), Is.EqualTo(new TestRow(2, "Alice")));
+        Assert.That(offsets, Is.EqualTo(new[] { 20 }));
+    }
+
+    [Test]
+    public void Insert_KeysOutOfOrder_RangeStillReturnsAscendingOrder() {
+        var index = NewIndex();
+        var c = index.Insert(3, 300);
+        index.Insert(1, 100);
+        index.Insert(2, 200);
+
+        var offsets = index.Range(1, 3);
+
+        Assert.That(c.IsOk(), Is.True);
+        Assert.That(offsets, Is.EqualTo(new[] { 100, 200, 300 }));
     }
 }

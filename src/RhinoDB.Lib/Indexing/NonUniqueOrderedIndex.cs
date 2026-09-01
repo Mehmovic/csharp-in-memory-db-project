@@ -1,10 +1,7 @@
-using RhinoDB.Lib.Storage;
-
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueOrderedIndex<TKey, TRow>(DenseArray<TRow> storage)
-    where TKey : notnull
-    where TRow : struct {
+public class NonUniqueOrderedIndex<TKey>
+    where TKey : notnull {
     private readonly SortedSet<(TKey Key, int Offset)> sortedSet = new SortedSet<(TKey Key, int Offset)>(
         Comparer<(TKey Key, int Offset)>.Create((a, b) => {
                 var cmp = Comparer<TKey>.Default.Compare(a.Key, b.Key);
@@ -13,26 +10,26 @@ public class NonUniqueOrderedIndex<TKey, TRow>(DenseArray<TRow> storage)
         )
     );
 
-    public Result Register(TKey key, int offset) {
+    public Result Insert(TKey key, int offset) {
         sortedSet.Add((key, offset));
         return Result.Ok();
     }
 
-    public Result Deregister(TKey key, int offset) {
+    public Result Delete(TKey key, int offset) {
         return sortedSet.Remove((key, offset))
             ? Result.Ok()
             : Result.Error(new OffsetNotRegisteredException(key, offset));
     }
 
-    public List<TRow> Get(TKey key) => Range(key, key);
+    public List<int> GetOffsets(TKey key) => Range(key, key);
 
-    public List<TRow> Range(TKey from, TKey to) {
+    public List<int> Range(TKey from, TKey to) {
         if (Comparer<TKey>.Default.Compare(from, to) > 0) return [];
 
-        var rows = new List<TRow>();
+        var offsets = new List<int>();
         foreach ((TKey Key, int Offset) entry in sortedSet.GetViewBetween((from, int.MinValue), (to, int.MaxValue)))
-            rows.Add(storage.Get(entry.Offset));
+            offsets.Add(entry.Offset);
 
-        return rows;
+        return offsets;
     }
 }

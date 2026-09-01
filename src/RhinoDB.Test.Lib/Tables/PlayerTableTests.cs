@@ -29,9 +29,9 @@ public class PlayerTableTests {
         var player = Alice();
         table.Insert(player);
 
-        Assert.That(table.Email.Get(player.Email).Unwrap(), Is.EqualTo(player));
-        Assert.That(table.Team.Get(player.Team), Is.EqualTo(new[] { player }));
-        Assert.That(table.Rating.Range(player.Rating, player.Rating), Is.EqualTo(new[] { player }));
+        Assert.That(table.GetByEmail(player.Email).Unwrap(), Is.EqualTo(player));
+        Assert.That(table.GetByTeam(player.Team), Is.EqualTo(new[] { player }));
+        Assert.That(table.GetByRating(player.Rating, player.Rating), Is.EqualTo(new[] { player }));
     }
 
     [Test]
@@ -77,8 +77,8 @@ public class PlayerTableTests {
 
         Assert.That(table.Count, Is.EqualTo(1));
         Assert.That(table.Get(2).IsError(), Is.True);
-        Assert.That(table.Team.Get("Blue"), Is.Empty);
-        Assert.That(table.Rating.Range(70, 70), Is.Empty);
+        Assert.That(table.GetByTeam("Blue"), Is.Empty);
+        Assert.That(table.GetByRating(70, 70), Is.Empty);
     }
 
     [Test]
@@ -90,28 +90,17 @@ public class PlayerTableTests {
         table.Insert(new Player(2, "Bob", original.Email, "Blue", 70));
 
         Assert.That(table.Get(1).Unwrap(), Is.EqualTo(original));
-        Assert.That(table.Email.Get(original.Email).Unwrap(), Is.EqualTo(original));
-    }
-
-    [Test]
-    public void Insert_SameTeamDifferentPlayers_BothRetrievableViaByTeam() {
-        var table = NewTable();
-        var a = Alice(id: 1, team: "Red");
-        var b = new Player(2, "Bob", "bob@example.com", "Red", 75);
-
-        table.Insert(a);
-        table.Insert(b);
-
-        Assert.That(table.Team.Get("Red"), Is.EquivalentTo(new[] { a, b }));
+        Assert.That(table.GetByEmail(original.Email).Unwrap(), Is.EqualTo(original));
     }
 
     [Test]
     public void Insert_DuplicateEmail_RollbackDeletesByOffsetNotById() {
-        // Regression: Insert's rollback calls storage.Delete(player.Id) instead of
-        // storage.Delete(offset). Id and offset are both plain ints so this compiles,
+        // Regression: Insert's rollback used to call storage.Delete(player.Id) instead
+        // of storage.Delete(offset). Id and offset are both plain ints so that compiled,
         // but they are different domains - here the failing insert's Id (1) is chosen
-        // to collide with bob's real storage offset (1), so a buggy offset-by-id
-        // delete swap-corrupts bob's row instead of removing the failed insert's row.
+        // to collide with bob's real storage offset (1), which used to swap-corrupt
+        // bob's row instead of removing the failed insert's row. Insert now pre-checks
+        // uniqueness before touching storage at all, so there is no rollback to get wrong.
         var table = NewTable();
         var alice = Alice(id: 10);
         var bob = new Player(11, "Bob", "bob@example.com", "Blue", 70);
@@ -122,6 +111,18 @@ public class PlayerTableTests {
         table.Insert(duplicate);
 
         Assert.That(table.Get(11).Unwrap(), Is.EqualTo(bob));
+    }
+
+    [Test]
+    public void Insert_SameTeamDifferentPlayers_BothRetrievableViaGetByTeam() {
+        var table = NewTable();
+        var a = Alice(id: 1, team: "Red");
+        var b = new Player(2, "Bob", "bob@example.com", "Red", 75);
+
+        table.Insert(a);
+        table.Insert(b);
+
+        Assert.That(table.GetByTeam("Red"), Is.EquivalentTo(new[] { a, b }));
     }
 
     [Test]
@@ -137,10 +138,10 @@ public class PlayerTableTests {
 
         foreach (var p in players) {
             Assert.That(table.Get(p.Id).Unwrap(), Is.EqualTo(p));
-            Assert.That(table.Email.Get(p.Email).Unwrap(), Is.EqualTo(p));
-            Assert.That(table.Rating.Range(p.Rating, p.Rating), Is.EqualTo(new[] { p }));
+            Assert.That(table.GetByEmail(p.Email).Unwrap(), Is.EqualTo(p));
+            Assert.That(table.GetByRating(p.Rating, p.Rating), Is.EqualTo(new[] { p }));
         }
-        Assert.That(table.Team.Get("Red"), Is.EquivalentTo(players));
+        Assert.That(table.GetByTeam("Red"), Is.EquivalentTo(players));
     }
 
     // ---- Delete ----
@@ -177,9 +178,9 @@ public class PlayerTableTests {
         Assert.That(result.IsOk(), Is.True);
         Assert.That(table.Count, Is.EqualTo(1));
         Assert.That(table.Get(2).IsError(), Is.True);
-        Assert.That(table.Email.Get(last.Email).IsError(), Is.True);
-        Assert.That(table.Team.Get("Blue"), Is.Empty);
-        Assert.That(table.Rating.Range(70, 70), Is.Empty);
+        Assert.That(table.GetByEmail(last.Email).IsError(), Is.True);
+        Assert.That(table.GetByTeam("Blue"), Is.Empty);
+        Assert.That(table.GetByRating(70, 70), Is.Empty);
     }
 
     [Test]
@@ -202,18 +203,18 @@ public class PlayerTableTests {
 
         // Carol must still be reachable, correctly, through every index.
         Assert.That(table.Get(3).Unwrap(), Is.EqualTo(carol));
-        Assert.That(table.Email.Get(carol.Email).Unwrap(), Is.EqualTo(carol));
-        Assert.That(table.Team.Get("Green"), Is.EqualTo(new[] { carol }));
-        Assert.That(table.Rating.Range(90, 90), Is.EqualTo(new[] { carol }));
+        Assert.That(table.GetByEmail(carol.Email).Unwrap(), Is.EqualTo(carol));
+        Assert.That(table.GetByTeam("Green"), Is.EqualTo(new[] { carol }));
+        Assert.That(table.GetByRating(90, 90), Is.EqualTo(new[] { carol }));
 
         // Untouched row unaffected.
         Assert.That(table.Get(2).Unwrap(), Is.EqualTo(bob));
 
         // Deleted row fully gone.
         Assert.That(table.Get(1).IsError(), Is.True);
-        Assert.That(table.Email.Get(alice.Email).IsError(), Is.True);
-        Assert.That(table.Team.Get("Red"), Is.Empty);
-        Assert.That(table.Rating.Range(80, 80), Is.Empty);
+        Assert.That(table.GetByEmail(alice.Email).IsError(), Is.True);
+        Assert.That(table.GetByTeam("Red"), Is.Empty);
+        Assert.That(table.GetByRating(80, 80), Is.Empty);
     }
 
     [Test]
@@ -230,7 +231,7 @@ public class PlayerTableTests {
 
         table.Delete(1); // Carol swaps into Alice's slot; Bob must be untouched
 
-        Assert.That(table.Team.Get("Red"), Is.EquivalentTo(new[] { bob, carol }));
+        Assert.That(table.GetByTeam("Red"), Is.EquivalentTo(new[] { bob, carol }));
     }
 
     [Test]
@@ -248,9 +249,9 @@ public class PlayerTableTests {
         Assert.That(table.Count, Is.EqualTo(0));
         foreach (var p in players) {
             Assert.That(table.Get(p.Id).IsError(), Is.True);
-            Assert.That(table.Email.Get(p.Email).IsError(), Is.True);
-            Assert.That(table.Team.Get(p.Team), Is.Empty);
-            Assert.That(table.Rating.Range(p.Rating, p.Rating), Is.Empty);
+            Assert.That(table.GetByEmail(p.Email).IsError(), Is.True);
+            Assert.That(table.GetByTeam(p.Team), Is.Empty);
+            Assert.That(table.GetByRating(p.Rating, p.Rating), Is.Empty);
         }
     }
 
@@ -266,8 +267,8 @@ public class PlayerTableTests {
 
         Assert.That(result.IsOk(), Is.True);
         Assert.That(table.Get(1).Unwrap(), Is.EqualTo(replacement));
-        Assert.That(table.Email.Get(original.Email).IsError(), Is.True);
-        Assert.That(table.Email.Get(replacement.Email).Unwrap(), Is.EqualTo(replacement));
+        Assert.That(table.GetByEmail(original.Email).IsError(), Is.True);
+        Assert.That(table.GetByEmail(replacement.Email).Unwrap(), Is.EqualTo(replacement));
     }
 
     [Test]
@@ -286,8 +287,8 @@ public class PlayerTableTests {
         Assert.That(table.Get(2).IsError(), Is.True);
         foreach (var p in players.Where(p => p.Id != 2)) {
             Assert.That(table.Get(p.Id).Unwrap(), Is.EqualTo(p));
-            Assert.That(table.Email.Get(p.Email).Unwrap(), Is.EqualTo(p));
-            Assert.That(table.Rating.Range(p.Rating, p.Rating), Is.EqualTo(new[] { p }));
+            Assert.That(table.GetByEmail(p.Email).Unwrap(), Is.EqualTo(p));
+            Assert.That(table.GetByRating(p.Rating, p.Rating), Is.EqualTo(new[] { p }));
         }
     }
 
@@ -338,9 +339,9 @@ public class PlayerTableTests {
 
         Assert.That(result.IsOk(), Is.True);
         Assert.That(table.Get(1).Unwrap(), Is.EqualTo(updated));
-        Assert.That(table.Email.Get(original.Email).Unwrap(), Is.EqualTo(updated));
-        Assert.That(table.Team.Get(original.Team), Is.EqualTo(new[] { updated }));
-        Assert.That(table.Rating.Range(original.Rating, original.Rating), Is.EqualTo(new[] { updated }));
+        Assert.That(table.GetByEmail(original.Email).Unwrap(), Is.EqualTo(updated));
+        Assert.That(table.GetByTeam(original.Team), Is.EqualTo(new[] { updated }));
+        Assert.That(table.GetByRating(original.Rating, original.Rating), Is.EqualTo(new[] { updated }));
     }
 
     [Test]
@@ -352,8 +353,8 @@ public class PlayerTableTests {
         var updated = original with { Email = "newalice@example.com" };
         table.Update(1, updated);
 
-        Assert.That(table.Email.Get(original.Email).IsError(), Is.True);
-        Assert.That(table.Email.Get(updated.Email).Unwrap(), Is.EqualTo(updated));
+        Assert.That(table.GetByEmail(original.Email).IsError(), Is.True);
+        Assert.That(table.GetByEmail(updated.Email).Unwrap(), Is.EqualTo(updated));
         Assert.That(table.Get(1).Unwrap(), Is.EqualTo(updated));
     }
 
@@ -382,9 +383,9 @@ public class PlayerTableTests {
         table.Update(2, bob with { Email = alice.Email });
 
         Assert.That(table.Get(2).Unwrap(), Is.EqualTo(bob));
-        Assert.That(table.Email.Get(bob.Email).Unwrap(), Is.EqualTo(bob));
-        Assert.That(table.Team.Get(bob.Team), Is.EqualTo(new[] { bob }));
-        Assert.That(table.Rating.Range(bob.Rating, bob.Rating), Is.EqualTo(new[] { bob }));
+        Assert.That(table.GetByEmail(bob.Email).Unwrap(), Is.EqualTo(bob));
+        Assert.That(table.GetByTeam(bob.Team), Is.EqualTo(new[] { bob }));
+        Assert.That(table.GetByRating(bob.Rating, bob.Rating), Is.EqualTo(new[] { bob }));
     }
 
     [Test]
@@ -398,7 +399,7 @@ public class PlayerTableTests {
         table.Update(2, bob with { Email = alice.Email });
 
         Assert.That(table.Get(1).Unwrap(), Is.EqualTo(alice));
-        Assert.That(table.Email.Get(alice.Email).Unwrap(), Is.EqualTo(alice));
+        Assert.That(table.GetByEmail(alice.Email).Unwrap(), Is.EqualTo(alice));
     }
 
     [Test]
@@ -410,8 +411,8 @@ public class PlayerTableTests {
         var updated = original with { Team = "Blue" };
         table.Update(1, updated);
 
-        Assert.That(table.Team.Get("Red"), Is.Empty);
-        Assert.That(table.Team.Get("Blue"), Is.EqualTo(new[] { updated }));
+        Assert.That(table.GetByTeam("Red"), Is.Empty);
+        Assert.That(table.GetByTeam("Blue"), Is.EqualTo(new[] { updated }));
     }
 
     [Test]
@@ -424,7 +425,7 @@ public class PlayerTableTests {
 
         table.Update(1, alice with { Team = "Blue" });
 
-        Assert.That(table.Team.Get("Red"), Is.EqualTo(new[] { bob }));
+        Assert.That(table.GetByTeam("Red"), Is.EqualTo(new[] { bob }));
     }
 
     [Test]
@@ -436,8 +437,8 @@ public class PlayerTableTests {
         var updated = original with { Rating = 95 };
         table.Update(1, updated);
 
-        Assert.That(table.Rating.Range(80, 80), Is.Empty);
-        Assert.That(table.Rating.Range(95, 95), Is.EqualTo(new[] { updated }));
+        Assert.That(table.GetByRating(80, 80), Is.Empty);
+        Assert.That(table.GetByRating(95, 95), Is.EqualTo(new[] { updated }));
     }
 
     [Test]
@@ -450,9 +451,9 @@ public class PlayerTableTests {
 
         Assert.That(result.IsOk(), Is.True);
         Assert.That(table.Get(1).Unwrap(), Is.EqualTo(original));
-        Assert.That(table.Email.Get(original.Email).Unwrap(), Is.EqualTo(original));
-        Assert.That(table.Team.Get(original.Team), Is.EqualTo(new[] { original }));
-        Assert.That(table.Rating.Range(original.Rating, original.Rating), Is.EqualTo(new[] { original }));
+        Assert.That(table.GetByEmail(original.Email).Unwrap(), Is.EqualTo(original));
+        Assert.That(table.GetByTeam(original.Team), Is.EqualTo(new[] { original }));
+        Assert.That(table.GetByRating(original.Rating, original.Rating), Is.EqualTo(new[] { original }));
     }
 
     [Test]
@@ -466,11 +467,11 @@ public class PlayerTableTests {
 
         Assert.That(result.IsOk(), Is.True);
         Assert.That(table.Get(1).Unwrap(), Is.EqualTo(updated));
-        Assert.That(table.Email.Get(original.Email).IsError(), Is.True);
-        Assert.That(table.Email.Get(updated.Email).Unwrap(), Is.EqualTo(updated));
-        Assert.That(table.Team.Get("Red"), Is.Empty);
-        Assert.That(table.Team.Get("Blue"), Is.EqualTo(new[] { updated }));
-        Assert.That(table.Rating.Range(80, 80), Is.Empty);
-        Assert.That(table.Rating.Range(95, 95), Is.EqualTo(new[] { updated }));
+        Assert.That(table.GetByEmail(original.Email).IsError(), Is.True);
+        Assert.That(table.GetByEmail(updated.Email).Unwrap(), Is.EqualTo(updated));
+        Assert.That(table.GetByTeam("Red"), Is.Empty);
+        Assert.That(table.GetByTeam("Blue"), Is.EqualTo(new[] { updated }));
+        Assert.That(table.GetByRating(80, 80), Is.Empty);
+        Assert.That(table.GetByRating(95, 95), Is.EqualTo(new[] { updated }));
     }
 }

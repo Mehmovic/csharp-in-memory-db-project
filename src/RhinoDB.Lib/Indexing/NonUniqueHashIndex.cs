@@ -1,13 +1,10 @@
-using RhinoDB.Lib.Storage;
-
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueHashIndex<TKey, TRow>(DenseArray<TRow> storage)
-    where TKey : notnull
-    where TRow : struct {
+public class NonUniqueHashIndex<TKey>
+    where TKey : notnull {
     private readonly Dictionary<TKey, List<int>> hashMap = new Dictionary<TKey, List<int>>();
 
-    public Result Register(TKey key, int offset) {
+    public Result Insert(TKey key, int offset) {
         if (!hashMap.TryGetValue(key, out var offsets)) {
             offsets = [];
             hashMap[key] = offsets;
@@ -17,7 +14,7 @@ public class NonUniqueHashIndex<TKey, TRow>(DenseArray<TRow> storage)
         return Result.Ok();
     }
 
-    public Result Deregister(TKey key, int offset) {
+    public Result Delete(TKey key, int offset) {
         if (!hashMap.TryGetValue(key, out var offsets))
             return Result.Error(new IndexKeyNotFoundException(key));
 
@@ -33,13 +30,7 @@ public class NonUniqueHashIndex<TKey, TRow>(DenseArray<TRow> storage)
         return Result.Ok();
     }
 
-    public List<TRow> Get(TKey key) {
-        if (!hashMap.TryGetValue(key, out var offsets)) return [];
-
-        var rows = new List<TRow>(offsets.Count);
-        foreach (var offset in offsets)
-            rows.Add(storage.Get(offset));
-
-        return rows;
+    public List<int> GetOffsets(TKey key) {
+        return hashMap.TryGetValue(key, out var offsets) ? offsets : [];
     }
 }

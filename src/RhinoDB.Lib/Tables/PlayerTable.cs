@@ -9,66 +9,86 @@ public readonly record struct Player(int Id, string Name, string Email, string T
 // Id is the primary key (immutable - Update can never change it, see PrimaryKeyImmutableException).
 // Email is a unique secondary index, Team a non-unique hash secondary, Rating a non-unique ordered secondary,
 // exercising all four index kinds and both the unique/non-unique failure paths through one table.
+//
+// Indexes are pure key->offset maps with no storage access of their own - PlayerTable is the
+// only thing that owns storage, so it's the only thing that can turn an offset back into a row.
 public class PlayerTable {
     private readonly DenseArray<Player> storage = new DenseArray<Player>(chunkSize: 4);
-    private readonly HashIndex<int, Player> primary;
+    private readonly HashIndex<int> primary = new HashIndex<int>();
 
-    public readonly HashIndex<string, Player> Email;
-    public readonly NonUniqueHashIndex<string, Player> Team;
-    public readonly NonUniqueOrderedIndex<int, Player> Rating;
-
-    public PlayerTable() {
-        primary = new HashIndex<int, Player>(storage, p => p.Id);
-        Email = new HashIndex<string, Player>(storage, p => p.Email);
-        Team = new NonUniqueHashIndex<string, Player>(storage);
-        Rating = new NonUniqueOrderedIndex<int, Player>(storage);
-    }
+    private readonly HashIndex<string> idxEmail = new HashIndex<string>();
+    private readonly NonUniqueHashIndex<string> idxTeam = new NonUniqueHashIndex<string>();
+    private readonly NonUniqueOrderedIndex<int> idxRating = new NonUniqueOrderedIndex<int>();
 
     public int Count => storage.Count;
 
-    public Result<Player> Get(int id) => primary.Get(id);
+    public Result<Player> Get(int id) {
+        var located = Locate(id);
+        if (located.IsError()) return (Result)located;
+        return located.Unwrap().Row;
+    }
+
+    public Result<Player> GetByEmail(string email) {
+        var offsetResult = idxEmail.GetOffset(email);
+        if (offsetResult.IsError()) return (Result)offsetResult;
+        return storage.Get(offsetResult.Unwrap());
+    }
+
+    public List<Player> GetByTeam(string team) {
+        var offsets = idxTeam.GetOffsets(team);
+        var rows = new List<Player>(offsets.Count);
+        foreach (var offset in offsets) rows.Add(storage.Get(offset));
+        return rows;
+    }
+
+    public List<Player> GetByRating(int from, int to) {
+        var offsets = idxRating.Range(from, to);
+        var rows = new List<Player>(offsets.Count);
+        foreach (var offset in offsets) rows.Add(storage.Get(offset));
+        return rows;
+    }
 
     public Result Insert(Player player) {
-        var duplicateIndexResult = primary.Get(player.Id);
+        var duplicateIndexResult = primary.GetOffset(player.Id);
         if (duplicateIndexResult.IsOk()) { return Result.Error(new DuplicateKeyException(player.Id)); }
 
-        var duplicateEmailResult = Email.Get(player.Email);
+        var duplicateEmailResult = idxEmail.GetOffset(player.Email);
         if (duplicateEmailResult.IsOk()) { return Result.Error(new DuplicateKeyException(player.Email)); }
 
         var offset = storage.Insert(player);
 
-        primary.Register(player.Id, offset);
-        Email.Register(player.Email, offset);
-        Team.Register(player.Team, offset);
-        Rating.Register(player.Rating, offset);
+        primary.Insert(player.Id, offset);
+        idxEmail.Insert(player.Email, offset);
+        idxTeam.Insert(player.Team, offset);
+        idxRating.Insert(player.Rating, offset);
         return Result.Ok();
     }
 
     public Result Delete(int id) {
-        var recordResult = primary.Fetch(id);
-        if (recordResult.IsError()) return recordResult;
+        var located = Locate(id);
+        if (located.IsError()) return located;
 
-        (Player record, var offset) = recordResult.Unwrap();
+        (Player record, var offset) = located.Unwrap();
         var lastOffset = storage.LastOffset;
 
         var deleteType = storage.Delete(offset);
 
-        primary.Deregister(record.Id, offset);
-        Rating.Deregister(record.Rating, offset);
-        Team.Deregister(record.Team, offset);
-        Email.Deregister(record.Email, offset);
+        primary.Delete(record.Id, offset);
+        idxRating.Delete(record.Rating, offset);
+        idxTeam.Delete(record.Team, offset);
+        idxEmail.Delete(record.Email, offset);
 
         if (deleteType != DeleteType.DeletedWithSwap) return Result.Ok();
 
         Player swapped = storage.Get(offset);
-        primary.Deregister(swapped.Id, lastOffset);
-        Rating.Deregister(swapped.Rating, lastOffset);
-        Team.Deregister(swapped.Team, lastOffset);
-        Email.Deregister(swapped.Email, lastOffset);
-        primary.Register(swapped.Id, offset);
-        Rating.Register(swapped.Rating, offset);
-        Team.Register(swapped.Team, offset);
-        Email.Register(swapped.Email, offset);
+        primary.Delete(swapped.Id, lastOffset);
+        idxRating.Delete(swapped.Rating, lastOffset);
+        idxTeam.Delete(swapped.Team, lastOffset);
+        idxEmail.Delete(swapped.Email, lastOffset);
+        primary.Insert(swapped.Id, offset);
+        idxRating.Insert(swapped.Rating, offset);
+        idxTeam.Insert(swapped.Team, offset);
+        idxEmail.Insert(swapped.Email, offset);
 
         return Result.Ok();
     }
@@ -76,21 +96,21 @@ public class PlayerTable {
     public Result Update(int id, Player newPlayer) {
         if (id != newPlayer.Id) return Result.Error(new PrimaryKeyImmutableException(id, newPlayer.Id));
 
-        var recordResult = primary.Fetch(id);
-        if (recordResult.IsError()) return recordResult;
+        var located = Locate(id);
+        if (located.IsError()) return located;
 
-        (Player oldRecord, var offset) = recordResult.Unwrap();
+        (Player oldRecord, var offset) = located.Unwrap();
 
         var emailUpdate = false;
         var teamUpdate = false;
         var ratingUpdate = false;
 
         if (oldRecord.Email != newPlayer.Email) {
-            var duplicateEmailResult = Email.Get(newPlayer.Email);
+            var duplicateEmailResult = idxEmail.GetOffset(newPlayer.Email);
             if (duplicateEmailResult.IsOk()) {
                 return Result.Error(new DuplicateKeyException(newPlayer.Email));
             }
-            
+
             emailUpdate = true;
         }
 
@@ -103,21 +123,29 @@ public class PlayerTable {
         }
 
         if (emailUpdate) {
-            Email.Deregister(oldRecord.Email, offset);
-            Email.Register(newPlayer.Email, offset);
+            idxEmail.Delete(oldRecord.Email, offset);
+            idxEmail.Insert(newPlayer.Email, offset);
         }
 
         if (teamUpdate) {
-            Team.Deregister(oldRecord.Team, offset);
-            Team.Register(newPlayer.Team, offset);
+            idxTeam.Delete(oldRecord.Team, offset);
+            idxTeam.Insert(newPlayer.Team, offset);
         }
 
         if (ratingUpdate) {
-            Rating.Deregister(oldRecord.Rating, offset);
-            Rating.Register(newPlayer.Rating, offset);
+            idxRating.Delete(oldRecord.Rating, offset);
+            idxRating.Insert(newPlayer.Rating, offset);
         }
 
         storage.Set(offset, newPlayer);
         return Result.Ok();
+    }
+    
+    private Result<(Player Row, int Offset)> Locate(int id) {
+        var offsetResult = primary.GetOffset(id);
+        if (offsetResult.IsError()) return (Result)offsetResult;
+
+        var offset = offsetResult.Unwrap();
+        return (storage.Get(offset), offset);
     }
 }
