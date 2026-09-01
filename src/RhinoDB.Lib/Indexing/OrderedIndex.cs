@@ -34,6 +34,12 @@ public class OrderedIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey>
             : Result.Error(new IndexKeyNotFoundException(key));
     }
 
+    public Result<(TRow, int)> Fetch(TKey key) {
+        return sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry)
+            ? (storage.Get(entry.Offset), entry.Offset)
+            : Result.Error(new IndexKeyNotFoundException(key));
+    }
+
     public Result Delete(TKey key) {
         if (!sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry))
             return Result.Error(new IndexKeyNotFoundException(key));

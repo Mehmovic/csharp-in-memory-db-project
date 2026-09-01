@@ -22,6 +22,7 @@ public class DenseArray<T>
     }
 
     public int Count { get; private set; }
+    public int LastOffset => Count - 1;
     public int Capacity => chunkCount * chunkSize;
 
     public int Insert(T item) {

@@ -9,11 +9,11 @@ public class HashIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey> ke
 
     public int Count => storage.Count;
 
-    public Result Insert(TRow row) {
+    public Result<int> Insert(TRow row) {
         TKey key = keySelector(row);
 
         var index = storage.Insert(row);
-        if (hashMap.TryAdd(key, index)) return Result.Ok();
+        if (hashMap.TryAdd(key, index)) return Result.Ok(index);
 
         storage.Delete(index);
         return Result.Error(new DuplicateKeyException(key));
@@ -31,16 +31,22 @@ public class HashIndex<TKey, TRow>(DenseArray<TRow> storage, Func<TRow, TKey> ke
             : Result.Error(new IndexKeyNotFoundException(key));
     }
 
-    public Result Delete(TKey key) {
+    public Result<(TRow, int)> Fetch(TKey key) {
+        return hashMap.TryGetValue(key, out var index)
+            ? (storage.Get(index), index)
+            : Result.Error(new IndexKeyNotFoundException(key));
+    }
+
+    public Result<(DeleteType, int offset)> Delete(TKey key) {
         if (!hashMap.Remove(key, out var index))
             return Result.Error(new IndexKeyNotFoundException(key));
 
         if (storage.Delete(index) != DeleteType.DeletedWithSwap)
-            return Result.Ok();
+            return Result.Ok((DeleteType.Deleted, index));
 
         TRow swapped = storage.Get(index);
         hashMap[keySelector(swapped)] = index;
-        return Result.Ok();
+        return Result.Ok((DeleteType.DeletedWithSwap, index));
     }
 
     public Result Register(TKey key, int offset) {
