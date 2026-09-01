@@ -42,7 +42,6 @@ public readonly struct Result<T> {
 
     public T Unwrap() {
         return !isError ? value : throw exception!;
-        ;
     }
 
     public bool TryUnwrap(out T result) {
@@ -63,4 +62,7 @@ public readonly struct Result<T> {
         !result.IsError()
             ? throw new InvalidOperationException("Cannot implicitly convert a successful Result to Result<T> - there is no value to carry.")
             : Error(result.GetException());
+
+    static public implicit operator Result(Result<T> result) =>
+        result.IsError() ? Result.Error(result.exception) : Result.Ok();
 }

@@ -11,9 +11,10 @@ public readonly struct Result {
     }
 
     static public Result Ok() => new Result(true, null);
-    
-    static public Result Error(Exception exception) {
-        exception ??= new Exception("Unexpected null exception");
+    static public Result<T> Ok<T>(T val) => Result<T>.Ok(val);
+
+    static public Result Error(Exception? exception) {
+        exception ??= new Exception("Unexpected error, empty exception caught");
         return new Result(false, exception);
     }
 
@@ -24,7 +25,7 @@ public readonly struct Result {
     public void ThrowIfError() {
         if (isError) throw exception!;
     }
-    
+
     public bool IsOk() => !isError;
     public bool IsError() => isError;
 
