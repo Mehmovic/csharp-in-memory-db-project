@@ -42,7 +42,7 @@ public class HashIndex_CompositeKeyTests {
         var result = index.Insert((5, 10), 1);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<DuplicateKeyException>());
     }
 
     [Test]
@@ -73,7 +73,7 @@ public class OrderedIndex_CompositeKeyTests {
         var result = index.Insert((5, 10), 1);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<DuplicateKeyException>());
     }
 
     [Test]

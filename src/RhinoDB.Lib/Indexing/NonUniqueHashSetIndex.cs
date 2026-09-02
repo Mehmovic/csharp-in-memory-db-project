@@ -16,10 +16,10 @@ public class NonUniqueHashSetIndex<TKey>
 
     public Result Delete(TKey key, int offset) {
         if (!hashMap.TryGetValue(key, out var offsets))
-            return Result.Error(new IndexKeyNotFoundException(key));
+            return Result.Error(RhinoError.IndexKeyNotFound(key));
 
         if (!offsets.Remove(offset))
-            return Result.Error(new OffsetNotRegisteredException(key, offset));
+            return Result.Error(RhinoError.OffsetNotRegistered(key, offset));
 
         if (offsets.Count == 0) hashMap.Remove(key);
         return Result.Ok();

@@ -42,7 +42,7 @@ public class PlayerTableTests {
         var result = table.Insert(Alice(id: 1, team: "Blue"));
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<DuplicateKeyException>());
     }
 
     [Test]
@@ -64,7 +64,7 @@ public class PlayerTableTests {
         var result = table.Insert(duplicate);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<DuplicateKeyException>());
     }
 
     [Test]
@@ -153,7 +153,7 @@ public class PlayerTableTests {
         var result = table.Delete(999);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
@@ -301,7 +301,7 @@ public class PlayerTableTests {
         var result = table.Update(999, Alice(id: 999));
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
@@ -313,7 +313,7 @@ public class PlayerTableTests {
         var result = table.Update(1, original with { Id = 2 });
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<PrimaryKeyImmutableException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<PrimaryKeyImmutableException>());
     }
 
     [Test]
@@ -369,7 +369,7 @@ public class PlayerTableTests {
         var result = table.Update(2, bob with { Email = alice.Email });
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<DuplicateKeyException>());
     }
 
     [Test]

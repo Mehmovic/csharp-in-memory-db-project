@@ -24,13 +24,13 @@ public class PlayerTable {
 
     public Result<Player> Get(int id) {
         var located = Locate(id);
-        if (located.IsError()) return (Result)located;
+        if (located.IsError()) return located.Void();
         return located.Unwrap().Row;
     }
 
     public Result<Player> GetByEmail(string email) {
         var offsetResult = idxEmail.GetOffset(email);
-        if (offsetResult.IsError()) return (Result)offsetResult;
+        if (offsetResult.IsError()) return offsetResult.Void();
         return storage.Get(offsetResult.Unwrap());
     }
 
@@ -50,10 +50,10 @@ public class PlayerTable {
 
     public Result Insert(Player player) {
         var duplicateIndexResult = primary.GetOffset(player.Id);
-        if (duplicateIndexResult.IsOk()) { return Result.Error(new DuplicateKeyException(player.Id)); }
+        if (duplicateIndexResult.IsOk()) { return Result.Error(RhinoError.DuplicateKey(player.Id)); }
 
         var duplicateEmailResult = idxEmail.GetOffset(player.Email);
-        if (duplicateEmailResult.IsOk()) { return Result.Error(new DuplicateKeyException(player.Email)); }
+        if (duplicateEmailResult.IsOk()) { return Result.Error(RhinoError.DuplicateKey(player.Email)); }
 
         var offset = storage.Insert(player);
 
@@ -94,7 +94,7 @@ public class PlayerTable {
     }
 
     public Result Update(int id, Player newPlayer) {
-        if (id != newPlayer.Id) return Result.Error(new PrimaryKeyImmutableException(id, newPlayer.Id));
+        if (id != newPlayer.Id) return Result.Error(RhinoError.PrimaryKeyImmutable(id, newPlayer.Id));
 
         var located = Locate(id);
         if (located.IsError()) return located;
@@ -108,7 +108,7 @@ public class PlayerTable {
         if (oldRecord.Email != newPlayer.Email) {
             var duplicateEmailResult = idxEmail.GetOffset(newPlayer.Email);
             if (duplicateEmailResult.IsOk()) {
-                return Result.Error(new DuplicateKeyException(newPlayer.Email));
+                return Result.Error(RhinoError.DuplicateKey(newPlayer.Email));
             }
 
             emailUpdate = true;
@@ -143,7 +143,7 @@ public class PlayerTable {
     
     private Result<(Player Row, int Offset)> Locate(int id) {
         var offsetResult = primary.GetOffset(id);
-        if (offsetResult.IsError()) return (Result)offsetResult;
+        if (offsetResult.IsError()) return offsetResult.Void();
 
         var offset = offsetResult.Unwrap();
         return (storage.Get(offset), offset);

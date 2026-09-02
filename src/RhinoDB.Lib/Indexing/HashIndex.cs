@@ -9,21 +9,21 @@ public class HashIndex<TKey>
     public Result<int> GetOffset(TKey key) {
         return hashMap.TryGetValue(key, out var offset)
             ? offset
-            : Result.Error(new IndexKeyNotFoundException(key));
+            : Result.Error(RhinoError.IndexKeyNotFound(key));
     }
 
     public Result Insert(TKey key, int offset) {
         return hashMap.TryAdd(key, offset)
             ? Result.Ok()
-            : Result.Error(new DuplicateKeyException(key));
+            : Result.Error(RhinoError.DuplicateKey(key));
     }
 
     public Result Delete(TKey key, int offset) {
         if (!hashMap.TryGetValue(key, out var storedOffset))
-            return Result.Error(new IndexKeyNotFoundException(key));
+            return Result.Error(RhinoError.IndexKeyNotFound(key));
 
         if (storedOffset != offset)
-            return Result.Error(new OffsetNotRegisteredException(key, offset));
+            return Result.Error(RhinoError.OffsetNotRegistered(key, offset));
 
         hashMap.Remove(key);
         return Result.Ok();

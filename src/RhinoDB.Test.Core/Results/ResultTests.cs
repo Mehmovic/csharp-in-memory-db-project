@@ -18,7 +18,7 @@ public class ResultTests
     {
         var result = Result.Ok();
 
-        Assert.Throws<InvalidOperationException>(() => result.GetException());
+        Assert.Throws<InvalidOperationException>(() => result.GetError().ToException());
     }
 
     [Test]
@@ -34,7 +34,7 @@ public class ResultTests
     {
         var result = Result.Ok();
 
-        var outcome = result.Match(() => "success", ex => ex.Message);
+        var outcome = result.Match(() => "success", err => err.ToException().Message);
 
         Assert.That(outcome, Is.EqualTo("success"));
     }
@@ -54,7 +54,7 @@ public class ResultTests
         var exception = new InvalidOperationException("boom");
         var result = Result.Error(exception);
 
-        Assert.That(result.GetException(), Is.SameAs(exception));
+        Assert.That(result.GetError().ToException(), Is.SameAs(exception));
     }
 
     [Test]
@@ -72,7 +72,7 @@ public class ResultTests
     {
         var result = Result.Error(new InvalidOperationException("boom"));
 
-        var outcome = result.Match(() => "success", ex => ex.Message);
+        var outcome = result.Match(() => "success", err => err.ToException().Message);
 
         Assert.That(outcome, Is.EqualTo("boom"));
     }
@@ -83,6 +83,6 @@ public class ResultTests
         var result = Result.Error(null!);
 
         Assert.That(result.IsError, Is.True);
-        Assert.That(result.GetException(), Is.Not.Null);
+        Assert.That(result.GetError().ToException(), Is.Not.Null);
     }
 }

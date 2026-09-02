@@ -75,7 +75,7 @@ public class NonUniqueHashSetIndexTests {
         var res = index.Delete("Red", 0);
 
         Assert.That(res.IsError(), Is.True);
-        Assert.That(res.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
+        Assert.That(res.GetError().ToException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
@@ -86,7 +86,7 @@ public class NonUniqueHashSetIndexTests {
         var res = index.Delete("Red", 999);
 
         Assert.That(res.IsError(), Is.True);
-        Assert.That(res.GetException(), Is.InstanceOf<OffsetNotRegisteredException>());
+        Assert.That(res.GetError().ToException(), Is.InstanceOf<OffsetNotRegisteredException>());
     }
 
     [Test]

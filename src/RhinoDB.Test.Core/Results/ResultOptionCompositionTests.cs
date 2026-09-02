@@ -61,7 +61,7 @@ public class ResultOptionCompositionTests
         var result = Lookup(data, 1, simulateFailure: true);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<InvalidOperationException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<InvalidOperationException>());
     }
 
     [Test]
@@ -88,7 +88,7 @@ public class ResultOptionCompositionTests
                 onSuccess: option => option.Match(
                     onSome: value => $"found:{value}",
                     onNone: () => "not-found"),
-                onFailure: ex => $"error:{ex.Message}");
+                onFailure: err => $"error:{err.ToException().Message}");
 
         Assert.That(Describe(found), Is.EqualTo("found:42"));
         Assert.That(Describe(notFound), Is.EqualTo("not-found"));

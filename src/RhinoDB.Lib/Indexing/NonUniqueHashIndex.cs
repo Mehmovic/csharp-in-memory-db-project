@@ -16,11 +16,11 @@ public class NonUniqueHashIndex<TKey>
 
     public Result Delete(TKey key, int offset) {
         if (!hashMap.TryGetValue(key, out var offsets))
-            return Result.Error(new IndexKeyNotFoundException(key));
+            return Result.Error(RhinoError.IndexKeyNotFound(key));
 
         var position = offsets.IndexOf(offset);
         if (position == -1)
-            return Result.Error(new OffsetNotRegisteredException(key, offset));
+            return Result.Error(RhinoError.OffsetNotRegistered(key, offset));
 
         var lastIndex = offsets.Count - 1;
         offsets[position] = offsets[lastIndex];

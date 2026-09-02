@@ -18,7 +18,7 @@ public class NonUniqueOrderedIndex<TKey>
     public Result Delete(TKey key, int offset) {
         return sortedSet.Remove((key, offset))
             ? Result.Ok()
-            : Result.Error(new OffsetNotRegisteredException(key, offset));
+            : Result.Error(RhinoError.OffsetNotRegistered(key, offset));
     }
 
     public List<int> GetOffsets(TKey key) => Range(key, key);

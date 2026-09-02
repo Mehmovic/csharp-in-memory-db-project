@@ -84,7 +84,7 @@ public class NonUniqueOrderedIndexTests {
         var res = index.Delete(30, 0);
 
         Assert.That(res.IsError(), Is.True);
-        Assert.That(res.GetException(), Is.InstanceOf<OffsetNotRegisteredException>());
+        Assert.That(res.GetError().ToException(), Is.InstanceOf<OffsetNotRegisteredException>());
     }
 
     [Test]

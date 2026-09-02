@@ -39,7 +39,7 @@ public class OrderedIndexTests {
         var result = index.Insert(1, 99);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<DuplicateKeyException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<DuplicateKeyException>());
     }
 
     [Test]
@@ -59,7 +59,7 @@ public class OrderedIndexTests {
         var result = index.GetOffset(999);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
@@ -81,7 +81,7 @@ public class OrderedIndexTests {
         var result = index.Delete(999, 0);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<IndexKeyNotFoundException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
@@ -92,7 +92,7 @@ public class OrderedIndexTests {
         var result = index.Delete(1, 999);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.InstanceOf<OffsetNotRegisteredException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<OffsetNotRegisteredException>());
     }
 
     [Test]

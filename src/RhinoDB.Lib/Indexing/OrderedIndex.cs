@@ -12,21 +12,21 @@ public class OrderedIndex<TKey>
     public Result<int> GetOffset(TKey key) {
         return sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry)
             ? entry.Offset
-            : Result.Error(new IndexKeyNotFoundException(key));
+            : Result.Error(RhinoError.IndexKeyNotFound(key));
     }
 
     public Result Insert(TKey key, int offset) {
         return sortedSet.Add((key, offset))
             ? Result.Ok()
-            : Result.Error(new DuplicateKeyException(key));
+            : Result.Error(RhinoError.DuplicateKey(key));
     }
 
     public Result Delete(TKey key, int offset) {
         if (!sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry))
-            return Result.Error(new IndexKeyNotFoundException(key));
+            return Result.Error(RhinoError.IndexKeyNotFound(key));
 
         if (entry.Offset != offset)
-            return Result.Error(new OffsetNotRegisteredException(key, offset));
+            return Result.Error(RhinoError.OffsetNotRegistered(key, offset));
 
         sortedSet.Remove(entry);
         return Result.Ok();

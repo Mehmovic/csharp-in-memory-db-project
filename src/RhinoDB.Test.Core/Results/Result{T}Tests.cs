@@ -52,7 +52,7 @@ public class ResultOfTTests
     {
         var result = Result<int>.Ok(42);
 
-        Assert.Throws<InvalidOperationException>(() => result.GetException());
+        Assert.Throws<InvalidOperationException>(() => result.GetError().ToException());
     }
 
     [Test]
@@ -99,7 +99,7 @@ public class ResultOfTTests
         var exception = new KeyNotFoundException("missing");
         var result = Result<int>.Error(exception);
 
-        Assert.That(result.GetException(), Is.SameAs(exception));
+        Assert.That(result.GetError().ToException(), Is.SameAs(exception));
     }
 
     [Test]
@@ -117,7 +117,7 @@ public class ResultOfTTests
     {
         var result = Result<int>.Ok(42);
 
-        var outcome = result.Match(value => $"value={value}", ex => ex.Message);
+        var outcome = result.Match(value => $"value={value}", err => err.ToException().Message);
 
         Assert.That(outcome, Is.EqualTo("value=42"));
     }
@@ -127,7 +127,7 @@ public class ResultOfTTests
     {
         var result = Result<int>.Error(new KeyNotFoundException("missing"));
 
-        var outcome = result.Match(value => $"value={value}", ex => ex.Message);
+        var outcome = result.Match(value => $"value={value}", err => err.ToException().Message);
 
         Assert.That(outcome, Is.EqualTo("missing"));
     }
@@ -150,7 +150,7 @@ public class ResultOfTTests
         Result<int> result = failure;
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.SameAs(exception));
+        Assert.That(result.GetError().ToException(), Is.SameAs(exception));
     }
 
     [Test]
@@ -167,7 +167,7 @@ public class ResultOfTTests
         var result = Result<int>.Error(null!);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetException(), Is.Not.Null);
+        Assert.That(result.GetError().ToException(), Is.Not.Null);
     }
 
     [Test]
