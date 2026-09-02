@@ -10,15 +10,12 @@ public class NonUniqueOrderedIndex<TKey>
         )
     );
 
-    public Result Insert(TKey key, int offset) {
+    public void Insert(TKey key, int offset) {
         sortedSet.Add((key, offset));
-        return Result.Ok();
     }
 
-    public Result Delete(TKey key, int offset) {
-        return sortedSet.Remove((key, offset))
-            ? Result.Ok()
-            : Result.Error(RhinoError.OffsetNotRegistered(key, offset));
+    public void Delete(TKey key, int offset) {
+        sortedSet.Remove((key, offset));
     }
 
     public List<int> GetOffsets(TKey key) => Range(key, key);

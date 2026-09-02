@@ -15,21 +15,12 @@ public class OrderedIndex<TKey>
             : Result.Error(RhinoError.IndexKeyNotFound(key));
     }
 
-    public Result Insert(TKey key, int offset) {
-        return sortedSet.Add((key, offset))
-            ? Result.Ok()
-            : Result.Error(RhinoError.DuplicateKey(key));
+    public void Insert(TKey key, int offset) {
+        sortedSet.Add((key, offset));
     }
 
-    public Result Delete(TKey key, int offset) {
-        if (!sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry))
-            return Result.Error(RhinoError.IndexKeyNotFound(key));
-
-        if (entry.Offset != offset)
-            return Result.Error(RhinoError.OffsetNotRegistered(key, offset));
-
-        sortedSet.Remove(entry);
-        return Result.Ok();
+    public void Delete(TKey key) {
+        sortedSet.Remove((key, 0));
     }
 
     public List<int> Range(TKey from, TKey to) {

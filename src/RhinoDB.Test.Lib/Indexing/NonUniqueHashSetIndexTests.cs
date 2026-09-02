@@ -1,4 +1,3 @@
-using RhinoDB.Core.Exceptions;
 using RhinoDB.Lib.Indexing;
 
 namespace RhinoDB.Test.Lib.Indexing;
@@ -66,27 +65,6 @@ public class NonUniqueHashSetIndexTests {
         index.Delete("Red", 0);
 
         Assert.That(index.GetOffsets("Red"), Is.Empty);
-    }
-
-    [Test]
-    public void Delete_UnknownKey_ReturnsFailureWithIndexKeyNotFoundException() {
-        var index = NewIndex();
-
-        var res = index.Delete("Red", 0);
-
-        Assert.That(res.IsError(), Is.True);
-        Assert.That(res.GetError().ToException(), Is.InstanceOf<IndexKeyNotFoundException>());
-    }
-
-    [Test]
-    public void Delete_OffsetNotUnderTheGivenKey_ReturnsFailureWithOffsetNotRegisteredException() {
-        var index = NewIndex();
-        index.Insert("Red", 0);
-
-        var res = index.Delete("Red", 999);
-
-        Assert.That(res.IsError(), Is.True);
-        Assert.That(res.GetError().ToException(), Is.InstanceOf<OffsetNotRegisteredException>());
     }
 
     [Test]

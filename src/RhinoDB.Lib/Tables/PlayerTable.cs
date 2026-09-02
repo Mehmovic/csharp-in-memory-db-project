@@ -71,24 +71,24 @@ public class PlayerTable {
         (Player record, var offset) = located.Unwrap();
         var lastOffset = storage.LastOffset;
 
-        var deleteType = storage.Delete(offset);
+        var swapped = storage.Delete(offset);
 
-        primary.Delete(record.Id, offset);
+        primary.Delete(record.Id);
         idxRating.Delete(record.Rating, offset);
         idxTeam.Delete(record.Team, offset);
-        idxEmail.Delete(record.Email, offset);
+        idxEmail.Delete(record.Email);
 
-        if (deleteType != DeleteType.DeletedWithSwap) return Result.Ok();
+        if (swapped is not { } swappedRow) return Result.Ok();
 
-        Player swapped = storage.Get(offset);
-        primary.Delete(swapped.Id, lastOffset);
-        idxRating.Delete(swapped.Rating, lastOffset);
-        idxTeam.Delete(swapped.Team, lastOffset);
-        idxEmail.Delete(swapped.Email, lastOffset);
-        primary.Insert(swapped.Id, offset);
-        idxRating.Insert(swapped.Rating, offset);
-        idxTeam.Insert(swapped.Team, offset);
-        idxEmail.Insert(swapped.Email, offset);
+        primary.Delete(swappedRow.Id);
+        idxRating.Delete(swappedRow.Rating, lastOffset);
+        idxTeam.Delete(swappedRow.Team, lastOffset);
+        idxEmail.Delete(swappedRow.Email);
+
+        primary.Insert(swappedRow.Id, offset);
+        idxRating.Insert(swappedRow.Rating, offset);
+        idxTeam.Insert(swappedRow.Team, offset);
+        idxEmail.Insert(swappedRow.Email, offset);
 
         return Result.Ok();
     }
@@ -123,7 +123,7 @@ public class PlayerTable {
         }
 
         if (emailUpdate) {
-            idxEmail.Delete(oldRecord.Email, offset);
+            idxEmail.Delete(oldRecord.Email);
             idxEmail.Insert(newPlayer.Email, offset);
         }
 

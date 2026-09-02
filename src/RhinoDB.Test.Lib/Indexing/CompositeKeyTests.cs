@@ -13,36 +13,25 @@ public class HashIndex_CompositeKeyTests {
     static private HashIndex<(int X, int Y)> NewIndex() => new HashIndex<(int X, int Y)>();
 
     [Test]
-    public void Insert_DifferentXSameY_BothSucceed() {
+    public void Insert_DifferentXSameY_BothRetrievable() {
         var index = NewIndex();
 
-        var a = index.Insert((5, 10), 0);
-        var b = index.Insert((6, 10), 1);
-
-        Assert.That(a.IsOk(), Is.True);
-        Assert.That(b.IsOk(), Is.True);
-    }
-
-    [Test]
-    public void Insert_SameXDifferentY_BothSucceed() {
-        var index = NewIndex();
-
-        var a = index.Insert((5, 10), 0);
-        var b = index.Insert((5, 20), 1);
-
-        Assert.That(a.IsOk(), Is.True);
-        Assert.That(b.IsOk(), Is.True);
-    }
-
-    [Test]
-    public void Insert_SameXAndY_RejectedAsDuplicate() {
-        var index = NewIndex();
         index.Insert((5, 10), 0);
+        index.Insert((6, 10), 1);
 
-        var result = index.Insert((5, 10), 1);
+        Assert.That(index.GetOffset((5, 10)).Unwrap(), Is.EqualTo(0));
+        Assert.That(index.GetOffset((6, 10)).Unwrap(), Is.EqualTo(1));
+    }
 
-        Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetError().ToException(), Is.InstanceOf<DuplicateKeyException>());
+    [Test]
+    public void Insert_SameXDifferentY_BothRetrievable() {
+        var index = NewIndex();
+
+        index.Insert((5, 10), 0);
+        index.Insert((5, 20), 1);
+
+        Assert.That(index.GetOffset((5, 10)).Unwrap(), Is.EqualTo(0));
+        Assert.That(index.GetOffset((5, 20)).Unwrap(), Is.EqualTo(1));
     }
 
     [Test]
@@ -66,25 +55,14 @@ public class OrderedIndex_CompositeKeyTests {
     static private OrderedIndex<(int X, int Y)> NewIndex() => new OrderedIndex<(int X, int Y)>();
 
     [Test]
-    public void Insert_SameXAndY_RejectedAsDuplicate() {
+    public void Insert_SameXDifferentY_BothRetrievable() {
         var index = NewIndex();
+
         index.Insert((5, 10), 0);
+        index.Insert((5, 20), 1);
 
-        var result = index.Insert((5, 10), 1);
-
-        Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetError().ToException(), Is.InstanceOf<DuplicateKeyException>());
-    }
-
-    [Test]
-    public void Insert_SameXDifferentY_BothSucceed() {
-        var index = NewIndex();
-
-        var a = index.Insert((5, 10), 0);
-        var b = index.Insert((5, 20), 1);
-
-        Assert.That(a.IsOk(), Is.True);
-        Assert.That(b.IsOk(), Is.True);
+        Assert.That(index.GetOffset((5, 10)).Unwrap(), Is.EqualTo(0));
+        Assert.That(index.GetOffset((5, 20)).Unwrap(), Is.EqualTo(1));
     }
 
     [Test]

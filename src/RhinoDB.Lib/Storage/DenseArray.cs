@@ -50,7 +50,7 @@ public class DenseArray<T>
         values[chunkIndex][index & chunkMask] = value;
     }
 
-    public DeleteType Delete(int index) {
+    public T? Delete(int index) {
         var lastIndex = Count - 1;
         var lastIndexInChunk = lastIndex & chunkMask;
 
@@ -58,7 +58,7 @@ public class DenseArray<T>
             Count -= 1;
             RemoveEmptyChunkIfRequired();
             MoveChunkCursorIfApplicable(lastIndexInChunk);
-            return DeleteType.Deleted;
+            return null;
         }
 
         var targetChunk = index >> chunkShift;
@@ -69,7 +69,7 @@ public class DenseArray<T>
         Count -= 1;
         RemoveEmptyChunkIfRequired();
         MoveChunkCursorIfApplicable(lastIndexInChunk);
-        return DeleteType.DeletedWithSwap;
+        return lastItem;
     }
 
     private void MoveChunkCursorIfApplicable(int lastIndexInChunk) {

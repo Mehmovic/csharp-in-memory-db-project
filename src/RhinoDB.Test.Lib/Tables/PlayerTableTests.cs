@@ -235,6 +235,27 @@ public class PlayerTableTests {
     }
 
     [Test]
+    public void Delete_OfNonLastRow_SiblingsInTheSameRatingBucketAreUnaffected() {
+        // Mirrors the Team version above but exercises idxRating's swap-repoint path
+        // instead - a SortedSet<(TKey,int)>-backed NonUniqueOrderedIndex, not the
+        // Dictionary<TKey,List<int>>-backed NonUniqueHashIndex. Delete no longer
+        // validates (key, offset) pairs on its own, so this is the test that would
+        // actually catch a swap-repoint bug (e.g. deleting/inserting the swapped row
+        // at the wrong offset) - not an internal check whose result nobody reads.
+        var table = NewTable();
+        var alice = new Player(1, "Alice", "alice@example.com", "Red", 80);
+        var bob = new Player(2, "Bob", "bob@example.com", "Blue", 80); // shares Rating with alice
+        var carol = new Player(3, "Carol", "carol@example.com", "Green", 80); // physically last, shares Rating too
+        table.Insert(alice);
+        table.Insert(bob);
+        table.Insert(carol);
+
+        table.Delete(1); // Carol swaps into Alice's slot; Bob must be untouched
+
+        Assert.That(table.GetByRating(80, 80), Is.EquivalentTo(new[] { bob, carol }));
+    }
+
+    [Test]
     public void Delete_EveryRow_LeavesTableEmptyAcrossAllIndexes() {
         var table = NewTable();
         var players = new[] {

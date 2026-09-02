@@ -12,20 +12,11 @@ public class HashIndex<TKey>
             : Result.Error(RhinoError.IndexKeyNotFound(key));
     }
 
-    public Result Insert(TKey key, int offset) {
-        return hashMap.TryAdd(key, offset)
-            ? Result.Ok()
-            : Result.Error(RhinoError.DuplicateKey(key));
+    public void Insert(TKey key, int offset) {
+        hashMap.Add(key, offset);
     }
 
-    public Result Delete(TKey key, int offset) {
-        if (!hashMap.TryGetValue(key, out var storedOffset))
-            return Result.Error(RhinoError.IndexKeyNotFound(key));
-
-        if (storedOffset != offset)
-            return Result.Error(RhinoError.OffsetNotRegistered(key, offset));
-
+    public void Delete(TKey key) {
         hashMap.Remove(key);
-        return Result.Ok();
     }
 }

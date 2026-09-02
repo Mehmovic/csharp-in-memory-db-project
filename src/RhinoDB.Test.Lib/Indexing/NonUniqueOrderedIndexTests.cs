@@ -1,4 +1,3 @@
-using RhinoDB.Core.Exceptions;
 using RhinoDB.Lib.Indexing;
 
 namespace RhinoDB.Test.Lib.Indexing;
@@ -75,16 +74,6 @@ public class NonUniqueOrderedIndexTests {
         index.Delete(30, 0);
 
         Assert.That(index.Range(1, 100), Is.Empty);
-    }
-
-    [Test]
-    public void Delete_UnknownPair_ReturnsFailureWithOffsetNotRegisteredException() {
-        var index = NewIndex();
-
-        var res = index.Delete(30, 0);
-
-        Assert.That(res.IsError(), Is.True);
-        Assert.That(res.GetError().ToException(), Is.InstanceOf<OffsetNotRegisteredException>());
     }
 
     [Test]
