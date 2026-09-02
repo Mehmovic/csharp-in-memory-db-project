@@ -495,4 +495,165 @@ public class PlayerTableTests {
         Assert.That(table.GetByRating(80, 80), Is.Empty);
         Assert.That(table.GetByRating(95, 95), Is.EqualTo(new[] { updated }));
     }
+
+    // ---- Mixed operations ----
+
+    [Test]
+    public void FullLifecycle_InsertDeleteInsertUpdateDelete_TableEndsConsistentAndEmpty() {
+        var table = NewTable();
+        var p1 = new Player(1, "Alice", "alice@x.com", "Red", 80);
+        var p2 = new Player(2, "Bob", "bob@x.com", "Blue", 70);
+        var p3 = new Player(3, "Carol", "carol@x.com", "Red", 90); // physically last after the first three inserts
+        var p4 = new Player(4, "Dave", "dave@x.com", "Green", 60);
+        var p5 = new Player(5, "Eve", "eve@x.com", "Red", 85);
+
+        table.Insert(p1);
+        table.Insert(p2);
+        table.Insert(p3);
+        table.Delete(1); // Carol swaps into Alice's old slot
+        table.Insert(p4);
+        table.Insert(p5);
+
+        var updatedBob = p2 with { Team = "Purple", Rating = 99 };
+        table.Update(2, updatedBob);
+
+        table.Delete(3); // Carol - physically not last anymore (Eve is); triggers another swap
+        table.Delete(4); // Dave - physically last at this point; no swap
+
+        Assert.That(table.Count, Is.EqualTo(2));
+        Assert.That(table.Get(2).Unwrap(), Is.EqualTo(updatedBob));
+        Assert.That(table.Get(5).Unwrap(), Is.EqualTo(p5));
+        Assert.That(table.GetByTeam("Red"), Is.EqualTo(new[] { p5 }));
+        Assert.That(table.GetByTeam("Purple"), Is.EqualTo(new[] { updatedBob }));
+        Assert.That(table.GetByTeam("Green"), Is.Empty);
+        Assert.That(table.GetByEmail(p3.Email).IsError(), Is.True);
+        Assert.That(table.GetByEmail(p4.Email).IsError(), Is.True);
+
+        table.Delete(2);
+        table.Delete(5);
+
+        Assert.That(table.Count, Is.EqualTo(0));
+        Assert.That(table.GetByTeam("Red"), Is.Empty);
+        Assert.That(table.GetByTeam("Purple"), Is.Empty);
+    }
+
+    [Test]
+    public void ChainedDeletes_MultipleConsecutiveSwaps_AllSurvivorsRemainConsistent() {
+        var table = NewTable();
+        var players = Enumerable.Range(1, 5)
+            .Select(i => new Player(i, $"P{i}", $"p{i}@x.com", i % 2 == 0 ? "Even" : "Odd", 50 + i))
+            .ToArray();
+        foreach (var p in players) table.Insert(p);
+
+        // Deleting from the front repeatedly forces a fresh swap on every call.
+        table.Delete(1);
+        table.Delete(2);
+        table.Delete(3);
+
+        var survivors = players.Where(p => p.Id is 4 or 5).ToArray();
+        Assert.That(table.Count, Is.EqualTo(2));
+        foreach (var p in survivors) {
+            Assert.That(table.Get(p.Id).Unwrap(), Is.EqualTo(p));
+            Assert.That(table.GetByEmail(p.Email).Unwrap(), Is.EqualTo(p));
+            Assert.That(table.GetByRating(p.Rating, p.Rating), Is.EqualTo(new[] { p }));
+        }
+        Assert.That(table.GetByTeam("Even"), Is.EquivalentTo(new[] { players[3] }));
+        Assert.That(table.GetByTeam("Odd"), Is.EquivalentTo(new[] { players[4] }));
+    }
+
+    [Test]
+    public void FailedInsertInTheMiddleOfASequence_DoesNotDisturbSurroundingOperations() {
+        var table = NewTable();
+        table.Insert(new Player(1, "Alice", "alice@x.com", "Red", 80));
+        table.Insert(new Player(2, "Bob", "bob@x.com", "Blue", 70));
+
+        var dup = table.Insert(new Player(3, "Eve", "alice@x.com", "Green", 99)); // duplicate email
+        Assert.That(dup.IsError(), Is.True);
+
+        var carol = new Player(4, "Carol", "carol@x.com", "Green", 90);
+        table.Insert(carol);
+        table.Delete(1); // Carol (physically last) swaps into Alice's old slot
+
+        Assert.That(table.Count, Is.EqualTo(2));
+        Assert.That(table.Get(3).IsError(), Is.True);
+        Assert.That(table.Get(2).Unwrap().Email, Is.EqualTo("bob@x.com"));
+        Assert.That(table.Get(4).Unwrap(), Is.EqualTo(carol));
+        Assert.That(table.GetByTeam("Green"), Is.EqualTo(new[] { carol }));
+    }
+
+    [Test]
+    public void UpdateThenSwapDelete_UpdatedFieldsSurviveTheSwap() {
+        var table = NewTable();
+        var alice = new Player(1, "Alice", "alice@x.com", "Red", 80);
+        var bob = new Player(2, "Bob", "bob@x.com", "Blue", 70);
+        var carol = new Player(3, "Carol", "carol@x.com", "Green", 90); // physically last
+
+        table.Insert(alice);
+        table.Insert(bob);
+        table.Insert(carol);
+
+        var updatedCarol = carol with { Team = "Purple", Rating = 55 };
+        table.Update(3, updatedCarol); // no swap yet - Carol is already physically last
+
+        table.Delete(1); // Carol (now Purple/55) swaps into Alice's old slot
+
+        Assert.That(table.Get(3).Unwrap(), Is.EqualTo(updatedCarol));
+        Assert.That(table.GetByTeam("Purple"), Is.EqualTo(new[] { updatedCarol }));
+        Assert.That(table.GetByTeam("Green"), Is.Empty);
+        Assert.That(table.GetByRating(55, 55), Is.EqualTo(new[] { updatedCarol }));
+        Assert.That(table.GetByRating(90, 90), Is.Empty);
+    }
+
+    [Test]
+    public void RandomizedMixedSequence_StaysConsistentWithReferenceModelAtEveryStep() {
+        // Model-based test: a plain Dictionary tracks what the table *should* contain,
+        // and every Insert/Delete/Update the table accepts is mirrored into it. After
+        // every step, every accessor is cross-checked against the model. This exercises
+        // far more insert/delete/update interleavings - and far more swap-repoint
+        // combinations - than any hand-written scenario would, while staying fully
+        // reproducible via the fixed seed if it ever fails.
+        var table = NewTable();
+        var oracle = new Dictionary<int, Player>();
+        var rng = new Random(20260902);
+        var nextId = 1;
+        var teams = new[] { "Red", "Blue", "Green", "Purple", "Yellow" };
+
+        for (var step = 0; step < 300; step++) {
+            switch (rng.Next(3)) {
+                case 0: {
+                    var id = nextId++;
+                    var player = new Player(id, $"P{id}", $"p{id}@x.com", teams[rng.Next(teams.Length)], rng.Next(40, 100));
+                    if (table.Insert(player).IsOk()) oracle[id] = player;
+                    break;
+                }
+                case 1: {
+                    if (oracle.Count == 0) break;
+                    var id = oracle.Keys.ElementAt(rng.Next(oracle.Count));
+                    if (table.Delete(id).IsOk()) oracle.Remove(id);
+                    break;
+                }
+                case 2: {
+                    if (oracle.Count == 0) break;
+                    var id = oracle.Keys.ElementAt(rng.Next(oracle.Count));
+                    var updated = oracle[id] with {
+                        Team = teams[rng.Next(teams.Length)],
+                        Rating = rng.Next(40, 100)
+                    };
+                    if (table.Update(id, updated).IsOk()) oracle[id] = updated;
+                    break;
+                }
+            }
+
+            Assert.That(table.Count, Is.EqualTo(oracle.Count), $"Count mismatch after step {step}");
+            foreach (var (id, expected) in oracle) {
+                Assert.That(table.Get(id).Unwrap(), Is.EqualTo(expected), $"Get({id}) wrong after step {step}");
+                Assert.That(table.GetByEmail(expected.Email).Unwrap(), Is.EqualTo(expected), $"GetByEmail({expected.Email}) wrong after step {step}");
+            }
+            foreach (var team in teams) {
+                var expected = oracle.Values.Where(p => p.Team == team);
+                Assert.That(table.GetByTeam(team), Is.EquivalentTo(expected), $"GetByTeam({team}) wrong after step {step}");
+            }
+            Assert.That(table.GetByRating(0, 200), Is.EquivalentTo(oracle.Values), $"GetByRating(full range) wrong after step {step}");
+        }
+    }
 }
