@@ -4,18 +4,14 @@ public readonly struct Result<T> {
     private readonly T value;
     private readonly RhinoError? error;
 
-    private readonly bool isError;
-
     private Result(T value) {
         this.value = value;
         error = null;
-        isError = false;
     }
 
     private Result(RhinoError error) {
         value = default!;
         this.error = error;
-        isError = true;
     }
 
     static public Result<T> Ok(T value) {
@@ -24,36 +20,36 @@ public readonly struct Result<T> {
             : new Result<T>(value);
     }
 
-    static public Result<T> Error(RhinoError error) => new Result<T>(error);
+    static public Result<T> Error(RhinoError? error) => new Result<T>(error ?? RhinoError.Of(null));
 
-    public bool IsOk() => !isError;
-    public bool IsError() => isError;
+    public bool IsOk() => error is null;
+    public bool IsError() => error is not null;
 
     public RhinoError GetError() {
-        return isError ? error!.Value : throw new InvalidOperationException("Result was successful, there is no exception.");
+        return error ?? throw new InvalidOperationException("Result was successful, there is no exception.");
     }
 
     public void ThrowIfError() {
-        if (isError) throw error!.Value.ToException();
+        if (error is not null) throw error.ToException();
     }
 
     public T Unwrap() {
-        return !isError ? value : throw error!.Value.ToException();
+        return error is null ? value : throw error.ToException();
     }
 
     public bool TryUnwrap(out T result) {
-        result = !isError ? value : default!;
-        return !isError;
+        result = error is null ? value : default!;
+        return error is null;
     }
 
     public T UnwrapOr(T orValue) {
-        return !isError ? value : orValue;
+        return error is null ? value : orValue;
     }
 
     public TResult Match<TResult>(Func<T, TResult> onSuccess, Func<RhinoError, TResult> onFailure) =>
-        !isError ? onSuccess(value) : onFailure(error!.Value);
+        error is null ? onSuccess(value) : onFailure(error);
 
-    public Result Void() => isError ? Result.Error(error!.Value) : Result.Ok();
+    public Result Void() => error is null ? Result.Ok() : Result.Error(error);
 
     static public implicit operator Result<T>(T value) => Ok(value);
 

@@ -23,8 +23,9 @@ public sealed class RhinoErrorGenerator : IIncrementalGenerator {
 
     static private ErrorModel ToModel(INamedTypeSymbol exceptionType) {
         // Every exception here has exactly one constructor - the primary constructor
-        // the exception declares itself with (e.g. `DuplicateKeyException(object key)`).
-        var ctor = exceptionType.InstanceConstructors.First(c => c.Parameters.Length > 0);
+        // the exception declares itself with (e.g. `DuplicateKeyException(object key)`),
+        // which may take zero parameters for errors with nothing to report.
+        var ctor = exceptionType.InstanceConstructors.First(c => !c.IsImplicitlyDeclared);
 
         const string suffix = "Exception";
         var typeName = exceptionType.Name;
@@ -48,7 +49,7 @@ public sealed class RhinoErrorGenerator : IIncrementalGenerator {
         sb.AppendLine();
         sb.AppendLine("namespace RhinoDB.Core.Results;");
         sb.AppendLine();
-        sb.AppendLine("public readonly partial struct RhinoError {");
+        sb.AppendLine("public partial class RhinoError {");
 
         sb.AppendLine("    private enum Kind {");
         foreach (var error in errors) sb.AppendLine($"        {error.FactoryName},");
@@ -56,11 +57,32 @@ public sealed class RhinoErrorGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
+        // One shared, immutable, no-data instance per Kind - safe to reuse across every
+        // thread and call site, and it's what every Verbose=false factory call returns.
+        foreach (var error in errors)
+            sb.AppendLine($"    private static readonly RhinoError Cached{error.FactoryName} = new(Kind.{error.FactoryName});");
+        sb.AppendLine();
+
         foreach (var error in errors) {
-            var parameterList = string.Join(", ", error.Parameters.Select(p => $"{p.Type} {p.Name}"));
+            if (error.Parameters.IsEmpty) {
+                sb.AppendLine($"    static public RhinoError {error.FactoryName}() => Cached{error.FactoryName};");
+                sb.AppendLine();
+                continue;
+            }
+
+            // Boxing-prone parameters (those stored as `object?`) get their own generic
+            // type parameter instead of `object` in the signature, so the boxing
+            // conversion lives inside the ternary's Verbose branch below and only
+            // actually runs when RhinoErrorConfiguration.Verbose is true.
+            var typeParams = error.Parameters.Where(p => IsBoxingProne(p.Name)).Select(p => GenericNameFor(p.Name)).ToImmutableArray();
+            var typeParamList = typeParams.IsEmpty ? "" : $"<{string.Join(", ", typeParams)}>";
+
+            var parameterList = string.Join(", ",
+                error.Parameters.Select(p => $"{(IsBoxingProne(p.Name) ? GenericNameFor(p.Name) : p.Type)} {p.Name}"));
             var arguments = string.Join(", ", error.Parameters.Select(p => $"{SlotFor(p.Name)}: {p.Name}"));
-            sb.AppendLine($"    static public RhinoError {error.FactoryName}({parameterList}) =>");
-            sb.AppendLine($"        new(Kind.{error.FactoryName}, {arguments});");
+
+            sb.AppendLine($"    static public RhinoError {error.FactoryName}{typeParamList}({parameterList}) =>");
+            sb.AppendLine($"        RhinoErrorConfiguration.Verbose ? new(Kind.{error.FactoryName}, {arguments}) : Cached{error.FactoryName};");
             sb.AppendLine();
         }
 
@@ -90,11 +112,27 @@ public sealed class RhinoErrorGenerator : IIncrementalGenerator {
     };
 
     static private string AccessorFor(string parameterName) => parameterName switch {
-        "key" => "key!",
-        "attemptedKey" => "attemptedKey!",
+        "key" => "key",
+        "attemptedKey" => "attemptedKey",
         "offset" => "offset",
         _ => throw new InvalidOperationException(
             $"RhinoErrorGenerator: no RhinoError slot for constructor parameter '{parameterName}'.")
+    };
+
+    // Only `object?`-typed slots box; `offset` is `int?` end-to-end and never needs genericizing.
+    static private bool IsBoxingProne(string parameterName) => parameterName switch {
+        "key" => true,
+        "attemptedKey" => true,
+        "offset" => false,
+        _ => throw new InvalidOperationException(
+            $"RhinoErrorGenerator: no RhinoError slot for constructor parameter '{parameterName}'.")
+    };
+
+    static private string GenericNameFor(string parameterName) => parameterName switch {
+        "key" => "TKey",
+        "attemptedKey" => "TAttemptedKey",
+        _ => throw new InvalidOperationException(
+            $"RhinoErrorGenerator: parameter '{parameterName}' is not boxing-prone, no generic name needed.")
     };
 
     private sealed class ErrorModel(string exceptionType, string factoryName, ImmutableArray<ParamModel> parameters) {
