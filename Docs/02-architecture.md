@@ -28,25 +28,46 @@ vs. `Confirmed` (await the libmdbx commit before propagating).
 
 ## Execution model: async at the edges, single-writer at the center
 
-Every transaction — including a bare instant write or a `.Atomic` op — is submitted
-to a single-consumer `Channel` and processed one at a time by a `SingleWriterLoop`.
-There is only ever one writer, system-wide. This is what makes the rest of the
-concurrency story simple: writers never race each other, full stop.
+The unit of work is one call point: `Context.Run<T>(Func<Context, Result<T>>
+operation)` — no separate reducer/procedure/view types. What makes collapsing
+those into one entry point safe is the delegate's shape: `operation` is
+**synchronous**, never `Func<Context, Task<Result<T>>>`, so there is no `await`
+possible inside it and therefore no way to block the writer thread on I/O.
+That's the actual hazard other actor-style databases split reducers and
+procedures to avoid — closing it off at the type level means RhinoDB never
+needed the second entry point to begin with.
 
-Reads use per-table blocking multiple-readers/single-writer locks — one lock per
-table, never a whole-database lock, so readers on unrelated tables never contend.
+Every `Run` call is submitted to a single-consumer `Channel` and processed one
+at a time by a `SingleWriterLoop` — there is only ever one writer, system-wide,
+and it is also the only reader. Internal reads (a table accessor called inside
+`operation`) and external reads (a subscription's initial snapshot and its
+subsequent diffs) are both computed on that same thread, at the same
+serialization point as writes. No table-level locking exists or is needed — a
+table is only ever touched by the one thread that owns its `Context`, so
+`Table<TPk,TRow>` carries no concurrency primitives of its own.
 
-Applying a transaction's buffered operations (`ApplyInMemory`) acquires **every
-table the transaction touches**, up front, before applying any op — not one table
-at a time. This was a correction made 2026-09-01: locking tables one at a time as a
-transaction's ops were applied let a reader observe table A already updated by a
-multi-table transaction while table B (touched by the same transaction) wasn't yet
-— breaking isolation for anything spanning more than one table. Since there is only
-ever one writer, holding multiple write locks at once adds no deadlock/contention
-risk beyond what per-table locking already had — the only cost is a marginally
-longer reader-blocked window, in exchange for real cross-table atomicity. All locks
-are released together before propagation/libmdbx commit run (neither touches the
-live table, only a captured value, so neither needs a lock at all).
+This supersedes a correction made 2026-09-01, which had `ApplyInMemory` acquire
+every table a transaction touches up front (not one at a time) to stop a reader
+from observing a multi-table transaction half-applied. That fix was patching a
+problem specific to readers running independently of the writer via per-table
+locks; once reads no longer do that, the torn-read hazard it corrected doesn't
+exist, and neither does the lock it was built around. A multi-table `operation`
+is now just sequential calls against tables in the same `Context` — atomic for
+free, no lock acquisition of any kind.
+
+Two *separate*, separately-awaited `Run` calls are a different story: nothing
+pins state between them, so other operations can and will interleave in
+between. If two things need to be atomic together, they belong inside one
+`operation`, not two sequential `await Run(...)` calls.
+
+`Context` is the actor: one `SingleWriterLoop`, one `Channel`, and whichever
+tables — persistent or instant, the durability kind is irrelevant here, see
+Table kinds above — are registered to it. Scaling is horizontal, not
+intra-process: parallelism comes from running multiple independent `Context`s,
+each fully serial internally, coordinating with each other, if at all, only
+through the async change-propagation channel below, never a shared lock. One
+database is one actor; more scale means more databases, not more concurrency
+inside one.
 
 ## Storage engine (in-memory)
 
@@ -97,6 +118,10 @@ unordered/lossy) is a per-table declaration, like durability tier — not a per-
 choice like `Optimistic`/`Confirmed`. A per-connection sender loop drains its own
 outgoing channel with opportunistic merge (last-write-per-key wins within an
 in-flight batch); no field-level diffing is planned.
+
+This is also the only bridge between two `Context`s — there is no synchronous
+cross-context transaction; anything spanning two database instances is async,
+message-passing coordination, never a shared lock.
 
 ## Hosting
 

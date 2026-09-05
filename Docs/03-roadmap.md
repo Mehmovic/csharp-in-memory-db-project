@@ -47,8 +47,18 @@ generate it from a declarative table definition via source generator (see
 
 ## Stage 4 — Transactions & execution model ⏳ not started
 
-`SingleWriterLoop`, `ApplyInMemory`, per-table SWMR locking with the corrected
-batched-lock-acquisition semantics (see [Architecture](02-architecture.md#execution-model-async-at-the-edges-single-writer-at-the-center)).
+Revised 2026-09-05 to move toward an actor-per-database model: one `Context`
+(one `SingleWriterLoop`, one `Channel`) is the actor, and the single call
+point `Context.Run<T>(Func<Context, Result<T>> operation)` replaces separate
+reducer/procedure/view types — safe because `operation` is synchronous, so
+there's no way to block the writer thread on I/O (see [Architecture](02-architecture.md#execution-model-async-at-the-edges-single-writer-at-the-center)).
+No table-level locking of any kind — this supersedes the per-table
+SWMR/batched-lock-acquisition design from 2026-09-01, which solved a torn-read
+problem that no longer exists once reads (internal and subscription-driven
+alike) are unified onto the same single-writer stream as writes. Scaling is
+horizontal: more `Context`s (more database instances), not more concurrency
+inside one.
+
 Built from the start using the generic, non-boxing `Change<TKey,TRow>` shape and
 typed op buffers — **not** the `object`/`Action`-typed placeholder that was
 sketched and rejected in design review on 2026-09-01. Even before the generator
