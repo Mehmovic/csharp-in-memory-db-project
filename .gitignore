@@ -4,6 +4,10 @@ obj/
 out/
 artifacts/
 
+# Zig build cache (src/RhinoDB.Native/vendor/libmdbx/build.zig output)
+.zig-cache/
+zig-out/
+
 # Visual Studio
 .vs/
 *.user

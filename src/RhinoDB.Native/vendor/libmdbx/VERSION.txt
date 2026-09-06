@@ -1,0 +1,131 @@
+Vendored from: https://github.com/isar/libmdbx (mirror of the official libmdbx repository)
+Tag: v0.13.9
+Commit: 926e90ac9a13eb761afc85d37641e4acfa8ea998
+License: Apache-2.0
+Vendored: 2026-09-06
+
+Layout: a minimal flat source set that `zig cc` compiles directly - no build
+system of any kind is vendored (see "Build tool" below for how config.h/
+version.c were produced, and why CMake itself isn't kept here). Assembled by
+hand from a full source checkout, not upstream's own pre-packaged
+amalgamation (that's only produced by their internal `make dist`, isn't
+published as a downloadable release asset on the mirrors, and would still
+need a build system to compile anyway):
+  - mdbx.c is the original src/alloy.c (a unity-build file that #includes
+    every other .c file) with its sibling .c/.h files copied flat alongside
+    it instead of left in a src/ subdirectory.
+  - version.c is hand-generated from src/version.c.in with this exact tag's
+    version/commit/tree/timestamp substituted in.
+  - config.h is CMake's generated output from src/config.h.in, produced once
+    (see "Build tool" below) against the full source tree, then copied here.
+  - mdbx.h is the only other file mdbx.c's own header search needs.
+  - zig-shim/asm/cachectl.h is a stub for a header Zig's bundled glibc is
+    missing (see build-linux-x64.sh for why).
+  Nothing else lives here - no CMakeLists.txt, no CLI-tool sources
+  (mdbx_chk.c etc.), no mdbx.c++/mdbx.h++, no ntdll.def. Those all existed
+  only because a *previous* version of this vendoring used CMake, which
+  required them to exist (even unused) to pass its own "is this the
+  amalgamated distribution?" file-existence check. Once CMake was dropped
+  from the day-to-day build path (see below), so was everything that existed
+  solely to satisfy it - confirmed by rebuilding both platforms clean after
+  removing them.
+
+Two deliberate patches on top of the unmodified upstream content, both
+required purely by this flat relocation / by a newer-than-upstream-tested
+compiler, not logic changes:
+  - essentials.h / preface.h: `#include "../mdbx.h"` -> `#include "mdbx.h"`
+    (was relative to the old src/ subdirectory; mdbx.h is now a flat sibling).
+  - gc-get.c: MDBX_ATTRIBUTE_TARGET_AVX512BW's target string gained `,evex512`
+    - newer LLVM/Clang (e.g. the one bundled with Zig, used for the actual
+      builds - see below) splits `evex512` out from `avx512bw` as a distinct
+      required feature for full ZMM register support; older/mainstream
+      compilers don't need this.
+
+Everything else from a full source checkout (test/, cmake/, docs/, example/,
+packages/, conanfile.py, VERSION.json - the last was only a CMake input, not
+needed once CMake itself isn't part of the build path) is simply not present
+here - matching upstream's own "amalgamated: not for testing libmdbx itself"
+distribution philosophy, just taken further since Zig needs even less than
+CMake did.
+
+## Build tool: one `build.zig`, four targets, callable from any host OS
+
+`build.zig` builds `mdbx.dll` (x86_64-windows-gnu), `libmdbx.so`
+(x86_64-linux-gnu), and `libmdbx.dylib` for both `x86_64-macos` and
+`aarch64-macos` in a single `zig build` invocation - not hand-maintained
+per-OS scripts. This is deliberate, not a convenience shortcut: rebuilding
+any or all of these needs nothing but Zig (https://ziglang.org, tested
+with 0.16.0) on PATH - no Visual Studio, no Xcode, no CMake, no
+platform-specific toolchain at all, run from *any* host OS. CMake is only
+needed once per vendored version bump, to (re)generate `config.h`/`version.c`
+from the `.in` templates if they've changed upstream - not for routine
+rebuilds (CMake itself isn't kept in this vendored tree at all; see above).
+Every target gets `-DMDBX_HAVE_BUILTIN_CPU_SUPPORTS=0` (a real
+`__builtin_cpu_supports` codegen/linking rough edge in Zig's bundled LLVM for
+shared-library targets; trades one optional SIMD fast path for build
+reliability, correctness unaffected) so all platforms behave identically
+rather than silently diverging. The macOS targets needed no source patches or
+extra linked frameworks beyond libc (`link_libc = true` already pulls in
+libSystem, which is all libmdbx's Darwin code path needs) - unlike Windows,
+which needs `ntdll` linked explicitly.
+
+**Cross-verified all four host×target combinations, 2026-09-06**: built and
+tested from both a Windows host and a Linux host (WSL2, once its networking
+was fixed - see the project's session notes), producing both the Windows and
+Linux binary from each. Three of the four were verified with a real
+`dotnet test` run against the actual built binary (not just a successful
+compile): Windows-host→Windows-binary, Linux-host→Windows-binary, and
+Linux-host→Linux-binary all pass the same 5 tests in `RhinoDB.Test.Native`.
+The fourth (Windows-host→Linux-binary) is verified structurally (all 14
+required functions present in the ELF `.dynsym` table) since this sandbox
+can't execute a Linux binary directly - but it's produced by the exact same
+`zig build` invocation and flags as the three that were behaviorally proven,
+so there's no reason to expect it to differ.
+
+**Re-verified after the install-path fix, same day**: the two-vs-three `../`
+bug above (fixed the same day, before this re-verification) meant the
+original cross-verification pass was against binaries that had been manually
+copied to the correct location for testing, not binaries `zig build` itself
+had placed there. Re-ran Linux-host→Windows-binary and Linux-host→Linux-binary
+end to end against the corrected `build.zig` (fresh WSL2 copy, `dotnet` SDK
+reinstalled there since `/tmp`-adjacent state doesn't persist between
+sessions) - both still pass all 5 `RhinoDB.Test.Native` tests, this time with
+`zig build`'s own output consumed directly, no manual copy step involved.
+
+**macOS targets added 2026-09-06, structurally verified only**: `osx-x64` and
+`osx-arm64` both compile cleanly and produce valid 64-bit Mach-O shared
+libraries (magic `0xfeedfacf`, cputype `x86_64`/`arm64` confirmed by
+inspecting the header bytes directly). Unlike Linux, there's no equivalent to
+the WSL2 trick available here to actually execute a Darwin binary from this
+Windows sandbox, so `dotnet test` has not been run against either - that
+needs a real Mac (or macOS CI runner) the first time someone builds a
+`PersistentTable` against these. Same reasoning as the Windows-built Linux
+binary above for why this isn't treated as a high-risk gap: identical source,
+identical flags, identical build tool as the targets that were behaviorally
+proven.
+
+**Development workflow**: `mdbx.dll`/`libmdbx.so` are committed to git - a
+normal RhinoDB build/clone/`dotnet test` never touches Zig, CMake, or the
+vendored C source at all, exactly like consuming any other native-backed
+NuGet package. `zig build` only gets run when the vendored source itself
+changes (a patch here, or re-vendoring a newer libmdbx release) - run it from
+this directory, verify (`dotnet test src/RhinoDB.Test.Native`), commit the
+regenerated binaries alongside the source change. `.zig-cache/`/`zig-out/`
+(this directory's build artifacts, distinct from the actual output which goes
+straight to `../../../runtimes/{rid}/native/`) are gitignored.
+
+**Install-path gotcha, found and fixed 2026-09-06**: `build.zig`'s
+`InstallDir.custom` is resolved relative to the install prefix (`zig-out/`,
+which lives inside this directory), not relative to `build.zig`'s own
+directory - so reaching `RhinoDB.Native/runtimes/{rid}/native/` needs three
+`../` segments (zig-out -> libmdbx -> vendor -> RhinoDB.Native), not two. The
+original two-`../` version silently placed both binaries one level too
+shallow, at `vendor/runtimes/...` - a real path, so the build "succeeded" and
+the file "existed", just in the wrong place, which looked from the outside
+like the file mysteriously vanishing when checked from the *intended* path
+in a separate shell invocation. No antivirus or file-sync interference was
+involved, despite that being the leading hypothesis for a while - worth
+remembering if this ever needs debugging again.
+
+Do not hand-edit anything here except by re-vendoring from a newer upstream
+tag through this same process (or updating VERSION.json/version.c to match).

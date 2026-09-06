@@ -43,19 +43,19 @@ public sealed class DbErrorGenerator : IIncrementalGenerator {
 
         sb.AppendLine("public enum ErrorKind : byte {");
         sb.AppendLine("    SystemFailure,");
-        foreach (var error in errors)
+        foreach (ErrorModel? error in errors)
             sb.AppendLine($"    {error.FactoryName},");
         sb.AppendLine("}");
         sb.AppendLine();
 
         sb.AppendLine("public readonly partial struct DbError {");
-        foreach (var error in errors)
+        foreach (ErrorModel? error in errors)
             sb.AppendLine($"    public static DbError {error.FactoryName}() => new(ErrorKind.{error.FactoryName});");
         sb.AppendLine();
 
         sb.AppendLine("    public Exception ToException() => Kind switch {");
         sb.AppendLine("        ErrorKind.SystemFailure => systemException!,");
-        foreach (var error in errors)
+        foreach (ErrorModel? error in errors)
             sb.AppendLine($"        ErrorKind.{error.FactoryName} => new {error.ExceptionType}(),");
         sb.AppendLine("        _ => new Exception(\"Unexpected error, empty exception caught\")");
         sb.AppendLine("    };");
