@@ -13,18 +13,16 @@ Exactly two, and only two:
 - **`instant`** — in-memory only. Can be written either inside a transaction or
   directly.
 
-Declaring a table only settles durability. Transactionality is a separate, per-call
-decision layered on top:
-
-- `ctx.BeginTransaction()` opens an explicit transaction, persistent or mixed.
-- `.Atomic` gives a single-operation write to a persistent table a no-ceremony path
-  (opens+commits a transaction internally for that one op).
-- `transient` is a transaction opened purely around `instant` writes — in-memory
-  atomicity/isolation for that call, nothing recorded on crash.
-
-Two propagation modes apply to a transaction's outward-facing behavior:
-`Optimistic` (fire-and-forget libmdbx commit, propagate to subscribers immediately)
-vs. `Confirmed` (await the libmdbx commit before propagating).
+Declaring a table only settles durability. There's no separate transaction-opening
+API layered on top of that — every `DbContext.Run(operation)` call is already
+atomic for everything `operation` touches, regardless of which table kinds it
+touches (see Execution model below), so a dedicated `BeginTransaction()`/`.Atomic`/
+`transient` surface would add nothing the unified call point doesn't already give
+for free. What *is* a per-call decision is `PropagationMode` (`Optimistic`,
+default, vs. `Confirmed`), a parameter on `Run` itself: `Optimistic` returns as
+soon as the in-memory change is applied, `Confirmed` will (once Stage 5/6 exist)
+wait for the libmdbx commit before returning. Both behave identically today —
+there's no libmdbx commit yet to differentiate them against.
 
 ## Execution model: async at the edges, single-writer at the center
 
@@ -74,10 +72,17 @@ inside one.
 See [Performance Principles §1](01-performance-principles.md#1-data-oriented-not-object-oriented)
 for the data-oriented rationale. Concretely: `DenseArray<TRow>` is the physical
 storage per table, `Dictionary<TKey,int>`-backed indexes map keys to physical
-offsets directly, and `Table<TRow>` is the coordinator that owns the array and
-drives every index (primary and secondary alike) through `Register`/`Deregister` —
-this is what lets a delete's swap-remove correctly repoint *every* index on the
-table, not just the one that initiated the delete.
+offsets directly, and `Table<TPk,TRow>` is the coordinator that owns the array
+and drives every index. The primary index (`IUniqueIndex<TPk>`) is a constructor
+argument; secondary indexes are added via `Register(ISecondaryIndex<TRow>)` at
+setup time, then driven per-operation through a uniform `CheckInsert`/`Insert`/
+`Delete` contract regardless of whether the concrete index is unique or
+non-unique — type-erased via `UniqueSecondaryIndex<TRow,TKey>`/
+`NonUniqueSecondaryIndex<TRow,TKey>` wrappers. This uniform contract is what lets
+a delete's swap-remove correctly repoint *every* index on the table, not just the
+one that initiated the delete, and what lets `Update`'s always-re-register pass
+avoid a false self-collision (`CheckInsert(row, selfOffset)` — a found entry is
+only a real conflict if it belongs to a different offset than the row's own).
 
 Indexes are declared explicitly per table, never defaulted — each one is a real
 cost (write-path maintenance), so it's a decision, not a default:

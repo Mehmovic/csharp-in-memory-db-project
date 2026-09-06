@@ -16,36 +16,40 @@ with hysteresis. The physical foundation everything else sits on.
 
 ## Stage 2 — Indexes ✅ done
 
-Four index types, all key-to-offset direct (no indirection):
+Five index types, all key-to-offset direct (no indirection):
 
-- `HashIndex<TKey,TRow>` / `OrderedIndex<TKey,TRow>` — unique.
-- `NonUniqueHashIndex<TKey,TRow>` / `NonUniqueOrderedIndex<TKey,TRow>` — non-unique.
+- `HashIndex<TKey>` / `OrderedIndex<TKey>` — unique, implement `IUniqueIndex<TKey>`
+  (`GetOffset`/`Insert`/`Delete`/`Range`).
+- `NonUniqueHashIndex<TKey>` / `NonUniqueHashSetIndex<TKey>` /
+  `NonUniqueOrderedIndex<TKey>` — non-unique, implement `INonUniqueHash<TKey>`
+  (`Insert`/`Delete`/`GetOffsets`).
 
-All four support `Register`/`Deregister` (secondary-index role) as well as
-`Insert`/`Delete` (primary-index role, storage-owning). Composite keys confirmed
-working via `ValueTuple` with no new code. Fully tested, including chunk-boundary
-crossings and swap-remove repoint edge cases.
+No `TRow` type parameter on the indexes themselves — they're pure key-to-offset
+maps with no storage access of their own; `Table<TPk,TRow>` (Stage 3) is what
+turns an offset back into a row. Composite keys confirmed working via
+`ValueTuple` with no new code. Fully tested, including chunk-boundary crossings
+and swap-remove repoint edge cases.
 
-## Stage 3 — `Table<TRow>` coordinator 🚧 in progress
+## Stage 3 — `Table<TPk,TRow>` coordinator ✅ done
 
-One concrete hand-written example (`PlayerTable`) before any generic reusable
-engine — proving the shape before generalizing it or generating it. The table owns
-`DenseArray` + drives every index (primary included) purely through
-`Register`/`Deregister`, so a delete's swap-remove correctly repoints *every*
-index, not just the one that initiated it.
+Proven by hand first (`PlayerTable`, fully tested against `PlayerTableTests.cs`
+including duplicate-key rollback across every index, swap-delete cross-index
+repoint, non-unique bucket siblings surviving a swap, chunk-boundary crossings,
+and primary-key immutability), then generalized to `Table<TPk,TRow>` — a
+constructor-supplied `IUniqueIndex<TPk>` primary plus a `List<ISecondaryIndex<TRow>>`
+registered at setup time, driven uniformly through `CheckInsert`/`Insert`/`Delete`
+(see [Architecture](02-architecture.md#storage-engine-in-memory)). `PlayerTable`
+is now a thin composing wrapper over `Table<int,Player>`, keeping only its own
+bespoke `GetByEmail`/`GetByTeam`/`GetByRating` accessors. `TableTests.cs` proves
+the generalized version reproduces `PlayerTableTests.cs`'s behavior exactly,
+plus the self-collision fix `Update` needed once the table always re-registers
+every secondary index rather than only the ones that actually changed.
 
-`PlayerTableTests.cs` is written as a TDD spec (currently red by design) covering
-insert/delete/update, duplicate-key rollback across every index, the swap-delete
-cross-index repoint, non-unique bucket siblings surviving a swap, chunk-boundary
-crossings, primary-key immutability, and update rollback on a mid-rekey uniqueness
-conflict. **Next concrete step: implement `Insert`/`Delete`/`Update` on
-`PlayerTable` against that spec.**
+Next: generate this from a declarative table definition via source generator
+(see [Performance Principles §5](01-performance-principles.md#5-source-generators-are-how-we-get-all-of-the-above-and-a-nice-api)) —
+not scheduled yet.
 
-Once that shape is proven by hand, generalize to `Table<TPk,TRow>` and — later —
-generate it from a declarative table definition via source generator (see
-[Performance Principles §5](01-performance-principles.md#5-source-generators-are-how-we-get-all-of-the-above-and-a-nice-api)).
-
-## Stage 4 — Transactions & execution model ⏳ not started
+## Stage 4 — Transactions & execution model ✅ done
 
 Revised 2026-09-05 to move toward an actor-per-database model: one `DbContext`
 (one `DbExecutionLoop`, one `Channel`) is the actor, and the single call
@@ -66,11 +70,19 @@ without waiting on durability confirmation, unless the caller opts into
 need to know the change survived a crash before proceeding. Still a no-op
 distinction until Stage 5 (libmdbx) exists to actually differentiate the two.
 
-Built from the start using the generic, non-boxing `Change<TKey,TRow>` shape and
-typed op buffers — **not** the `object`/`Action`-typed placeholder that was
-sketched and rejected in design review on 2026-09-01. Even before the generator
-exists to emit these types, the hand-written version should already be in the
-target shape, not a shortcut to be revisited later.
+Implemented as `DbContext` (single-writer actor) + `DbExecutionLoop` (its
+private, non-reusable engine — takes the owning `DbContext` in its constructor,
+`Enqueue` accepts `Func<DbContext, ...>` and `PropagationMode` directly) over a
+`Channel<Func<PropagationMode>>` with `SingleReader = true, SingleWriter =
+false`, matching the actual multi-caller/one-writer shape. An operation that
+throws doesn't fault the returned `Task` — it comes back as an ordinary
+`Result.Error` with `Kind == ErrorKind.SystemFailure`, carrying the real
+exception (see [Architecture](02-architecture.md#error-handling)), so a caller
+never needs both an `IsError()` check and a `try`/`catch` at the same call site.
+Fully tested in `Execution/DbContextTests.cs` — round-trips, both `TArgs`
+overloads, `RunConfirmed`, ordering under single- and multi-thread concurrent
+submission, exception safety, and the no-adjacency-guarantee-across-separate-calls
+property.
 
 ## Stage 5 — Cold storage (libmdbx) ⏳ not started
 
@@ -79,6 +91,12 @@ MemoryPack serialization (positional, no version tags), per-table sub-databases,
 batched schema migration — versioning tracked as generated code, not runtime tags.
 
 ## Stage 6 — Change propagation ⏳ designed, not built
+
+Build from the start using the generic, non-boxing `Change<TKey,TRow>` shape and
+typed op buffers — **not** the `object`/`Action`-typed placeholder that was
+sketched and rejected in design review on 2026-09-01. Even before the generator
+exists to emit these types, the hand-written version should already be in the
+target shape, not a shortcut to be revisited later.
 
 Per-table delivery-guarantee declaration (`Reliable` vs. lossy), per-connection
 sender loop with opportunistic last-write-per-key merge.
