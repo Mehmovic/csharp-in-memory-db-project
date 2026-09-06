@@ -28,7 +28,7 @@ public class Table<TKey, TRow>(int chunkSize, IUniqueIndex<TKey> primary, Func<T
     public Result Insert(TRow record) {
         TKey pk = selector(record);
         var duplicateIndexResult = primary.GetOffset(pk);
-        if (duplicateIndexResult.IsOk()) { return Result.Error(RhinoError.DuplicateKey(pk)); }
+        if (duplicateIndexResult.IsOk()) { return Result.Error(DbError.DuplicateKey()); }
 
         foreach (var idx in secondaryIndexes) {
             Result insertResult = idx.CheckInsert(record, -1);
@@ -79,7 +79,7 @@ public class Table<TKey, TRow>(int chunkSize, IUniqueIndex<TKey> primary, Func<T
 
     public Result Update(TKey id, TRow newRecord) {
         TKey newId = selector(newRecord);
-        if (!id.Equals(newId)) return Result.Error(RhinoError.PrimaryKeyImmutable(id, newId));
+        if (!id.Equals(newId)) return Result.Error(DbError.PrimaryKeyImmutable());
 
         var located = Locate(id);
         if (located.IsError()) return located;

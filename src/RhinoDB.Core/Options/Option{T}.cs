@@ -1,4 +1,4 @@
-namespace RhinoDB.Core.Options;
+namespace RhinoDB.Core;
 
 public readonly struct Option<T> {
     private readonly T value;

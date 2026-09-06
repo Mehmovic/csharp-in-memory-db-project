@@ -1,5 +1,5 @@
-using RhinoDB.Core.Options;
-using RhinoDB.Core.Results;
+using RhinoDB.Core.Exceptions;
+using RhinoDB.Core;
 
 namespace RhinoDB.Test.Core.Results;
 
@@ -9,7 +9,7 @@ public class ResultOptionCompositionTests
     // of the usual two (found / not found / operation failed).
     static private Result<Option<string>> Lookup(Dictionary<int, string?> data, int key, bool simulateFailure)
     {
-        if (simulateFailure) return Result.Error(new InvalidOperationException("storage unavailable"));
+        if (simulateFailure) return Result.Error(DbError.OffsetOutOfRange());
 
         if (!data.TryGetValue(key, out var value)) return Option<string>.None();
         return value is null ? Option<string>.None() : Option<string>.Some(value);
@@ -61,7 +61,7 @@ public class ResultOptionCompositionTests
         var result = Lookup(data, 1, simulateFailure: true);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetError().ToException(), Is.InstanceOf<InvalidOperationException>());
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<OffsetOutOfRangeException>());
     }
 
     [Test]
@@ -81,7 +81,7 @@ public class ResultOptionCompositionTests
     {
         Result<Option<int>> found = Option.Some(42);
         Result<Option<int>> notFound = Option<int>.None();
-        Result<Option<int>> failed = Result.Error(new InvalidOperationException("boom"));
+        Result<Option<int>> failed = Result.Error(DbError.OffsetOutOfRange());
 
         string Describe(Result<Option<int>> result) =>
             result.Match(
@@ -92,6 +92,6 @@ public class ResultOptionCompositionTests
 
         Assert.That(Describe(found), Is.EqualTo("found:42"));
         Assert.That(Describe(notFound), Is.EqualTo("not-found"));
-        Assert.That(Describe(failed), Is.EqualTo("error:boom"));
+        Assert.That(Describe(failed), Is.EqualTo("error:Offset is out of range"));
     }
 }

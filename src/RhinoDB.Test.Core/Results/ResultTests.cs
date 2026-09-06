@@ -1,4 +1,5 @@
-using RhinoDB.Core.Results;
+using RhinoDB.Core.Exceptions;
+using RhinoDB.Core;
 
 namespace RhinoDB.Test.Core.Results;
 
@@ -42,47 +43,35 @@ public class ResultTests
     [Test]
     public void Error_ReportsFailure()
     {
-        var result = Result.Error(new InvalidOperationException("boom"));
+        var result = Result.Error(DbError.IndexKeyNotFound());
 
         Assert.That(result.IsError, Is.True);
         Assert.That(result.IsOk(), Is.False);
     }
 
     [Test]
-    public void Error_GetException_ReturnsTheStoredException()
+    public void Error_GetException_ReturnsTheGeneratedExceptionType()
     {
-        var exception = new InvalidOperationException("boom");
-        var result = Result.Error(exception);
+        var result = Result.Error(DbError.IndexKeyNotFound());
 
-        Assert.That(result.GetError().ToException(), Is.SameAs(exception));
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
-    public void Error_ThrowIfError_ThrowsTheStoredException()
+    public void Error_ThrowIfError_ThrowsTheGeneratedExceptionType()
     {
-        var exception = new InvalidOperationException("boom");
-        var result = Result.Error(exception);
+        var result = Result.Error(DbError.IndexKeyNotFound());
 
-        var thrown = Assert.Throws<InvalidOperationException>(() => result.ThrowIfError());
-        Assert.That(thrown, Is.SameAs(exception));
+        Assert.Throws<IndexKeyNotFoundException>(() => result.ThrowIfError());
     }
 
     [Test]
-    public void Error_Match_InvokesTheOnFailureBranchWithTheException()
+    public void Error_Match_InvokesTheOnFailureBranchWithTheError()
     {
-        var result = Result.Error(new InvalidOperationException("boom"));
+        var result = Result.Error(DbError.IndexKeyNotFound());
 
-        var outcome = result.Match(() => "success", err => err.ToException().Message);
+        var outcome = result.Match(() => "success", err => err.Kind.ToString());
 
-        Assert.That(outcome, Is.EqualTo("boom"));
-    }
-
-    [Test]
-    public void Error_WithNullException_SubstitutesADefaultException()
-    {
-        var result = Result.Error(null!);
-
-        Assert.That(result.IsError, Is.True);
-        Assert.That(result.GetError().ToException(), Is.Not.Null);
+        Assert.That(outcome, Is.EqualTo(nameof(ErrorKind.IndexKeyNotFound)));
     }
 }

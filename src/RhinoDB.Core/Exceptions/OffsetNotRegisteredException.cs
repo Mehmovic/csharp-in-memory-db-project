@@ -1,8 +1,4 @@
 namespace RhinoDB.Core.Exceptions;
 
-[GeneratesRhinoError]
-public sealed class OffsetNotRegisteredException(object? key, int? offset)
-    : Exception($"Offset {offset?.ToString() ?? "[null]"} is not registered under key '{key ?? "[null]"}'") {
-    public object? Key { get; } = key;
-    public int? Offset { get; } = offset;
-}
+[GenerateDbError]
+public sealed class OffsetNotRegisteredException() : Exception("Offset is not registered under the given key");

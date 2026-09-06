@@ -1,7 +1,4 @@
 namespace RhinoDB.Core.Exceptions;
 
-[GeneratesRhinoError]
-public sealed class OffsetOutOfRangeException(int? offset)
-    : Exception($"Offset {offset?.ToString() ?? "[null]"} is out of range") {
-    public int? Offset { get; } = offset;
-}
+[GenerateDbError]
+public sealed class OffsetOutOfRangeException() : Exception("Offset is out of range");

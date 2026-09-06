@@ -1,15 +1,15 @@
-namespace RhinoDB.Core.Results;
+namespace RhinoDB.Core;
 
 public readonly struct Result<T> {
     private readonly T value;
-    private readonly RhinoError? error;
+    private readonly DbError? error;
 
     private Result(T value) {
         this.value = value;
         error = null;
     }
 
-    private Result(RhinoError error) {
+    private Result(DbError error) {
         value = default!;
         this.error = error;
     }
@@ -20,21 +20,21 @@ public readonly struct Result<T> {
             : new Result<T>(value);
     }
 
-    static public Result<T> Error(RhinoError? error) => new Result<T>(error ?? RhinoError.Of(null));
+    static public Result<T> Error(DbError error) => new Result<T>(error);
 
     public bool IsOk() => error is null;
     public bool IsError() => error is not null;
 
-    public RhinoError GetError() {
+    public DbError GetError() {
         return error ?? throw new InvalidOperationException("Result was successful, there is no exception.");
     }
 
     public void ThrowIfError() {
-        if (error is not null) throw error.ToException();
+        if (error is not null) throw error.Value.ToException();
     }
 
     public T Unwrap() {
-        return error is null ? value : throw error.ToException();
+        return error is null ? value : throw error.Value.ToException();
     }
 
     public bool TryUnwrap(out T result) {
@@ -46,10 +46,10 @@ public readonly struct Result<T> {
         return error is null ? value : orValue;
     }
 
-    public TResult Match<TResult>(Func<T, TResult> onSuccess, Func<RhinoError, TResult> onFailure) =>
-        error is null ? onSuccess(value) : onFailure(error);
+    public TResult Match<TResult>(Func<T, TResult> onSuccess, Func<DbError, TResult> onFailure) =>
+        error is null ? onSuccess(value) : onFailure(error.Value);
 
-    public Result Void() => error is null ? Result.Ok() : Result.Error(error);
+    public Result Void() => error is null ? Result.Ok() : Result.Error(error.Value);
 
     static public implicit operator Result<T>(T value) => Ok(value);
 

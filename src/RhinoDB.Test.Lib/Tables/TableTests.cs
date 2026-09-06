@@ -1,7 +1,7 @@
 using RhinoDB.Core.Exceptions;
-using RhinoDB.Core.Results;
 using RhinoDB.Lib.Indexing;
 using RhinoDB.Lib.Tables;
+using RhinoDB.Core;
 
 namespace RhinoDB.Test.Lib.Tables;
 

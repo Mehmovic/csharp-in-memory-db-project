@@ -1,4 +1,4 @@
-using RhinoDB.Core.Options;
+using RhinoDB.Core;
 
 namespace RhinoDB.Test.Core.Options;
 

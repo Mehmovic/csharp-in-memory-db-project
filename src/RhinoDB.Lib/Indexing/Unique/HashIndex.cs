@@ -9,7 +9,7 @@ public class HashIndex<TKey> : IUniqueIndex<TKey>
     public Result<int> GetOffset(TKey key) {
         return hashMap.TryGetValue(key, out var offset)
             ? offset
-            : Result.Error(RhinoError.IndexKeyNotFound(key));
+            : Result.Error(DbError.IndexKeyNotFound());
     }
 
     public void Insert(TKey key, int offset) {

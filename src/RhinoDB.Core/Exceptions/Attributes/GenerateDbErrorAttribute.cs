@@ -1,5 +1,5 @@
 namespace RhinoDB.Core.Exceptions;
 
 [AttributeUsage(AttributeTargets.Class)]
-public sealed class GeneratesRhinoErrorAttribute : Attribute {
+public sealed class GenerateDbErrorAttribute : Attribute {
 }

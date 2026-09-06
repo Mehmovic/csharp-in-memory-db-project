@@ -1,4 +1,5 @@
-using RhinoDB.Core.Results;
+using RhinoDB.Core.Exceptions;
+using RhinoDB.Core;
 
 namespace RhinoDB.Test.Core.Results;
 
@@ -58,26 +59,24 @@ public class ResultOfTTests
     [Test]
     public void Error_ReportsFailure()
     {
-        var result = Result<int>.Error(new KeyNotFoundException("missing"));
+        var result = Result<int>.Error(DbError.IndexKeyNotFound());
 
         Assert.That(result.IsError(), Is.True);
         Assert.That(result.IsOk(), Is.False);
     }
 
     [Test]
-    public void Error_GetValue_ThrowsTheStoredException()
+    public void Error_GetValue_ThrowsTheGeneratedExceptionType()
     {
-        var exception = new KeyNotFoundException("missing");
-        var result = Result<int>.Error(exception);
+        var result = Result<int>.Error(DbError.IndexKeyNotFound());
 
-        var thrown = Assert.Throws<KeyNotFoundException>(() => result.Unwrap());
-        Assert.That(thrown, Is.SameAs(exception));
+        Assert.Throws<IndexKeyNotFoundException>(() => result.Unwrap());
     }
 
     [Test]
     public void Error_TryGetValue_ReturnsFalseAndTheDefault()
     {
-        var result = Result<int>.Error(new KeyNotFoundException("missing"));
+        var result = Result<int>.Error(DbError.IndexKeyNotFound());
 
         var found = result.TryUnwrap(out var value);
 
@@ -88,28 +87,25 @@ public class ResultOfTTests
     [Test]
     public void Error_GetValueOr_ReturnsTheFallback()
     {
-        var result = Result<int>.Error(new KeyNotFoundException("missing"));
+        var result = Result<int>.Error(DbError.IndexKeyNotFound());
 
         Assert.That(result.UnwrapOr(-1), Is.EqualTo(-1));
     }
 
     [Test]
-    public void Error_GetException_ReturnsTheStoredException()
+    public void Error_GetException_ReturnsTheGeneratedExceptionType()
     {
-        var exception = new KeyNotFoundException("missing");
-        var result = Result<int>.Error(exception);
+        var result = Result<int>.Error(DbError.IndexKeyNotFound());
 
-        Assert.That(result.GetError().ToException(), Is.SameAs(exception));
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
-    public void Error_ThrowIfError_ThrowsTheStoredException()
+    public void Error_ThrowIfError_ThrowsTheGeneratedExceptionType()
     {
-        var exception = new KeyNotFoundException("missing");
-        var result = Result<int>.Error(exception);
+        var result = Result<int>.Error(DbError.IndexKeyNotFound());
 
-        var thrown = Assert.Throws<KeyNotFoundException>(() => result.ThrowIfError());
-        Assert.That(thrown, Is.SameAs(exception));
+        Assert.Throws<IndexKeyNotFoundException>(() => result.ThrowIfError());
     }
 
     [Test]
@@ -123,13 +119,13 @@ public class ResultOfTTests
     }
 
     [Test]
-    public void Match_OnFailure_InvokesTheOnFailureBranchWithTheException()
+    public void Match_OnFailure_InvokesTheOnFailureBranchWithTheError()
     {
-        var result = Result<int>.Error(new KeyNotFoundException("missing"));
+        var result = Result<int>.Error(DbError.IndexKeyNotFound());
 
-        var outcome = result.Match(value => $"value={value}", err => err.ToException().Message);
+        var outcome = result.Match(value => $"value={value}", err => err.Kind.ToString());
 
-        Assert.That(outcome, Is.EqualTo("missing"));
+        Assert.That(outcome, Is.EqualTo(nameof(ErrorKind.IndexKeyNotFound)));
     }
 
     [Test]
@@ -142,15 +138,14 @@ public class ResultOfTTests
     }
 
     [Test]
-    public void ImplicitConversion_FromAFailedNonGenericResult_PropagatesTheException()
+    public void ImplicitConversion_FromAFailedNonGenericResult_PropagatesTheError()
     {
-        var exception = new KeyNotFoundException("missing");
-        Result failure = Result.Error(exception);
+        Result failure = Result.Error(DbError.IndexKeyNotFound());
 
         Result<int> result = failure;
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetError().ToException(), Is.SameAs(exception));
+        Assert.That(result.GetError().ToException(), Is.InstanceOf<IndexKeyNotFoundException>());
     }
 
     [Test]
@@ -159,15 +154,6 @@ public class ResultOfTTests
         Result success = Result.Ok();
 
         Assert.Throws<InvalidOperationException>(() => { Result<int> _ = success; });
-    }
-
-    [Test]
-    public void Error_WithNullException_SubstitutesADefaultException()
-    {
-        var result = Result<int>.Error(null!);
-
-        Assert.That(result.IsError(), Is.True);
-        Assert.That(result.GetError().ToException(), Is.Not.Null);
     }
 
     [Test]
