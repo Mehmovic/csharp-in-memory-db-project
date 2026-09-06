@@ -28,22 +28,22 @@ vs. `Confirmed` (await the libmdbx commit before propagating).
 
 ## Execution model: async at the edges, single-writer at the center
 
-The unit of work is one call point: `Context.Run<T>(Func<Context, Result<T>>
+The unit of work is one call point: `DbContext.Run<T>(Func<DbContext, Result<T>>
 operation)` — no separate reducer/procedure/view types. What makes collapsing
 those into one entry point safe is the delegate's shape: `operation` is
-**synchronous**, never `Func<Context, Task<Result<T>>>`, so there is no `await`
+**synchronous**, never `Func<DbContext, Task<Result<T>>>`, so there is no `await`
 possible inside it and therefore no way to block the writer thread on I/O.
 That's the actual hazard other actor-style databases split reducers and
 procedures to avoid — closing it off at the type level means RhinoDB never
 needed the second entry point to begin with.
 
 Every `Run` call is submitted to a single-consumer `Channel` and processed one
-at a time by a `SingleWriterLoop` — there is only ever one writer, system-wide,
+at a time by a `DbExecutionLoop` — there is only ever one writer, system-wide,
 and it is also the only reader. Internal reads (a table accessor called inside
 `operation`) and external reads (a subscription's initial snapshot and its
 subsequent diffs) are both computed on that same thread, at the same
 serialization point as writes. No table-level locking exists or is needed — a
-table is only ever touched by the one thread that owns its `Context`, so
+table is only ever touched by the one thread that owns its `DbContext`, so
 `Table<TPk,TRow>` carries no concurrency primitives of its own.
 
 This supersedes a correction made 2026-09-01, which had `ApplyInMemory` acquire
@@ -52,7 +52,7 @@ from observing a multi-table transaction half-applied. That fix was patching a
 problem specific to readers running independently of the writer via per-table
 locks; once reads no longer do that, the torn-read hazard it corrected doesn't
 exist, and neither does the lock it was built around. A multi-table `operation`
-is now just sequential calls against tables in the same `Context` — atomic for
+is now just sequential calls against tables in the same `DbContext` — atomic for
 free, no lock acquisition of any kind.
 
 Two *separate*, separately-awaited `Run` calls are a different story: nothing
@@ -60,10 +60,10 @@ pins state between them, so other operations can and will interleave in
 between. If two things need to be atomic together, they belong inside one
 `operation`, not two sequential `await Run(...)` calls.
 
-`Context` is the actor: one `SingleWriterLoop`, one `Channel`, and whichever
+`DbContext` is the actor: one `DbExecutionLoop`, one `Channel`, and whichever
 tables — persistent or instant, the durability kind is irrelevant here, see
 Table kinds above — are registered to it. Scaling is horizontal, not
-intra-process: parallelism comes from running multiple independent `Context`s,
+intra-process: parallelism comes from running multiple independent `DbContext`s,
 each fully serial internally, coordinating with each other, if at all, only
 through the async change-propagation channel below, never a shared lock. One
 database is one actor; more scale means more databases, not more concurrency
@@ -119,7 +119,7 @@ choice like `Optimistic`/`Confirmed`. A per-connection sender loop drains its ow
 outgoing channel with opportunistic merge (last-write-per-key wins within an
 in-flight batch); no field-level diffing is planned.
 
-This is also the only bridge between two `Context`s — there is no synchronous
+This is also the only bridge between two `DbContext`s — there is no synchronous
 cross-context transaction; anything spanning two database instances is async,
 message-passing coordination, never a shared lock.
 
@@ -134,11 +134,26 @@ this project has no use for.
 
 `Result`/`Result<T>` instead of throwing on expected/common failure paths (not
 found, duplicate key) — chosen specifically because `out` parameters are illegal in
-`async` methods, and much of the outer API (`BeginTransaction`, `Confirmed`
-propagation) is necessarily async. A `Result` carries the real exception object
-(not a string or error code), deferring the throw rather than paying its cost,
-while preserving type-based discrimination whenever the caller does ask for it.
-Custom typed exceptions (`DuplicateKeyException`, `IndexKeyNotFoundException`,
-`OffsetNotRegisteredException`, `PrimaryKeyImmutableException`) replace generic BCL
-exceptions across the index layer, each carrying the offending key/offset as a
-real property, not just a formatted message.
+`async` methods, and much of the outer API (`DbContext.Run`) is necessarily async.
+
+The error a `Result` carries is `DbError`: a slim `readonly struct` holding
+nothing but a `Kind` (a generated, `byte`-backed enum — one member per
+`[GenerateDbError]`-tagged exception class, e.g. `DuplicateKey`,
+`IndexKeyNotFound`, `OffsetNotRegistered`, `OffsetOutOfRange`,
+`PrimaryKeyImmutable`). No key, offset, or any other per-call data rides along —
+those exceptions are parameterless with a fixed generic message
+(`DuplicateKeyException() : Exception("Key already exists")`), and `DbError`'s
+generated `ToException()` builds a fresh instance from `Kind` on demand. This is
+deliberate: `DbError` represents *anticipated* logic failures the caller is
+expected to branch on, not a bag of debug context.
+
+One `Kind` breaks that pattern on purpose: `SystemFailure`, produced by
+`DbError.SystemFailure(Exception)`, is the only one that actually carries data —
+the real exception a `DbContext.Run` operation didn't catch itself. Everything
+thrown out of an operation ends up here rather than faulting the returned `Task`,
+so callers get one uniform `Result`-shaped answer instead of needing both an
+`IsError()` check and a `try`/`catch` at every call site — while `Kind ==
+SystemFailure` keeps an unplanned failure visibly distinct from an ordinary
+`DuplicateKey` rejection. `Result`/`Result<T>` both also expose a convenience
+`Error(Exception)` overload that wraps into `SystemFailure`, so an operation that
+catches its own exception can report it identically to one that doesn't.
