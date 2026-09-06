@@ -21,6 +21,7 @@ public readonly struct Result<T> {
     }
 
     static public Result<T> Error(DbError error) => new Result<T>(error);
+    static public Result<T> Error(Exception ex) => new Result<T>(DbError.SystemFailure(ex));
 
     public bool IsOk() => error is null;
     public bool IsError() => error is not null;

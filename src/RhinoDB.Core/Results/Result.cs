@@ -11,6 +11,7 @@ public readonly struct Result {
     static public Result<T> Ok<T>(T val) => Result<T>.Ok(val);
 
     static public Result Error(DbError error) => new Result(error);
+    static public Result Error(Exception ex) => new Result(DbError.SystemFailure(ex));
 
     public DbError GetError() {
         return error ?? throw new InvalidOperationException("Result was successful, there is no exception.");

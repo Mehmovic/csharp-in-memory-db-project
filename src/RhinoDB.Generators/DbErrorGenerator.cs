@@ -42,10 +42,9 @@ public sealed class DbErrorGenerator : IIncrementalGenerator {
         sb.AppendLine();
 
         sb.AppendLine("public enum ErrorKind : byte {");
-        for (var i = 0; i < errors.Length; i++) {
-            var comma = i < errors.Length - 1 ? "," : "";
-            sb.AppendLine($"    {errors[i].FactoryName}{comma}");
-        }
+        sb.AppendLine("    SystemFailure,");
+        foreach (var error in errors)
+            sb.AppendLine($"    {error.FactoryName},");
         sb.AppendLine("}");
         sb.AppendLine();
 
@@ -55,6 +54,7 @@ public sealed class DbErrorGenerator : IIncrementalGenerator {
         sb.AppendLine();
 
         sb.AppendLine("    public Exception ToException() => Kind switch {");
+        sb.AppendLine("        ErrorKind.SystemFailure => systemException!,");
         foreach (var error in errors)
             sb.AppendLine($"        ErrorKind.{error.FactoryName} => new {error.ExceptionType}(),");
         sb.AppendLine("        _ => new Exception(\"Unexpected error, empty exception caught\")");
