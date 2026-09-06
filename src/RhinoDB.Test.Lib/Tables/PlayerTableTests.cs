@@ -4,7 +4,7 @@ using RhinoDB.Lib.Tables;
 namespace RhinoDB.Test.Lib.Tables;
 
 public class PlayerTableTests {
-    static private PlayerTable NewTable() => new PlayerTable();
+    static private PlayerTable NewTable() => new PlayerTable(4);
 
     static private Player Alice(int id = 1, string team = "Red", int rating = 80) =>
         new Player(id, "Alice", $"alice{id}@example.com", team, rating);

@@ -1,6 +1,6 @@
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueHashIndex<TKey>
+public class NonUniqueHashIndex<TKey> : INonUniqueHash<TKey>
     where TKey : notnull {
     private readonly Dictionary<TKey, List<int>> hashMap = new Dictionary<TKey, List<int>>();
 
@@ -23,7 +23,7 @@ public class NonUniqueHashIndex<TKey>
         if (offsets.Count == 0) hashMap.Remove(key);
     }
 
-    public List<int> GetOffsets(TKey key) {
+    public ICollection<int> GetOffsets(TKey key) {
         return hashMap.TryGetValue(key, out var offsets) ? offsets : [];
     }
 }

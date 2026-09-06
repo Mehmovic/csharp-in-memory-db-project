@@ -1,6 +1,6 @@
 namespace RhinoDB.Lib.Indexing;
 
-public class HashIndex<TKey>
+public class HashIndex<TKey> : IUniqueIndex<TKey>
     where TKey : notnull {
     private readonly Dictionary<TKey, int> hashMap = new Dictionary<TKey, int>();
 
@@ -19,4 +19,6 @@ public class HashIndex<TKey>
     public void Delete(TKey key) {
         hashMap.Remove(key);
     }
+    
+    public ICollection<int> Range(TKey from, TKey to) => throw new NotSupportedException();
 }

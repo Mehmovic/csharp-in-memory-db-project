@@ -1,6 +1,6 @@
 namespace RhinoDB.Lib.Indexing;
 
-public class OrderedIndex<TKey>
+public class OrderedIndex<TKey> : IUniqueIndex<TKey>
     where TKey : notnull {
     private readonly SortedSet<(TKey Key, int Offset)> sortedSet =
         new SortedSet<(TKey Key, int Offset)>(
@@ -23,7 +23,7 @@ public class OrderedIndex<TKey>
         sortedSet.Remove((key, 0));
     }
 
-    public List<int> Range(TKey from, TKey to) {
+    public ICollection<int> Range(TKey from, TKey to) {
         if (Comparer<TKey>.Default.Compare(from, to) > 0) return [];
 
         var offsets = new List<int>();

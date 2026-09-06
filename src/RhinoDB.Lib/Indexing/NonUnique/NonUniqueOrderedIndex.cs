@@ -1,6 +1,6 @@
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueOrderedIndex<TKey>
+public class NonUniqueOrderedIndex<TKey> : INonUniqueHash<TKey>
     where TKey : notnull {
     private readonly SortedSet<(TKey Key, int Offset)> sortedSet = new SortedSet<(TKey Key, int Offset)>(
         Comparer<(TKey Key, int Offset)>.Create((a, b) => {
@@ -18,7 +18,7 @@ public class NonUniqueOrderedIndex<TKey>
         sortedSet.Remove((key, offset));
     }
 
-    public List<int> GetOffsets(TKey key) => Range(key, key);
+    public ICollection<int> GetOffsets(TKey key) => Range(key, key);
 
     public List<int> Range(TKey from, TKey to) {
         if (Comparer<TKey>.Default.Compare(from, to) > 0) return [];
