@@ -1,9 +1,18 @@
+using RhinoDB.Lib.Cold;
+
 namespace RhinoDB.Lib.Execution;
 
 public class DbContext {
     private readonly DbExecutionLoop executionLoop;
 
+    internal ColdStore? Cold { get; }
+
     public DbContext() {
+        executionLoop = new DbExecutionLoop(this);
+    }
+
+    public DbContext(ColdStore cold) {
+        Cold = cold;
         executionLoop = new DbExecutionLoop(this);
     }
 

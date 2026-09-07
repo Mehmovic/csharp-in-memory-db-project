@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using RhinoDB.Native.Interop;
 
 namespace RhinoDB.Native;
@@ -29,7 +30,10 @@ public sealed class MdbxEnvironment : IDisposable {
         return rc;
     }
 
-    static public string StrError(int code) => MdbxNative.mdbx_strerror(code);
+    static public string StrError(int code) {
+        var ptr = MdbxNative.mdbx_strerror(code);
+        return ptr == 0 ? "" : Marshal.PtrToStringUTF8(ptr) ?? "";
+    }
 
     public void Dispose() {
         if (disposed) return;

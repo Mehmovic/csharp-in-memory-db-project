@@ -8,7 +8,12 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\RhinoDB.Core\RhinoDB.Core.csproj" />
+        <PackageReference Include="MemoryPack" Version="1.21.4"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\RhinoDB.Core\RhinoDB.Core.csproj"/>
+        <ProjectReference Include="..\RhinoDB.Native\RhinoDB.Native.csproj"/>
     </ItemGroup>
 
 </Project>

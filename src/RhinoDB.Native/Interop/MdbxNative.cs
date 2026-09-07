@@ -46,6 +46,6 @@ static internal partial class MdbxNative {
     [LibraryImport(LibraryName)]
     static public partial int mdbx_del(nint txn, uint dbi, in MdbxVal key, nint data);
 
-    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
-    static public partial string mdbx_strerror(int errnum);
+    [LibraryImport(LibraryName)]
+    static public partial nint mdbx_strerror(int errnum);
 }
