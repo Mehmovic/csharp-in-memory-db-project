@@ -1,9 +1,8 @@
 using RhinoDB.Core;
 using RhinoDB.Core.Exceptions;
 using RhinoDB.Lib.Indexing;
-using RhinoDB.Lib.Tables;
 
-namespace RhinoDB.Test.Lib.Tables;
+namespace RhinoDB.Lib.Tables.Test;
 
 public class SecondaryIndexTests {
     private readonly record struct Widget(int Id, string Sku);

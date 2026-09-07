@@ -1,7 +1,6 @@
 using RhinoDB.Core.Exceptions;
-using RhinoDB.Lib.Indexing;
 
-namespace RhinoDB.Test.Lib.Indexing;
+namespace RhinoDB.Lib.Indexing.Test;
 
 public class HashIndexTests {
     static private HashIndex<int> NewIndex() => new HashIndex<int>();

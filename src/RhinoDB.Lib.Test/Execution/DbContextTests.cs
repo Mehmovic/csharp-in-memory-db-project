@@ -1,7 +1,6 @@
 using RhinoDB.Core;
-using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Lib.Execution;
+namespace RhinoDB.Lib.Execution.Test;
 
 public class DbContextTests {
     private readonly record struct AddArgs(int Left, int Right);

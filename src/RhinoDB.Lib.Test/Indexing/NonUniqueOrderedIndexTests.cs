@@ -1,6 +1,4 @@
-using RhinoDB.Lib.Indexing;
-
-namespace RhinoDB.Test.Lib.Indexing;
+namespace RhinoDB.Lib.Indexing.Test;
 
 public class NonUniqueOrderedIndexTests {
     static private NonUniqueOrderedIndex<int> NewIndex() => new NonUniqueOrderedIndex<int>();

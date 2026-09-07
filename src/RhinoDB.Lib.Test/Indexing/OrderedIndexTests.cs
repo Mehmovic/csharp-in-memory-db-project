@@ -1,7 +1,6 @@
 using RhinoDB.Core.Exceptions;
-using RhinoDB.Lib.Indexing;
 
-namespace RhinoDB.Test.Lib.Indexing;
+namespace RhinoDB.Lib.Indexing.Test;
 
 public class OrderedIndexTests {
     static private OrderedIndex<int> NewIndex() => new OrderedIndex<int>();

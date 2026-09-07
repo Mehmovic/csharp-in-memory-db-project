@@ -1,7 +1,6 @@
 using RhinoDB.Core.Exceptions;
-using RhinoDB.Core;
 
-namespace RhinoDB.Test.Core.Results;
+namespace RhinoDB.Core.Results.Test;
 
 public class ResultOfTTests
 {

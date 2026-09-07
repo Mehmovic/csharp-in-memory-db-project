@@ -1,7 +1,4 @@
-using RhinoDB.Core.Exceptions;
-using RhinoDB.Lib.Indexing;
-
-namespace RhinoDB.Test.Lib.Indexing;
+namespace RhinoDB.Lib.Indexing.Test;
 
 // Composite keys aren't a distinct feature of any index type - they fall out of TKey
 // being generic and ValueTuple's built-in equality/comparison. These tests exist to

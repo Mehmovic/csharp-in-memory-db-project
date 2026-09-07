@@ -1,6 +1,4 @@
-using RhinoDB.Core;
-
-namespace RhinoDB.Test.Core.Options;
+namespace RhinoDB.Core.Options.Test;
 
 public class OptionOfTTests
 {

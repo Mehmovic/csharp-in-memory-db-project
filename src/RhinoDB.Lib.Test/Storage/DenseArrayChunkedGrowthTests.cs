@@ -1,6 +1,4 @@
-using RhinoDB.Lib.Storage;
-
-namespace RhinoDB.Test.Lib.Storage;
+namespace RhinoDB.Lib.Storage.Test;
 
 public class DenseArrayChunkedGrowthTests
 {

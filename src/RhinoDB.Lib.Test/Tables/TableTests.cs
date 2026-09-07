@@ -1,9 +1,8 @@
 using RhinoDB.Core.Exceptions;
 using RhinoDB.Lib.Indexing;
-using RhinoDB.Lib.Tables;
 using RhinoDB.Core;
 
-namespace RhinoDB.Test.Lib.Tables;
+namespace RhinoDB.Lib.Tables.Test;
 
 public class TableTests {
     // Widget exercises the same four index kinds PlayerTable does (unique primary,

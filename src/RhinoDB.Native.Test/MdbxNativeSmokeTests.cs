@@ -1,7 +1,6 @@
 using System.Text;
-using RhinoDB.Native;
 
-namespace RhinoDB.Test.Native;
+namespace RhinoDB.Native.Test;
 
 // Exercises the raw P/Invoke binding directly against the real native
 // library - this is what proves (or would have disproven) the MdbxVal field

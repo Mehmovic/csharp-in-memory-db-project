@@ -1,8 +1,7 @@
 using RhinoDB.Core;
 using RhinoDB.Core.Exceptions;
-using RhinoDB.Lib.Tables;
 
-namespace RhinoDB.Test.Lib.Tables;
+namespace RhinoDB.Lib.Tables.Test;
 
 public class PlayerTableTests {
     static private PlayerTable NewTable() => new PlayerTable(4);
