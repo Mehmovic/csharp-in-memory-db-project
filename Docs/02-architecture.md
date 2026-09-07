@@ -188,6 +188,37 @@ and `Evict` awaits it before removing the row. `Confirmed` commits never need
 tracking at all — their own await already provides a stronger guarantee before
 propagation even runs.
 
+**Secondary-index uniqueness is enforced only against whatever's currently
+loaded — the library does not, and today cannot, extend it into libmdbx.** A
+unique secondary index is an in-memory structure owned by the composed
+`Table`; libmdbx itself is a plain key→blob store keyed by primary key only,
+with no concept of a secondary index at all (see "Future, not yet scheduled"
+below — that's precisely the layer that doesn't exist yet). Any row that isn't
+currently loaded — evicted, never loaded since restart, or simply outside the
+eager-load set — sits outside every secondary index's enforcement scope while
+its durable copy remains intact in libmdbx. `Evict` is the sharpest case to get
+surprised by, because the row was enforced a moment earlier: evict a row held
+under a unique username index, then `Insert` a new row reusing that same
+username, and the in-memory check passes cleanly (the index has no memory of
+the evicted value) and writes through to libmdbx under a different primary
+key — libmdbx now durably holds two rows sharing a value the application
+believes is unique, and nothing in RhinoDB is aware anything went wrong. This
+is not a gap to close by having `Insert` probe cold storage first — the same
+reasoning that already rejected that shape for the primary-key case (no
+surprise disk read on every `Insert`) applies without exception to every
+secondary index. **The responsibility is entirely the caller's**: don't evict
+a row governed by a unique secondary index unless the value it held is
+independently guaranteed (application-level bookkeeping, or just never
+evicting those tables) not to be reintroduced later. Because cold storage is
+keyed purely by primary key, there is no way to check for this by secondary
+key before inserting, even for a caller who wants to — that only becomes
+possible once the relational layer over libmdbx below is built. The hazard's
+timing is sharper still under `Optimistic` writes: the colliding `Insert`'s
+caller sees success as soon as the in-memory check and enqueue complete, not
+after its libmdbx write is durable — so the write that actually corrupts cold
+storage can land asynchronously, arbitrarily later and outside the confirm
+pipeline of the operation that appeared to succeed.
+
 **Schema migration: no `ALTER TABLE`, because there's no catalog.** libmdbx is
 schema-blind — a key maps to an opaque blob, and the only place a schema exists
 at all is in RhinoDB's own serialization code. A migration can't be declarative;

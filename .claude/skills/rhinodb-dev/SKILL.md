@@ -76,6 +76,22 @@ are committed; a normal clone/build/test never invokes Zig.
   before assuming no plan exists) — it's the authoritative task breakdown for
   that stage, more detailed than the roadmap's one-paragraph summary.
 
+## Known, intentional gaps — don't "fix" these without asking
+
+- **Secondary-index uniqueness is in-memory-only; nothing enforces it against
+  libmdbx.** Cold storage is keyed purely by primary key — no secondary-index
+  KV pairs exist there (that's deferred future work, the "relational layer
+  over libmdbx"). Any row not currently loaded (evicted, or never reloaded
+  after restart) sits outside every unique secondary index's enforcement
+  scope while its durable copy stays intact; a later `Insert` reusing that
+  same "unique" value isn't caught by anything and silently produces a
+  durable duplicate. This is a deliberate consequence of already-made
+  decisions (no cold-storage probing on `Insert`/`Evict`), not a bug — a
+  caller must never evict a row governed by a unique secondary index unless
+  it can independently guarantee that value won't be reintroduced, since
+  there is currently no library-provided way to check cold storage by
+  secondary key at all. Full detail: `Docs/02-architecture.md` § Cold storage.
+
 ## Git commit style observed in this repo
 
 `[tag] short description`, lowercase tag, imperative-ish: `[add]`, `[refactor]`,
