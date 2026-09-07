@@ -23,6 +23,10 @@ can stream through, not a graph of scattered heap allocations linked by referenc
 - Composite keys (e.g. `(X, Y)`) work for free through `ValueTuple`'s structural
   equality/ordering — no special-cased composite-key machinery.
 
+This pattern has a name outside databases too — a *sparse set*, or *slot map* —
+used for exactly this dual-access reason (fast point lookup **and** fast full
+iteration from the same structure) wherever it shows up.
+
 The payoff: a full table scan, a range query, or a hot-path write touches
 contiguous memory and predictable index structures, not a pile of individually
 allocated objects the GC has to track.

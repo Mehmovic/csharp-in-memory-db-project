@@ -53,8 +53,12 @@ goal.
   execution model, storage engine, indexing, cold storage.
 - **[Roadmap](03-roadmap.md)** — the build order, current status, and what's next.
 
-The full, continuously-updated design (with pseudocode and worked examples) lives in
-a Claude artifact the project maintains alongside these docs:
-https://claude.ai/code/artifact/53c986ee-4e8b-48c9-8418-6ced821f58c5. These `Docs/`
-files are the stable, repo-local summary of that design — read them first for
-orientation, go to the artifact for implementation-level detail.
+These `Docs/` files are the authoritative, continuously-updated design — not a
+summary of something more detailed living elsewhere. Design work used to be
+drafted in a Claude artifact ("RhinoDB — Design Notes v0.2") before this repo's
+own docs existed; that artifact is now deprecated (2026-09-07) — its content has
+been folded into these files where still valid, and its transaction/execution
+pseudocode was superseded outright by the real `DbContext`/`DbExecutionLoop`
+implementation (Stage 4) and by [Architecture](02-architecture.md)'s own
+description of it. Don't re-fetch or cite the artifact going forward; treat
+these docs, plus the actual source under `src/`, as the complete picture.

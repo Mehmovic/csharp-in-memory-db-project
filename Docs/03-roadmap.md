@@ -107,7 +107,27 @@ Minimal direct HTTP/WebSocket host once the core engine and propagation are soli
 Not before — networking is explicitly deferred so early effort stays on the parts
 of the design that are actually novel and risky.
 
-## Stage 8+ — Soccer manager game
+## Stage 8 — View/Table-only client access, subscribe-and-diff ⏳ designed, not built
+
+Decided 2026-09-07, queued here rather than folded into Stage 5. Clients never
+fetch via an ad-hoc RPC query — the only client-facing read path is subscribing
+to a `View`/`Table`: one full snapshot on first subscribe, then only `Change<TKey,TRow>`
+diffs (Stage 6's shape) afterward. Same "single call point" discipline already
+used for writes (`DbContext.Run`) and for cold reads (`Peek`), applied to the
+client boundary — no code path that bypasses the diffing machinery, so the
+bandwidth win (heavy cost paid once at subscribe time, not on every read) is
+structural, not just a convention. A raw JSON/HTTP query API may come later, but
+as an additive transport over the same View snapshot/diff mechanism, not a
+redesign of it.
+
+Needs Stage 6 (the diff shape itself) and Stage 7 (a transport to push over) to
+exist first — mechanically this stage is "who's allowed to read, and how" layered
+on top of both, not new storage or propagation machinery of its own. Also needs a
+subscription-matching/fan-out engine (routing each committed change to the
+subscriptions that care about it) and a reconnect/catch-up story for a client
+that missed diffs while disconnected — real scope, not a thin wrapper.
+
+## Stage 9+ — Soccer manager game
 
 The actual application. Persistent tables for clubs/finances/contracts/standings/
 transfer history, instant tables for live match tick state, transfer transactions,
@@ -119,7 +139,22 @@ Tracked deliberately as *not yet* rather than *never*, so they don't get lost an
 don't get built before they're needed:
 
 - **B+tree replacement for `OrderedIndex`** — only if a specific table's measured
-  profile proves `SortedSet` insufficient.
+  profile proves `SortedSet` insufficient. `SortedSet`/`SortedDictionary` are
+  red-black trees — correct, O(log n), but one key per heap-scattered node, so a
+  range scan is real pointer-chasing. The concrete upgrade target, if this is ever
+  triggered: not a plain B+tree (values-in-leaves-only, the textbook baseline —
+  what libmdbx itself uses, right for *disk* pages) but a cache-sensitive variant
+  suited to this being an in-memory, single-writer, read-optimized-range-scan
+  structure — a CSB+-tree (children stored contiguously instead of one pointer
+  each, more keys per cache line) with FAST's technique (SIMD compare against
+  several keys at once per node, via `System.Runtime.Intrinsics`, node width sized
+  to the target register's element count) grafted onto CSB+-tree's ordinary
+  incrementally-mutable node layout rather than FAST's own bulk-load assumption.
+- **Generation counter on `DenseArray` slots** — only if row references are ever
+  cached across calls instead of always being re-looked-up by key. Would catch a
+  stale handle pointing at a since-reused slot (after a swap-remove) rather than
+  silently reading the wrong row. Not needed today since nothing caches a
+  reference past a single lookup.
 - **Spatial index** (quad-tree/R-tree/geohash) — only if a real bounding-box/
   proximity query need shows up that composite-key `Range` can't serve.
 - **`ArrayPool<T>` pooling** — identified good fits are libmdbx commit
