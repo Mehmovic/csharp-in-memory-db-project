@@ -17,8 +17,8 @@ public class MemoryPackRoundTripTests {
     public void Serialize_ThenDeserialize_ProducesAnEqualValue() {
         var account = new Account(1, "alice@example.com", 250.75m);
 
-        byte[] bytes = MemoryPackSerializer.Serialize(account);
-        Account roundTripped = MemoryPackSerializer.Deserialize<Account>(bytes);
+        var bytes = MemoryPackSerializer.Serialize(account);
+        var roundTripped = MemoryPackSerializer.Deserialize<Account>(bytes);
 
         Assert.That(roundTripped, Is.EqualTo(account));
     }
@@ -28,8 +28,8 @@ public class MemoryPackRoundTripTests {
         var a = new Account(1, "alice@example.com", 250.75m);
         var b = new Account(2, "bob@example.com", 10m);
 
-        byte[] bytesA = MemoryPackSerializer.Serialize(a);
-        byte[] bytesB = MemoryPackSerializer.Serialize(b);
+        var bytesA = MemoryPackSerializer.Serialize(a);
+        var bytesB = MemoryPackSerializer.Serialize(b);
 
         Assert.That(bytesA, Is.Not.EqualTo(bytesB));
     }
@@ -41,8 +41,8 @@ public class MemoryPackRoundTripTests {
         // riding along that would make two serializations of an identical value diverge.
         var account = new Account(1, "alice@example.com", 250.75m);
 
-        byte[] first = MemoryPackSerializer.Serialize(account);
-        byte[] second = MemoryPackSerializer.Serialize(account);
+        var first = MemoryPackSerializer.Serialize(account);
+        var second = MemoryPackSerializer.Serialize(account);
 
         Assert.That(first, Is.EqualTo(second));
     }
@@ -54,8 +54,8 @@ public class MemoryPackRoundTripTests {
         var shortOwner = new Account(1, "a", 0m);
         var longOwner = new Account(1, new string('a', 200), 0m);
 
-        byte[] shortBytes = MemoryPackSerializer.Serialize(shortOwner);
-        byte[] longBytes = MemoryPackSerializer.Serialize(longOwner);
+        var shortBytes = MemoryPackSerializer.Serialize(shortOwner);
+        var longBytes = MemoryPackSerializer.Serialize(longOwner);
 
         Assert.That(longBytes.Length, Is.GreaterThan(shortBytes.Length + 190));
     }
@@ -65,8 +65,8 @@ public class MemoryPackRoundTripTests {
         var original = new Account(1, "alice@example.com", 250.75m);
         var other = new Account(1, "alice@example.com", 250.76m);
 
-        byte[] bytes = MemoryPackSerializer.Serialize(other);
-        Account roundTripped = MemoryPackSerializer.Deserialize<Account>(bytes);
+        var bytes = MemoryPackSerializer.Serialize(other);
+        var roundTripped = MemoryPackSerializer.Deserialize<Account>(bytes);
 
         Assert.That(roundTripped, Is.Not.EqualTo(original));
     }

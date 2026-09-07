@@ -141,7 +141,7 @@ public class OptionOfTTests
     [Test]
     public void NonGenericOptionSome_InfersTheTypeArgumentFromTheValue()
     {
-        Option<int> option = Option.Some(42);
+        var option = Option.Some(42);
 
         Assert.That(option.IsSome(), Is.True);
         Assert.That(option.Get(), Is.EqualTo(42));
