@@ -188,6 +188,45 @@ and `Evict` awaits it before removing the row. `Confirmed` commits never need
 tracking at all — their own await already provides a stronger guarantee before
 propagation even runs.
 
+**Confirmed commit batching: mostly already free, the remaining knob is
+deliberately deferred, not undesigned.** The async-durability-sync design
+above (`ColdStore.EndScope`'s `pendingSync` chaining) already gives `Confirmed`
+writes an *opportunistic* form of group commit, not just a way to keep the
+writer thread unblocked: `EndScope` chains onto whatever sync is already in
+flight rather than firing an independent one, and a sync that runs after a
+given commit necessarily covers it — so under concurrent `Confirmed` load,
+several callers' commits can end up resolved by the very same
+`mdbx_env_sync_ex` call, for free, with no explicit batching code. Under
+low/serial load (each `Confirmed` call arriving with idle time before the
+next), this property does nothing — every call still pays its own dedicated
+fsync, since there's never anything in flight to chain onto.
+
+Closing that gap needs a genuinely new decision, not implied by anything
+already built: a **bounded commit-coalescing window** — after a commit
+succeeds, wait a small, configurable delay (on the order of 0-2ms) before
+actually firing `mdbx_env_sync_ex`, giving other `Confirmed` calls that arrive
+in that window a chance to pile onto the same `pendingSync` and share its
+cost — the same idea as Postgres's `commit_delay`/`commit_siblings`. This is
+deliberately two separate, orthogonal knobs, not one: **txn granularity** (one
+write txn per `Run` call, decided, staying that way — bundling unrelated
+operations into one txn would couple their atomicity, so a later operation's
+failure could roll back an earlier, already-succeeded one nobody asked to
+link) versus **sync granularity** (currently opportunistic-only; the
+coalescing window is the deliberate lever on top of it). The window's
+*existence* as a mechanism is worth deciding now, since it's genuinely hard to
+retrofit once application code has been written assuming today's latency
+profile; its *default value* stays deferred to
+[Roadmap Part H](03-roadmap.md)'s benchmark — same "don't tune blind" posture
+used elsewhere in this design — because guessing a number now without a
+measured fsync-latency/throughput curve for the actual target hardware would
+be worse than not having the knob at all. Why this is safe to defer without
+boxing anything in: the entire mechanism is already isolated to one place,
+`ColdStore.EndScope`'s sync-firing branch — adding the delay touches nothing
+in `DbExecutionLoop`, `PersistentTable`, or any already-shipped
+`Insert`/`Update`/`Delete`/`Load`/`Evict`/`Peek` code, the same containment
+that already let the original async-sync addendum land without perturbing
+anything built before it.
+
 **Secondary-index uniqueness is enforced only against whatever's currently
 loaded — the library does not, and today cannot, extend it into libmdbx.** A
 unique secondary index is an in-memory structure owned by the composed
@@ -250,6 +289,63 @@ array offset → `DenseArray`), so no new index *concept* is needed when this ge
 built — just cursor support in the native binding and an order-preserving key
 encoding. Deliberately deferred: nothing durable exists yet to backfill an index
 over.
+
+## Restart & recovery
+
+**Recovery is "reopen the environment," not "replay a log."** libmdbx's own
+copy-on-write commit model (see Cold storage above) already guarantees cold
+storage reflects some prior, fully-committed state after any crash — RhinoDB
+doesn't layer a second recovery mechanism on top of it. In-memory state is
+never itself persisted (no memory-mapped heap, no snapshot file) — a crash
+simply discards it, and a fresh process starts every `Table` completely
+empty, the same as a brand-new database would. There is nothing to "recover"
+in memory, only cold storage to reopen and, deliberately, *not* bulk-load
+from.
+
+**The `OnStart` hook is how a table gets anything back into memory before
+traffic arrives, and it runs through the ordinary execution path, not a
+special pre-loop step.** Concretely: `OnStart` is scheduled as the first
+operation submitted to a `DbContext`'s `Run` pipeline, and hosting code awaits
+its completion before accepting external requests — reusing the existing
+single-writer serialization (no new concurrency primitive) to guarantee
+whatever it loads is visible before anything else runs, for free. What it
+loads is entirely application-specific (the roadmap's soccer-manager target
+might warm "clubs with an active session," a chat server might warm nothing
+at all) — the engine's job is only to provide the primitive (`Load`) and the
+guaranteed-first hook point, not to guess what's worth pre-warming for an
+application it doesn't know about.
+
+**Restart is the routine, whole-table version of the eviction hazard already
+documented above, not a new one.** A unique secondary index only enforces
+against currently-loaded rows; after *any* restart, every row outside the
+eager-load set is in exactly the state a deliberately-`Evict`ed row is in —
+unenforced, until reloaded. Where `Evict` is a deliberate, presumably rare
+application action, a restart is routine (every deploy, every crash) and
+typically unloads *most* of the table at once, not one row — the same
+insert-a-colliding-value corruption already described for `Evict` is not a
+one-off edge case here, it's the default post-restart state for anything not
+in the eager-load set. **Concrete rule, not just a caution**: a `persistent`
+table carrying a unique secondary index that must actually hold should eager-
+load its *entire* contents in `OnStart`, not a partial set — partial or no
+eager-load is only safe for tables with no unique secondary index (where a
+stale value can be wrong to read but can't corrupt a uniqueness guarantee) or
+where an application has independently verified staleness there is
+acceptable. This isn't a new mechanism to build — `Load` already exists — it's
+a stated requirement on how `OnStart` is used per table, worth a comment at
+the `[GenerateTable]` declaration site once that exists, not just here.
+
+**`Optimistic` writes have a real, bounded data-loss window across a crash —
+name it plainly rather than leaving it implied.** An `Optimistic` `Run` call
+returns success as soon as its in-memory mutation completes; the libmdbx sync
+is fired and forgotten. If the process crashes before that sync completes,
+the mutation is gone from cold storage even though the original caller
+already observed success and may have already acted on it (sent a network
+response, updated a UI). This is the accepted, intentional cost of
+`Optimistic` — the whole reason it exists is to not pay for that wait — but it
+should be a named, understood property when choosing `Optimistic` vs.
+`Confirmed` per call, not a surprise discovered during an incident: a
+tick-position update losing at most one in-flight write on a crash is fine;
+"player spent 500 gold" is not, and belongs on `Confirmed`.
 
 ## Change propagation (designed, not yet built)
 
