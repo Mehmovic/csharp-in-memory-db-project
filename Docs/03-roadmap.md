@@ -92,11 +92,14 @@ batched schema migration — versioning tracked as generated code, not runtime t
 
 ## Stage 6 — Change propagation ⏳ designed, not built
 
-Build from the start using the generic, non-boxing `Change<TKey,TRow>` shape and
-typed op buffers — **not** the `object`/`Action`-typed placeholder that was
-sketched and rejected in design review on 2026-09-01. Even before the generator
-exists to emit these types, the hand-written version should already be in the
-target shape, not a shortcut to be revisited later.
+The generic, non-boxing `Change<TKey,TRow>` shape and per-table typed `Ops`
+buffers this stage was always meant to use — **not** the `object`/`Action`-typed
+placeholder sketched and rejected in design review on 2026-09-01 — are no
+longer something this stage needs to build. They already exist and are real,
+built for the table generator's transaction/batch-apply system (see
+[Architecture — Transactions](02-architecture.md#transactions)). Stage 6's job
+shrinks to delivery/fan-out on top of what's already there, not inventing the
+shape itself.
 
 Per-table delivery-guarantee declaration (`Reliable` vs. lossy), per-connection
 sender loop with opportunistic last-write-per-key merge.

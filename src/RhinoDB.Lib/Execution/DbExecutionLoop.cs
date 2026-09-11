@@ -82,6 +82,52 @@ internal sealed class DbExecutionLoop {
         return tcs.Task;
     }
 
+    public Task<Result> Enqueue<TTx>(Func<DbContext, TTx, Result> operation, PropagationMode mode) where TTx : ITransaction {
+        var tcs = new TaskCompletionSource<Result>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pushed = channel.Writer.TryWrite(() => {
+                context.Cold?.BeginScope();
+                Result result;
+                try {
+                    ITransaction tx = context.CreateTransaction()!;
+                    result = operation.Invoke(context, (TTx)tx);
+                    if (result.IsOk()) {
+                        Result applyResult = tx.Apply();
+                        if (applyResult.IsError()) result = applyResult;
+                    }
+                }
+                catch (Exception ex) { result = Result.Error(ex); }
+
+                Complete(tcs, result, context.Cold?.EndScope(commit: result.IsOk(), forceSync: mode == PropagationMode.Confirmed));
+            }
+        );
+
+        if (!pushed) tcs.SetResult(Result.Error(DbError.ProcedureCreationFailed()));
+        return tcs.Task;
+    }
+
+    public Task<Result<T>> Enqueue<T, TTx>(Func<DbContext, TTx, Result<T>> operation, PropagationMode mode) where TTx : ITransaction {
+        var tcs = new TaskCompletionSource<Result<T>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pushed = channel.Writer.TryWrite(() => {
+                context.Cold?.BeginScope();
+                Result<T> result;
+                try {
+                    ITransaction tx = context.CreateTransaction()!;
+                    result = operation.Invoke(context, (TTx)tx);
+                    if (result.IsOk()) {
+                        Result applyResult = tx.Apply();
+                        if (applyResult.IsError()) result = applyResult;
+                    }
+                }
+                catch (Exception ex) { result = Result<T>.Error(ex); }
+
+                Complete(tcs, result, context.Cold?.EndScope(commit: result.IsOk(), forceSync: mode == PropagationMode.Confirmed));
+            }
+        );
+
+        if (!pushed) tcs.SetResult(Result<T>.Error(DbError.ProcedureCreationFailed()));
+        return tcs.Task;
+    }
+
     private async Task RunLoop() {
         await foreach (Action action in channel.Reader.ReadAllAsync()) {
             action.Invoke();

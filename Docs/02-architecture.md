@@ -80,6 +80,104 @@ through the async change-propagation channel below, never a shared lock. One
 database is one actor; more scale means more databases, not more concurrency
 inside one.
 
+## Transactions
+
+**Status: Milestone 1 of the table generator is real (a single `Instant`-kind
+table, primary key only) — secondary indexes, `Persistent`-kind tables, and
+real cross-table validation are designed here but not yet built.** This
+section describes the target shape; where something is still a stub, it says
+so explicitly.
+
+Every `[GenerateTable]`-attributed row type gets a generated per-table `Ops`
+class; every `[Database]`-attributed `DbContext` subclass gets a generated
+`Transaction` aggregating one `Ops` field per table. **Tables never write
+directly — only read is direct.** An operation's `Insert`/`Update`/`Delete`
+calls only ever *stage* a `Change<TKey,TRow>` into that table's `Ops`
+(a plain `readonly struct` sitting inline in a `List<Change<TKey,TRow>>` —
+zero allocation per staged change); nothing touches real storage until the
+whole operation has already returned success, at which point `Transaction
+.Apply()` replays every touched table's staged changes in order, inside the
+same ambient write-txn machinery cold storage already uses (see Cold storage
+below — unchanged by any of this).
+
+**Reads stay direct, and see the same operation's own not-yet-applied
+writes.** An `Ops.Get` scans its own staged changes most-recent-first before
+falling through to the real `Table`/`PersistentTable` — a `Delete` entry
+means "not found," an `Insert`/`Update` entry returns that staged row
+directly. This is why a staged `Change`'s key has to be final the moment it's
+staged, not resolved later at apply time (see `AutoIncrement` below) — the
+overlay has no way to tell two zero-keyed inserts apart within one operation
+otherwise.
+
+**Two-phase apply gives free atomicity, no rollback machinery.** `Transaction
+.Apply()` checks every dirty table's `Validate()` first — nothing mutates
+during this pass — before calling any table's `Apply()`. A validation
+failure on the *second* table therefore never leaves the *first* table's
+already-staged insert applied, which fixes, for free, the multi-table
+partial-apply limitation flagged and deferred earlier in this doc's original
+`PersistentTable` design. **Currently a stub**: `Validate()` always returns
+`true` — Milestone 1 only proved the staging/overlay/apply-on-success
+mechanism itself; real pre-apply validation (duplicate key, unique-secondary-
+index conflicts, primary-key immutability — checked across every staged
+change before mutating any of them) is the next slice.
+
+**Dirty flags, not a registry.** Each `Ops` class tracks its own `bool
+Dirty` (set the moment anything is actually staged — not on a no-op call,
+e.g. deleting a key that doesn't exist), and a `Transaction`'s apply logic is
+a flat, generator-emitted sequence of `if (table.Dirty) ...` checks — no
+dynamic "which tables were touched this call" lookup. A table nothing was
+staged against pays one boolean check and nothing else, regardless of how
+many tables the database has.
+
+**No stored key-selector delegates anywhere generated.** `Table<TKey,TRow>`
+itself still takes a `Func<TRow,TKey> selector` (a hand-written, pre-codegen
+type, unchanged by any of this) — but the generator never stores one of its
+own. Every generated `Ops.Insert` reads the row's primary-key field directly
+(`row.Id`, not `selector(row)`), known statically at compile time — a source
+generator, unlike a hand-written generic helper, has no runtime type it
+doesn't already know at the point it emits code.
+
+**`AutoIncrement`** — an independent attribute (`[AutoIncrement]`), usually
+paired with `[PrimaryKey]` but not required to be. On `Insert`, a zero-valued
+tagged field is replaced with the next value from an `AutoIncrementCounter`
+*before* staging, via a record-struct `with` expression (every generated
+table already assumes `readonly partial record struct`, so this is free).
+Assignment happens at stage time, not apply time, for the same overlay
+reason above: deferring it would mean two same-operation zero-keyed inserts
+both read as key `0` until apply, colliding in the read-your-own-writes scan.
+The counter itself lives on the generated database class next to the
+table's `Table` field, *not* on the per-operation `Ops` instance — it has to
+survive across every `CreateTransaction()` call, not reset each operation.
+A value consumed by an operation that later fails and gets discarded is not
+reused; gaps are expected and accepted, the same property every real auto-
+increment/identity/sequence implementation has (Postgres `SERIAL`, MySQL
+`AUTO_INCREMENT` included) — closing that gap would mean serializing every
+insert behind a lock held until the whole operation commits, for a guarantee
+nothing here needs. **Not yet handled**: `Persistent`-kind tables, where the
+counter needs seeding from durable state on restart, or it could reissue an
+ID already used by a row that exists cold-only but isn't in the eager-load
+set — the same restart hazard already documented under Restart & recovery
+below for unique secondary indexes, now extended to auto-incremented primary
+keys. `TableGenerator` already skips `Persistent` kind entirely for now, so
+this inherits that same scope boundary rather than needing its own.
+
+**Performance discipline, elaborated from [Performance
+Principles](01-performance-principles.md):** reading a staged change back —
+the overlay scan in `Get`, the replay in `Apply` — binds `ref readonly var c
+= ref span[i]` via `CollectionsMarshal.AsSpan(changes)` inside a plain
+indexed `for` loop, not `changes[i]` repeated per field accessed and not a
+`foreach` copy — a `Change` carries a full row plus a key, and a `List<T>`
+indexer returns by value for a struct element type. One real, environment-
+specific gotcha worth recording since it cost real debugging time: `foreach
+(ref readonly var c in span)` — the *foreach* form specifically, not the
+indexed form — triggered a `CS8652 ref struct interfaces ... Preview`
+compiler error against this project's pinned Roslyn version, regardless of
+target `LanguageVersion` (`Latest`, `CSharp13`, and `CSharp12` all hit it
+identically, ruling out a version-resolution explanation). The indexed
+`for` + explicit `ref readonly` rebinding form compiles and runs cleanly
+and produces the identical zero-copy result, so it's the form every
+generated apply/overlay loop uses — worth trying first if this resurfaces.
+
 ## Storage engine (in-memory)
 
 See [Performance Principles §1](01-performance-principles.md#1-data-oriented-not-object-oriented)

@@ -38,7 +38,18 @@ stop — it means every struct key or row gets heap-allocated just to be looked 
 Every index type, every storage type, is generic over the real key/row type, all
 the way down. This was violated once, in an early sketch of the transaction
 pipeline (`Change.Key`/`Value` typed `object`) — caught in review and corrected to
-a generic `Change<TKey,TRow>` before being built. See [[Architecture — Transactions]].
+a generic `Change<TKey,TRow>` before being built. See
+[Architecture — Transactions](02-architecture.md#transactions).
+
+The same discipline applies to *reading* a `Change` back, not just storing one:
+a `List<Change<TKey,TRow>>` indexer returns a struct element by value, so
+`changes[i]` repeated per field examined (or a plain `foreach`) silently copies
+the whole row on every access. The generated table code binds `ref readonly var
+c = ref span[i]` via `CollectionsMarshal.AsSpan(changes)` instead — one binding,
+zero copies, whether it's the read-your-own-writes overlay scan or the apply-time
+replay. See Architecture — Transactions for the one real compiler gotcha this
+surfaced (a `foreach (ref readonly ...)` form that doesn't compile in this
+project's pinned Roslyn version, where the equivalent indexed `for` loop does).
 
 ## 3. No closures on the hot path
 
@@ -52,11 +63,18 @@ after its first use and costs nothing per call, so "avoid closures" does not mea
 Two places this bit us, both caught in design review rather than after being built:
 
 - The transaction pipeline's original `BufferedOps` was `List<(TableId, Action)>` —
-  an `Action` closure allocated per buffered operation. Fix: per-table typed op
-  buffers instead of `Action`.
-- `Update`'s user-facing shape (`u => u with { X = x }`) both copies the row *and*
-  allocates a capturing closure. Fix: a by-ref mutator delegate shape instead of
-  `with`-expressions, so the common case is a `static` non-capturing lambda.
+  an `Action` closure allocated per buffered operation. Fix, now built exactly
+  this way: per-table typed `Ops` buffers instead of `Action` (see
+  [Architecture — Transactions](02-architecture.md#transactions)).
+- An early sketch had `Update`'s user-facing shape as `u => u with { X = x }` —
+  copies the row *and* allocates a capturing closure. What actually shipped is
+  simpler than either that or the mutator-delegate fix once floated as an
+  alternative: `Update(TKey id, TRow newRow)` takes the complete replacement row
+  directly, no delegate parameter of any kind. Whatever the caller does to build
+  `newRow` (a `with`-expression against an already-loaded row is the common case)
+  is the caller's own cost, off the generated API surface entirely — there was
+  never a closure to eliminate from the call itself once the shape stopped
+  routing through a delegate at all.
 
 ## 4. No LINQ on the hot path
 
@@ -79,13 +97,17 @@ This is the intended shape for *all* of it, not just index maintenance:
 
 - **Index maintenance** — the generator knows at compile time which index depends
   on which field(s), so `Update` only touches the indexes whose backing field
-  actually changed, instead of blindly re-registering everywhere.
-- **Per-table accessors** — `context.Db.Position.ByTeam.Get(...)` is a generated
-  `readonly` field wrapping a real, non-generic index reference, constructed once,
-  not a property recomputed per access.
-- **Transaction change types** — the generator emits `Change<TKey,TRow>` and typed
-  op buffers per concrete table, so the ergonomic call site (`tx.Persistent.X.Update(...)`)
-  never has to touch `object` or a hand-written `Action` closure underneath.
+  actually changed, instead of blindly re-registering everywhere. **Not yet
+  built** — the first generated slice always re-registers, matching
+  `Table<TKey,TRow>`'s own unconditional behavior; deferred until profiling
+  shows it matters, not assumed to matter up front.
+- **Per-table accessors** — a generated `Ops` class (`WidgetOps`, `ClubOps`, ...)
+  wraps a real, non-generic `Table<TKey,TRow>`/`PersistentTable<TKey,TRow>`
+  reference, constructed once per database, not recomputed per access.
+- **Transaction change types** — the generator emits one `Ops` class per table and
+  one `Transaction` class per database, both built on the shared, generic
+  `Change<TKey,TRow>`, so the call site (`tx.Widgets.Update(...)`) never has to
+  touch `object` or a hand-written `Action` closure underneath.
 
 Reflection is rejected outright, everywhere, for the same underlying reason: it's
 slow and its cost is invisible at the call site. Plain generics

@@ -1,0 +1,118 @@
+using RhinoDB.Core;
+using RhinoDB.Lib.Execution;
+
+namespace RhinoDB.Test.Generators;
+
+// Milestone 1 [CHECK IN]: the smallest possible vertical slice through the
+// entire pipeline - one Instant-kind table, primary key only, no secondary
+// indexes - proving attribute parsing, TableModel/DatabaseModel resolution,
+// generated Ops/Transaction/DbContext-partial emission, and the new
+// DbExecutionLoop tx-threading all work together end to end via a real
+// ctx.Run call.
+public class Milestone1Tests {
+    private const string Source = """
+        using RhinoDB.Core.Tables;
+        using RhinoDB.Lib.Execution;
+
+        namespace TestNs;
+
+        [Database]
+        public partial class WidgetDb : DbContext { }
+
+        [GenerateTable(TableKind.Instant, typeof(WidgetDb))]
+        public readonly partial record struct Widget([PrimaryKey] int Id, string Name, int Stock);
+        """;
+
+    static private (object Db, Type TxType, System.Reflection.Assembly Assembly) NewDb() {
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
+        var dbType = asm.GetType("TestNs.WidgetDb")!;
+        var txType = asm.GetType("TestNs.WidgetDbTransaction")!;
+        var db = Activator.CreateInstance(dbType)!;
+        return (db, txType, asm);
+    }
+
+    static private object NewWidget(System.Reflection.Assembly assembly, int id, string name, int stock) {
+        var widgetType = assembly.GetType("TestNs.Widget")!;
+        return Activator.CreateInstance(widgetType, id, name, stock)!;
+    }
+
+    [Test]
+    public async Task Insert_ThenGet_ReturnsTheInsertedRow() {
+        var (db, txType, asm) = NewDb();
+        var widget = NewWidget(asm, 1, "Ada", 10);
+
+        var insertResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Insert((dynamic)widget); return Result.Ok(); }, PropagationMode.Optimistic);
+        Assert.That(insertResult.IsOk(), Is.True);
+
+        var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic got = ((dynamic)tx).Widgets.Get(1);
+                return got.IsOk() ? Result.Ok() : Result.Error((DbError)got.GetError());
+            }, PropagationMode.Optimistic);
+        Assert.That(getResult.IsOk(), Is.True);
+    }
+
+    [Test]
+    public async Task Update_ThenGet_ReturnsTheUpdatedRow() {
+        var (db, txType, asm) = NewDb();
+        var original = NewWidget(asm, 1, "Ada", 10);
+        var updated = NewWidget(asm, 1, "Ada", 42);
+
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Insert((dynamic)original); return Result.Ok(); }, PropagationMode.Optimistic);
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Update(1, (dynamic)updated); return Result.Ok(); }, PropagationMode.Optimistic);
+
+        int stock = -1;
+        var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic got = ((dynamic)tx).Widgets.Get(1);
+                stock = (int)got.Unwrap().Stock;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(getResult.IsOk(), Is.True);
+        Assert.That(stock, Is.EqualTo(42));
+    }
+
+    [Test]
+    public async Task Delete_ThenGet_ReportsNotFound() {
+        var (db, txType, asm) = NewDb();
+        var widget = NewWidget(asm, 1, "Ada", 10);
+
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Insert((dynamic)widget); return Result.Ok(); }, PropagationMode.Optimistic);
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Delete(1); return Result.Ok(); }, PropagationMode.Optimistic);
+
+        var foundAfterDelete = true;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic got = ((dynamic)tx).Widgets.Get(1);
+                foundAfterDelete = got.IsOk();
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(foundAfterDelete, Is.False);
+    }
+
+    [Test]
+    public async Task InsertThenGet_WithinTheSameOperation_SeesTheStagedRow() {
+        // Read-your-own-writes: a Get inside the same operation as a not-yet-
+        // applied Insert must see it via the staged-changes overlay.
+        var (db, txType, asm) = NewDb();
+        var widget = NewWidget(asm, 1, "Ada", 10);
+
+        var foundWithinSameOperation = false;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                dtx.Widgets.Insert((dynamic)widget);
+                foundWithinSameOperation = dtx.Widgets.Get(1).IsOk();
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(foundWithinSameOperation, Is.True);
+    }
+}

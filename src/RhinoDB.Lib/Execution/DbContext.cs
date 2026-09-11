@@ -32,6 +32,16 @@ public class DbContext {
         return executionLoop.Enqueue(func, args, mode);
     }
 
+    protected internal virtual ITransaction? CreateTransaction() => null;
+
+    public Task<Result> Run<TTx>(Func<DbContext, TTx, Result> func, PropagationMode mode = PropagationMode.Optimistic) where TTx : ITransaction {
+        return executionLoop.Enqueue(func, mode);
+    }
+
+    public Task<Result<T>> Run<T, TTx>(Func<DbContext, TTx, Result<T>> func, PropagationMode mode = PropagationMode.Optimistic) where TTx : ITransaction {
+        return executionLoop.Enqueue(func, mode);
+    }
+
     public Task<Result> RunConfirmed(Func<DbContext, Result> func)
         => Run(func, PropagationMode.Confirmed);
 
