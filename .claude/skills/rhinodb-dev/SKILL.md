@@ -21,13 +21,12 @@ Full detail: memory `feedback-rhinodb-collaboration-style`.
 
 ## Build & test
 
-**Pinned to .NET 11 RC1 (`global.json`, 2026-09-11)** — installed user-locally
-to `%LocalAppData%\Microsoft\dotnet` (`-NoPath`, deliberately not touching the
-machine-wide `C:\Program Files\dotnet` install used by the 8/9/10 SDKs also on
-this machine). `global.json` alone won't make a bare `dotnet` command on PATH
-find it — either prepend that directory for the session
-(`PATH="/c/Users/<you>/AppData/Local/Microsoft/dotnet:$PATH"` in Git Bash, or
-the PowerShell equivalent) or invoke `dotnet.exe` there directly.
+**Pinned to .NET 11 RC1 (`global.json`, 2026-09-11)** — installed into
+`C:\Program Files\dotnet`, coexisting with the 8/9/10 SDKs already there. A
+bare `dotnet` command in this repo resolves to RC1 automatically via
+`global.json`; no PATH tricks needed. (A user-local copy also exists under
+`%LocalAppData%\Microsoft\dotnet` from verifying this before the global
+install landed — redundant now, harmless to leave or remove.)
 
 ```
 dotnet build                          # whole solution

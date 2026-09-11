@@ -8,6 +8,8 @@ public sealed class ColdStore : IDisposable {
     private const uint ReadOnlyTxn = 0x20000; // MDBX_RDONLY / MDBX_TXN_RDONLY
     private const ushort DefaultUnixMode = 0b110_100_100; // 0644: rw-r--r--
 
+    private const int MdbxResultTrue = -1;
+
     private readonly MdbxEnvironment env;
     private readonly Dictionary<string, object> tables = [];
     private Task<int> pendingSync = Task.FromResult(0);
@@ -53,7 +55,10 @@ public sealed class ColdStore : IDisposable {
         var rc = commit ? txn.Commit() : txn.Abort();
         if (!commit || !forceSync || rc != 0) return Task.FromResult(rc);
 
-        pendingSync = pendingSync.ContinueWith(_ => env.Sync(force: true, nonblock: false), TaskScheduler.Default);
+        pendingSync = pendingSync.ContinueWith(_ => {
+            var syncRc = env.Sync(force: true, nonblock: false);
+            return syncRc == MdbxResultTrue ? 0 : syncRc;
+        }, TaskScheduler.Default);
         return pendingSync;
     }
 
