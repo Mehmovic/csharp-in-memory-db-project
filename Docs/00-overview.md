@@ -2,7 +2,7 @@
 
 ## What we're building
 
-RhinoDB is an in-process, embedded, transactional database library for C# (net10.0).
+RhinoDB is an in-process, embedded, transactional database library for C# (net11.0).
 It's linked directly into the host process — no wire protocol, no client/server round
 trip. A call into RhinoDB is a function call, not a network request.
 

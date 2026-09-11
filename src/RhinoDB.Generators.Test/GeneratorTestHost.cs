@@ -23,7 +23,7 @@ static internal class GeneratorTestHost {
     static public (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoad(
         string source, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") {
         var assemblyName = $"Gen_{testName}_{Guid.NewGuid():N}";
-        var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.CSharp12));
+        var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest));
 
         var compilation = CSharpCompilation.Create(
             assemblyName,

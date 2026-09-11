@@ -1,6 +1,6 @@
 ---
 name: rhinodb-dev
-description: Operating guide for the RhinoDB repo — an embedded transactional DB in C#/net10.0. Use whenever working on RhinoDB source, tests, docs, or roadmap in this repository: build/test commands, project layout, the stage-based dependency order, and the collaboration convention (user writes implementation, Claude writes tests/design). Trigger on any RhinoDB source/test/doc change, "run the tests", "next stage", "what's left", or picking up work after a break.
+description: Operating guide for the RhinoDB repo — an embedded transactional DB in C#/net11.0. Use whenever working on RhinoDB source, tests, docs, or roadmap in this repository: build/test commands, project layout, the stage-based dependency order, and the collaboration convention (user writes implementation, Claude writes tests/design). Trigger on any RhinoDB source/test/doc change, "run the tests", "next stage", "what's left", or picking up work after a break.
 ---
 
 # RhinoDB dev guide
@@ -20,6 +20,14 @@ review afterward.
 Full detail: memory `feedback-rhinodb-collaboration-style`.
 
 ## Build & test
+
+**Pinned to .NET 11 RC1 (`global.json`, 2026-09-11)** — installed user-locally
+to `%LocalAppData%\Microsoft\dotnet` (`-NoPath`, deliberately not touching the
+machine-wide `C:\Program Files\dotnet` install used by the 8/9/10 SDKs also on
+this machine). `global.json` alone won't make a bare `dotnet` command on PATH
+find it — either prepend that directory for the session
+(`PATH="/c/Users/<you>/AppData/Local/Microsoft/dotnet:$PATH"` in Git Bash, or
+the PowerShell equivalent) or invoke `dotnet.exe` there directly.
 
 ```
 dotnet build                          # whole solution

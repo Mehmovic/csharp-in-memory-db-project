@@ -179,9 +179,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine();
 
         sb.AppendLine("    internal void Apply() {");
-        sb.AppendLine("        var span = CollectionsMarshal.AsSpan(changes);");
-        sb.AppendLine("        for (var i = 0; i < span.Length; i++) {");
-        sb.AppendLine("            ref readonly var c = ref span[i];");
+        sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
         sb.AppendLine("            var result = c.Kind switch {");
         sb.AppendLine("                ChangeKind.Insert => table.Insert(c.Row),");
         sb.AppendLine("                ChangeKind.Update => table.Update(c.Key, c.Row),");
