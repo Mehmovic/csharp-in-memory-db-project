@@ -12,7 +12,7 @@ namespace RhinoDB.Generators;
 // 2026-09-10) for the target shape this is building toward.
 [Generator]
 public sealed class TableGenerator : IIncrementalGenerator {
-    private const string GenerateTableAttributeFullName = "RhinoDB.Core.Tables.GenerateTableAttribute";
+    private const string TableAttributeFullName = "RhinoDB.Core.Tables.TableAttribute";
     private const string DatabaseAttributeFullName = "RhinoDB.Core.Tables.DatabaseAttribute";
     private const string PrimaryKeyAttributeFullName = "RhinoDB.Core.Tables.PrimaryKeyAttribute";
     private const string AutoIncrementAttributeFullName = "RhinoDB.Core.Tables.AutoIncrementAttribute";
@@ -20,7 +20,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var tables = context.SyntaxProvider
             .ForAttributeWithMetadataName(
-                GenerateTableAttributeFullName,
+                TableAttributeFullName,
                 // `record struct Foo(...)` parses as RecordDeclarationSyntax
                 // (RecordStructDeclaration kind), not StructDeclarationSyntax -
                 // a plain `struct Foo { }` is the only thing that IS the latter.
@@ -243,7 +243,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine($"    private readonly AutoIncrementCounter {Camel(table.RowTypeName)}Counter = new();");
         }
         sb.AppendLine();
-        sb.Append($"    protected override ITransaction CreateTransaction() => new {txName}(");
+        sb.Append($"    protected override {txName} CreateTransaction() => new {txName}(");
         sb.Append(string.Join(", ", tables.Select(t => t.AutoIncrementFieldName is not null
             ? $"new {t.RowTypeName}Ops({Camel(t.RowTypeName)}Table, {Camel(t.RowTypeName)}Counter)"
             : $"new {t.RowTypeName}Ops({Camel(t.RowTypeName)}Table)")));

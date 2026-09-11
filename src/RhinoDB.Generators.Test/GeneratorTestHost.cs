@@ -50,44 +50,47 @@ static internal class GeneratorTestHost {
         return (context.LoadFromStream(peStream), generatorDiagnostics);
     }
 
-    // DbContext.Run<TTx>(Func<DbContext,TTx,Result>, PropagationMode) is generic
-    // over TTx, and TTx here only exists in the dynamically-loaded assembly - it
-    // can't be named at this project's own compile time, so `dynamic`/direct
-    // generic calls don't apply. This closes the gap with reflection: resolve
-    // Run<TTx> via MakeGenericMethod(txType), then build a matching
-    // Func<DbContext,TTx,Result> delegate via an Expression tree that just
+    // DbContext<TTx>.Run(Func<DbContext<TTx>,TTx,Result>, PropagationMode) lives
+    // on the closed generic DbContext<TTx> - TTx here only exists in the
+    // dynamically-loaded assembly, so it can't be named at this project's own
+    // compile time and `dynamic`/direct calls don't apply. This closes the gap
+    // with reflection: resolve DbContext<> + txType to get the closed context
+    // type, find its (now non-generic-at-the-method-level, TTx already fixed on
+    // the class) Run overload, then build a matching
+    // Func<DbContext<TTx>,TTx,Result> delegate via an Expression tree that just
     // forwards to an ordinary `Func<object,object,object> body` (itself free to
     // use `dynamic` internally, since it isn't a generic-method type argument).
     static public object RunTransactional(object db, Type txType, Func<object, object, object> body, object mode) {
-        // Run<TTx>(Func<DbContext,TTx,Result>, PropagationMode) - distinguished from:
-        //  - Run<T>(Func<DbContext,Result<T>>, PropagationMode): also 1 generic
-        //    method parameter, but a 2-type-argument (not 3) delegate parameter.
-        //  - Run<TArgs>(Func<DbContext,TArgs,Result>, TArgs, PropagationMode): same
-        //    1 generic parameter AND the same 3-type-argument delegate shape, but 3
-        //    method parameters (func, args, mode), not 2 (func, mode).
-        var runMethod = typeof(DbContext).GetMethods()
-            .Single(m => m.Name == "Run" && m.IsGenericMethodDefinition && m.GetGenericArguments().Length == 1
+        var dbContextType = typeof(DbContext<>).MakeGenericType(txType);
+
+        // Run(Func<DbContext<TTx>,TTx,Result>, PropagationMode) - distinguished from:
+        //  - Run<T>(Func<DbContext<TTx>,TTx,Result<T>>, PropagationMode): a
+        //    generic method (1 type param), this one isn't.
+        //  - Run<TArgs>(Func<DbContext<TTx>,TTx,TArgs,Result>, TArgs, PropagationMode):
+        //    same 3-type-argument delegate shape, but 3 method parameters
+        //    (func, args, mode), not 2 (func, mode).
+        var runMethod = dbContextType.GetMethods()
+            .Single(m => m.Name == "Run" && !m.IsGenericMethodDefinition
                          && m.GetParameters().Length == 2
                          && m.GetParameters()[0].ParameterType.GetGenericArguments().Length == 3);
-        var genericRun = runMethod.MakeGenericMethod(txType);
 
-        var ctxParam = Expression.Parameter(typeof(DbContext), "ctx");
+        var ctxParam = Expression.Parameter(dbContextType, "ctx");
         var txParam = Expression.Parameter(txType, "tx");
         var invokeBody = Expression.Invoke(
             Expression.Constant(body),
             Expression.Convert(ctxParam, typeof(object)),
             Expression.Convert(txParam, typeof(object)));
-        var delegateType = typeof(Func<,,>).MakeGenericType(typeof(DbContext), txType, typeof(Result));
+        var delegateType = typeof(Func<,,>).MakeGenericType(dbContextType, txType, typeof(Result));
         var operation = Expression.Lambda(delegateType, Expression.Convert(invokeBody, typeof(Result)), ctxParam, txParam).Compile();
 
-        return genericRun.Invoke(db, [operation, mode])!;
+        return runMethod.Invoke(db, [operation, mode])!;
     }
 
     static private ImmutableArray<MetadataReference> BuildReferences() {
         var trustedPlatformAssemblies = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator);
         var references = trustedPlatformAssemblies.Select(path => (MetadataReference)MetadataReference.CreateFromFile(path)).ToList();
 
-        references.Add(MetadataReference.CreateFromFile(typeof(GenerateTableAttribute).Assembly.Location));
+        references.Add(MetadataReference.CreateFromFile(typeof(TableAttribute).Assembly.Location));
         references.Add(MetadataReference.CreateFromFile(typeof(Table<,>).Assembly.Location));
 
         return references.ToImmutableArray();

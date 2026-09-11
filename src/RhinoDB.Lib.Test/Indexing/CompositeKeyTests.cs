@@ -92,8 +92,8 @@ public class OrderedIndex_CompositeKeyTests {
     }
 }
 
-public class NonUniqueHashIndex_CompositeKeyTests {
-    static private NonUniqueHashIndex<(int X, int Y)> NewIndex() => new NonUniqueHashIndex<(int X, int Y)>();
+public class NonUniqueHashSetIndex_CompositeKeyTests {
+    static private NonUniqueHashSetIndex<(int X, int Y)> NewIndex() => new NonUniqueHashSetIndex<(int X, int Y)>();
 
     [Test]
     public void Insert_MultipleEntitiesAtSameCoordinate_GetOffsetsReturnsAllOfThem() {

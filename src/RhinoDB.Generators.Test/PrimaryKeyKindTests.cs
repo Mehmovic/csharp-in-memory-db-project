@@ -14,9 +14,9 @@ public class PrimaryKeyKindTests {
         namespace TestNs;
 
         [Database]
-        public partial class RankingDb : DbContext { }
+        public partial class RankingDb : DbContext<RankingDbTransaction> { }
 
-        [GenerateTable(TableKind.Instant, typeof(RankingDb))]
+        [Table(TableKind.Instant, typeof(RankingDb))]
         public readonly partial record struct Ranking([PrimaryKey(IndexKind.RedBlackOrdered)] int Id, string Name);
         """;
 

@@ -18,13 +18,13 @@ public class TableTests {
     private readonly record struct WidgetTable(
         Table<int, Widget> Table,
         HashIndex<string> IdxSku,
-        NonUniqueHashIndex<string> IdxCategory,
+        NonUniqueHashSetIndex<string> IdxCategory,
         NonUniqueOrderedIndex<int> IdxStock);
 
     static private WidgetTable NewTable() {
         var table = new Table<int, Widget>(chunkSize: 4, new HashIndex<int>(), static w => w.Id);
         var idxSku = new HashIndex<string>();
-        var idxCategory = new NonUniqueHashIndex<string>();
+        var idxCategory = new NonUniqueHashSetIndex<string>();
         var idxStock = new NonUniqueOrderedIndex<int>();
 
         table.Register(new UniqueSecondaryIndex<Widget, string>(idxSku, static w => w.Sku));

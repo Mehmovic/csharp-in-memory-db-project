@@ -80,6 +80,31 @@ through the async change-propagation channel below, never a shared lock. One
 database is one actor; more scale means more databases, not more concurrency
 inside one.
 
+**The actor boundary is per-`[Database]` class, and it reaches all the way
+down through storage, not just the in-memory writer.** Every `[Database]`-
+attributed `DbContext` subclass gets its own `ColdStore`, and `ColdStore`
+wraps exactly one `MdbxEnvironment` — so a database's durability layer is as
+independent as its in-memory layer: separate file, separate libmdbx writer
+lock, no contention with any other database's commits. (Multiple *tables*
+within one database do share that one environment and its one write txn per
+`Run` call — see Cold storage below — which is the durable-side mirror of
+`DbExecutionLoop` already serializing everything for that `DbContext` through
+one channel.) This alignment is a consequence of decisions already made here,
+not a separate design: `WidgetDb`/`GameDb`-style multiple `[Database]`
+classes are already independently-schedulable actors today, in-process, with
+no shared lock at either layer.
+
+This is also the seam a future multi-process deployment would use, should one
+ever be needed — not something built or scheduled, just the natural next step
+if it is. `Run`/`RunConfirmed` are already the sole entry point into a
+`DbContext` (see Embedding & access below), so relocating a given `[Database]`
+to its own process would mean swapping what sits behind `Run` — in-process
+channel-enqueue becomes an RPC call — without touching the table generator,
+the declarative attributes, or the storage boundary at all, since those are
+already scoped per-database. Nothing today is built toward this; it falls out
+for free from the actor boundary already being per-database rather than
+global.
+
 ## Transactions
 
 **Status: Milestone 1 of the table generator is real (a single `Instant`-kind
@@ -88,10 +113,21 @@ real cross-table validation are designed here but not yet built.** This
 section describes the target shape; where something is still a stub, it says
 so explicitly.
 
-Every `[GenerateTable]`-attributed row type gets a generated per-table `Ops`
-class; every `[Database]`-attributed `DbContext` subclass gets a generated
-`Transaction` aggregating one `Ops` field per table. **Tables never write
-directly — only read is direct.** An operation's `Insert`/`Update`/`Delete`
+Every `[Table]`-attributed row type gets a generated per-table `Ops`
+class; every `[Database]`-attributed class gets a generated `{Db}Transaction`
+aggregating one `Ops` field per table. **The database class declares its own
+base type as `DbContext<{Db}Transaction>`, by hand** (e.g. `[Database] public
+partial class WidgetDb : DbContext<WidgetDbTransaction> { }`) — a source
+generator can add members to a partial class, but can never supply the base
+type itself, so this one line is the one piece of the generated type's name
+the author has to know and write, following the fixed `{Db}Transaction`
+naming convention. `DbContext<TTx>` threads that one concrete `TTx` through
+every `Run` call on the class with no runtime cast and no per-call generic
+parameter — a plain, tx-less `DbContext` (used directly, with no `[Database]`
+subclass) is just `DbContext<NullTransaction>` under a convenience
+non-generic name, `NullTransaction` being a stateless no-op `ITransaction` so
+the tx-less path costs nothing extra. **Tables never write directly — only
+read is direct.** An operation's `Insert`/`Update`/`Delete`
 calls only ever *stage* a `Change<TKey,TRow>` into that table's `Ops`
 (a plain `readonly struct` sitting inline in a `List<Change<TKey,TRow>>` —
 zero allocation per staged change); nothing touches real storage until the
@@ -430,7 +466,7 @@ stale value can be wrong to read but can't corrupt a uniqueness guarantee) or
 where an application has independently verified staleness there is
 acceptable. This isn't a new mechanism to build — `Load` already exists — it's
 a stated requirement on how `OnStart` is used per table, worth a comment at
-the `[GenerateTable]` declaration site once that exists, not just here.
+the `[Table]` declaration site once that exists, not just here.
 
 **`Optimistic` writes have a real, bounded data-loss window across a crash —
 name it plainly rather than leaving it implied.** An `Optimistic` `Run` call

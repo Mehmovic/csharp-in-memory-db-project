@@ -62,7 +62,7 @@ public class SecondaryIndexTests {
 
     [Test]
     public void NonUniqueSecondaryIndex_CheckInsert_AlwaysSucceeds_EvenWithAnExistingEntry() {
-        var index = new NonUniqueHashIndex<string>();
+        var index = new NonUniqueHashSetIndex<string>();
         index.Insert("A", offset: 5);
         var secondary = new NonUniqueSecondaryIndex<Widget, string>(index, static w => w.Sku);
 
@@ -73,7 +73,7 @@ public class SecondaryIndexTests {
 
     [Test]
     public void NonUniqueSecondaryIndex_Insert_ThenDelete_RemovesOnlyThatOffset() {
-        var index = new NonUniqueHashIndex<string>();
+        var index = new NonUniqueHashSetIndex<string>();
         var secondary = new NonUniqueSecondaryIndex<Widget, string>(index, static w => w.Sku);
 
         secondary.Insert(new Widget(1, "A"), offset: 3);

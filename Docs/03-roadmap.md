@@ -20,9 +20,15 @@ Five index types, all key-to-offset direct (no indirection):
 
 - `HashIndex<TKey>` / `OrderedIndex<TKey>` — unique, implement `IUniqueIndex<TKey>`
   (`GetOffset`/`Insert`/`Delete`/`Range`).
-- `NonUniqueHashIndex<TKey>` / `NonUniqueHashSetIndex<TKey>` /
-  `NonUniqueOrderedIndex<TKey>` — non-unique, implement `INonUniqueHash<TKey>`
-  (`Insert`/`Delete`/`GetOffsets`).
+- `NonUniqueHashSetIndex<TKey>` / `NonUniqueOrderedIndex<TKey>` — non-unique,
+  implement `INonUniqueHash<TKey>` (`Insert`/`Delete`/`GetOffsets`).
+  **`NonUniqueHashIndex<TKey>` (the original `Dictionary<TKey,List<int>>`-backed,
+  O(n)-delete variant) removed 2026-09-11** — `NonUniqueHashSetIndex<TKey>`
+  (`Dictionary<TKey,HashSet<int>>`, O(1) delete) is the sole non-unique-hash
+  implementation now and the one `[Index(IndexKind.Hash)]` maps to; the
+  `List`-backed variant was never reachable through the declarative surface
+  and RhinoDB's own CSB+-tree (Backlog, below) is the intended eventual upgrade
+  path anyway, not a second hand-maintained hash variant.
 
 No `TRow` type parameter on the indexes themselves — they're pure key-to-offset
 maps with no storage access of their own; `Table<TPk,TRow>` (Stage 3) is what
@@ -38,12 +44,16 @@ repoint, non-unique bucket siblings surviving a swap, chunk-boundary crossings,
 and primary-key immutability), then generalized to `Table<TPk,TRow>` — a
 constructor-supplied `IUniqueIndex<TPk>` primary plus a `List<ISecondaryIndex<TRow>>`
 registered at setup time, driven uniformly through `CheckInsert`/`Insert`/`Delete`
-(see [Architecture](02-architecture.md#storage-engine-in-memory)). `PlayerTable`
-is now a thin composing wrapper over `Table<int,Player>`, keeping only its own
-bespoke `GetByEmail`/`GetByTeam`/`GetByRating` accessors. `TableTests.cs` proves
-the generalized version reproduces `PlayerTableTests.cs`'s behavior exactly,
-plus the self-collision fix `Update` needed once the table always re-registers
-every secondary index rather than only the ones that actually changed.
+(see [Architecture](02-architecture.md#storage-engine-in-memory)). `TableTests.cs`
+proved the generalized version reproduces `PlayerTableTests.cs`'s behavior
+exactly, plus the self-collision fix `Update` needed once the table always
+re-registers every secondary index rather than only the ones that actually
+changed. **`PlayerTable`/`PlayerTableTests.cs` removed 2026-09-11** — their
+proof was historical (this paragraph) and `TableTests.cs` already carries the
+same coverage forward independently; keeping both was redundant once Part G's
+generator turned out to prove itself against its own fixtures rather than
+against `PlayerTable` (the original plan for that changed, see
+[Architecture — Transactions](02-architecture.md#transactions)).
 
 Next: generate this from a declarative table definition via source generator
 (see [Performance Principles §5](01-performance-principles.md#5-source-generators-are-how-we-get-all-of-the-above-and-a-nice-api)) —

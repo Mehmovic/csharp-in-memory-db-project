@@ -11,9 +11,9 @@ public class AutoIncrementTests {
         namespace TestNs;
 
         [Database]
-        public partial class GadgetDb : DbContext { }
+        public partial class GadgetDb : DbContext<GadgetDbTransaction> { }
 
-        [GenerateTable(TableKind.Instant, typeof(GadgetDb))]
+        [Table(TableKind.Instant, typeof(GadgetDb))]
         public readonly partial record struct Gadget([PrimaryKey][AutoIncrement] int Id, string Name);
         """;
 

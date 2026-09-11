@@ -17,9 +17,9 @@ public class Milestone1Tests {
         namespace TestNs;
 
         [Database]
-        public partial class WidgetDb : DbContext { }
+        public partial class WidgetDb : DbContext<WidgetDbTransaction> { }
 
-        [GenerateTable(TableKind.Instant, typeof(WidgetDb))]
+        [Table(TableKind.Instant, typeof(WidgetDb))]
         public readonly partial record struct Widget([PrimaryKey] int Id, string Name, int Stock);
         """;
 
