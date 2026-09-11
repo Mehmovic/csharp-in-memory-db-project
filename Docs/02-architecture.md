@@ -55,7 +55,8 @@ and it is also the only reader. Internal reads (a table accessor called inside
 subsequent diffs) are both computed on that same thread, at the same
 serialization point as writes. No table-level locking exists or is needed — a
 table is only ever touched by the one thread that owns its `DbContext`, so
-`Table<TPk,TRow>` carries no concurrency primitives of its own.
+the generated `Ops` class and the storage/index fields it drives carry no
+concurrency primitives of their own.
 
 This supersedes a correction made 2026-09-01, which had `ApplyInMemory` acquire
 every table a transaction touches up front (not one at a time) to stop a reader
@@ -107,11 +108,12 @@ global.
 
 ## Transactions
 
-**Status: Milestone 1 of the table generator is real (a single `Instant`-kind
-table, primary key only) — secondary indexes, `Persistent`-kind tables, and
-real cross-table validation are designed here but not yet built.** This
-section describes the target shape; where something is still a stub, it says
-so explicitly.
+**Status: Milestones 1-2 of the table generator are real** — `Instant`-kind
+tables, secondary indexes (all 4 `IndexKind` × `Uniqueness` combinations),
+and real pre-apply cross-table validation. `Persistent`-kind tables and the
+secondary-index read-your-own-writes overlay are designed here but not yet
+built (Milestones 3 and 4). This section describes the target shape; where
+something is still a stub, it says so explicitly.
 
 Every `[Table]`-attributed row type gets a generated per-table `Ops`
 class; every `[Database]`-attributed class gets a generated `{Db}Transaction`
@@ -151,11 +153,92 @@ during this pass — before calling any table's `Apply()`. A validation
 failure on the *second* table therefore never leaves the *first* table's
 already-staged insert applied, which fixes, for free, the multi-table
 partial-apply limitation flagged and deferred earlier in this doc's original
-`PersistentTable` design. **Currently a stub**: `Validate()` always returns
-`true` — Milestone 1 only proved the staging/overlay/apply-on-success
-mechanism itself; real pre-apply validation (duplicate key, unique-secondary-
-index conflicts, primary-key immutability — checked across every staged
-change before mutating any of them) is the next slice.
+`PersistentTable` design. **Real as of Milestone 2**: for each staged
+`Insert`, `Validate()` checks for a duplicate key and any unique-secondary-
+index conflict; for each staged `Update`, primary-key immutability and the
+same unique-secondary-index check, self-offset-aware (an update that keeps
+its own already-owned unique value is not a false conflict against itself).
+`Delete` needs no check — its target's existence was already resolved
+against the overlay at stage time. The duplicate-key check is itself
+overlay-aware across the *current batch*: an `Insert` scans backward through
+this operation's own earlier staged changes for the same key before falling
+back to committed storage, so a same-batch `Delete`-then-re-`Insert` of one
+key isn't wrongly flagged, and — the concrete bug this closes — a same-batch
+double-`Insert` of one key *is* now caught here instead of silently
+corrupting at `Apply()` time (previously: the second physical `table.Insert`
+would fail during replay, but nothing stopped the loop or surfaced that
+failure to the caller, who saw an overall `Result.Ok()` regardless). One
+gap, deliberately not solved here: an `Update` whose target doesn't yet
+exist in committed storage (because it was inserted earlier in this *same*
+batch, not yet applied) skips its own pre-check and falls through to
+`Apply()`'s in-order replay to resolve correctly — the same way this already
+worked before Milestone 2, since two-phase pre-validation doesn't change
+apply order. `Ops`'s secondary-index read accessors are direct against the
+real index and real storage only — **not** overlay-aware (they don't see
+this operation's own not-yet-applied writes by secondary key, unlike the
+primary-key `Get`) — that harder half is Milestone 4's job.
+
+**`Table<TKey,TRow>` — the generic, interface/delegate-driven engine both
+hand-written code and codegen used to share — is gone from the codebase
+entirely, not just unused by codegen.** It, `ISecondaryIndex<TRow>`,
+`UniqueSecondaryIndex`/`NonUniqueSecondaryIndex`, `Table.Register`, and
+`INonUniqueHash<TKey>` (found to have zero real remaining usages once
+secondary indexes moved off it — nothing anywhere stored a variable typed
+as it) were all the right shape to hand-prove the storage engine and
+secondary indexes worked at all (Stage 3, then Milestone 2's first pass) —
+once proven, deleted outright, the same "hand-prove then delete the
+scaffold" discipline already applied to `PlayerTable`, `InstantTable`, and
+`ChangeSet<TKey,TRow>`. The generator always knows every table's exact
+concrete primary-index type (`HashIndex<TKey>`/`OrderedIndex<TKey>`, from
+`[PrimaryKey(kind)]`) and every secondary index's concrete type
+(`HashIndex<T>`/`OrderedIndex<T>`/`NonUniqueHashSetIndex<T>`/
+`NonUniqueOrderedIndex<T>`) at generation time, so the generated `{Db}`
+class owns a `DenseArray<TRow>` and a concrete primary-index field directly,
+and the generated `Ops` class drives all of it itself — `Insert`/`Update`/
+`Delete`, including swap-remove repointing when `DenseArray.Delete`
+relocates the physically-last row to fill a gap — with no interface
+dispatch and no `Func<TRow,TKey> selector` delegate call anywhere; every
+key read is a literal `row.{PrimaryKeyName}` field access, known at
+generation time. `PersistentTable<TKey,TRow>` absorbed `Table`'s old logic
+directly (merged, not composed) rather than being retired the same way —
+it's still a hand-written, generically reusable class, since Milestone 3
+hasn't wired persistent-kind codegen up yet to inline into. `IUniqueIndex<TKey>`
+and the concrete raw index types are untouched — `IUniqueIndex<TKey>` is
+still genuinely load-bearing for `PersistentTable`'s primary-key slot (a
+runtime choice between `HashIndex`/`OrderedIndex`, same reason `Table` used
+to need it), and the raw index types are still constructed directly by both
+codegen and plenty of hand-written tests.
+
+**`[Index]`'s `Accessor` and `Order` parameters, and composite indexes.**
+The generated accessor method is named for the field itself by default
+(`[Index(IndexKind.Hash, Uniqueness.Unique)] string ShortCode` → a method
+literally named `ShortCode(string value)` on the `Ops` class — no `By`
+prefix). Setting `Accessor` explicitly overrides that name — and setting the
+*same* `Accessor` value on 2-3 fields builds one **composite** index over
+all of them, keyed by a named `ValueTuple` (the same composite-key mechanism
+`CompositeKeyTests.cs` already proved for hand-written indexes). Field order
+within a composite key defaults to declaration order; `Order` (an `int`,
+default `-1` meaning "unset" — `int?` isn't a legal attribute parameter
+type) overrides that per field. The generated accessor's parameter list
+follows the same resolved order, so a reordering `Order` is directly
+observable at the call site, not just internally.
+
+`Accessor` also exists on `[PrimaryKey]` (renames the generated read method,
+default `Get`) and `[Table]` (renames the generated property exposing that
+table's `Ops` on the database's `Transaction`, default `{RowTypeName}s`) —
+not on `[Database]`: unlike a row field or a table, a `[Database]` class has
+no *other* generated symbol that refers to it by a name distinct from the
+class's own — everything (`{Db}Transaction`, `[Table(kind, typeof(WidgetDb))]`)
+already derives from the class name the author already fully controls, so
+there's nothing for an `Accessor` to rename.
+
+**Every rule the generator relies on is a diagnostic, not a silent
+assumption or a crash.** A missing `[PrimaryKey]`, an empty `Accessor`
+string, a composite index whose fields disagree on `Kind`/`Uniqueness`, one
+with more than 3 fields, or two fields with the same explicit `Order` — each
+is a real Roslyn diagnostic (`RHINO001`-`RHINO005`) at the offending
+attribute's own location, and only *that* table is skipped, not the whole
+compilation.
 
 **Dirty flags, not a registry.** Each `Ops` class tracks its own `bool
 Dirty` (set the moment anything is actually staged — not on a no-op call,
@@ -165,11 +248,11 @@ dynamic "which tables were touched this call" lookup. A table nothing was
 staged against pays one boolean check and nothing else, regardless of how
 many tables the database has.
 
-**No stored key-selector delegates anywhere generated.** `Table<TKey,TRow>`
-itself still takes a `Func<TRow,TKey> selector` (a hand-written, pre-codegen
-type, unchanged by any of this) — but the generator never stores one of its
-own. Every generated `Ops.Insert` reads the row's primary-key field directly
-(`row.Id`, not `selector(row)`), known statically at compile time — a source
+**No stored key-selector delegates anywhere generated** (see above — this
+used to be phrased relative to `Table<TKey,TRow>`'s own `Func<TRow,TKey>
+selector`, which no longer exists at all now that codegen doesn't compose
+`Table` anymore). Every generated `Ops.Insert` reads the row's primary-key
+field directly (`row.Id`), known statically at compile time — a source
 generator, unlike a hand-written generic helper, has no runtime type it
 doesn't already know at the point it emits code.
 
@@ -219,17 +302,25 @@ generated apply/overlay loop uses — worth trying first if this resurfaces.
 See [Performance Principles §1](01-performance-principles.md#1-data-oriented-not-object-oriented)
 for the data-oriented rationale. Concretely: `DenseArray<TRow>` is the physical
 storage per table, `Dictionary<TKey,int>`-backed indexes map keys to physical
-offsets directly, and `Table<TPk,TRow>` is the coordinator that owns the array
-and drives every index. The primary index (`IUniqueIndex<TPk>`) is a constructor
-argument; secondary indexes are added via `Register(ISecondaryIndex<TRow>)` at
-setup time, then driven per-operation through a uniform `CheckInsert`/`Insert`/
-`Delete` contract regardless of whether the concrete index is unique or
-non-unique — type-erased via `UniqueSecondaryIndex<TRow,TKey>`/
-`NonUniqueSecondaryIndex<TRow,TKey>` wrappers. This uniform contract is what lets
-a delete's swap-remove correctly repoint *every* index on the table, not just the
-one that initiated the delete, and what lets `Update`'s always-re-register pass
-avoid a false self-collision (`CheckInsert(row, selfOffset)` — a found entry is
-only a real conflict if it belongs to a different offset than the row's own).
+offsets directly. For a `[Table]`-generated table, the generated `{Db}` class
+owns one `DenseArray<TRow>` field and one concrete primary-index field
+(`HashIndex<TKey>`/`OrderedIndex<TKey>`, chosen by `[PrimaryKey(kind)]`)
+directly — no separate coordinator type in between (see § Transactions above
+for why: the generic `Table<TKey,TRow>` that used to fill that role was
+retired from the codebase once codegen stopped needing its interface/delegate
+indirection). The generated `Ops` class drives storage and every index
+(primary and secondary) itself, unrolled per index — a delete's swap-remove
+repoints *every* index on the table, not just the primary, and `Update`
+always unconditionally re-registers every index against the new row to
+avoid a false self-collision (a found entry in a unique index is only a real
+conflict if it belongs to a different offset than the row's own).
+Hand-written, non-generated code that still wants a general-purpose
+multi-index table coordinator (there is currently no such use case in the
+codebase — `PersistentTable<TKey,TRow>` inlines its own storage +
+`IUniqueIndex<TKey>` primary slot directly, the same shape `Table` used to
+have, since it's still generically reusable pending Milestone 3) can still
+compose `DenseArray<TRow>` plus the raw index types by hand; nothing about
+their removal from the generated path prevents that.
 
 Indexes are declared explicitly per table, never defaulted — each one is a real
 cost (write-path maintenance), so it's a decision, not a default:

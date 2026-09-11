@@ -4,4 +4,5 @@ namespace RhinoDB.Core.Tables;
 public sealed class TableAttribute(TableKind kind, Type database) : Attribute {
     public TableKind Kind { get; } = kind;
     public Type Database { get; } = database;
+    public string? Accessor { get; set; }
 }

@@ -91,7 +91,7 @@ static internal class GeneratorTestHost {
         var references = trustedPlatformAssemblies.Select(path => (MetadataReference)MetadataReference.CreateFromFile(path)).ToList();
 
         references.Add(MetadataReference.CreateFromFile(typeof(TableAttribute).Assembly.Location));
-        references.Add(MetadataReference.CreateFromFile(typeof(Table<,>).Assembly.Location));
+        references.Add(MetadataReference.CreateFromFile(typeof(AutoIncrementCounter).Assembly.Location));
 
         return references.ToImmutableArray();
     }

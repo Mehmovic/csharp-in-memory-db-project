@@ -54,6 +54,19 @@ same coverage forward independently; keeping both was redundant once Part G's
 generator turned out to prove itself against its own fixtures rather than
 against `PlayerTable` (the original plan for that changed, see
 [Architecture — Transactions](02-architecture.md#transactions)).
+**`Table<TPk,TRow>` itself (and, in turn, `TableTests.cs`) removed
+2026-09-12** — once the generator's own secondary-index retirement
+(Milestone 2, see Architecture) proved codegen never needed `Table`'s
+interface/delegate-driven engine, the same argument extended to its
+primary-key slot (`IUniqueIndex<TPk>`, `Func<TRow,TKey> selector`): the
+generator always knows a table's exact concrete primary-index type and
+primary-key field name at generation time, so it now owns `DenseArray<TRow>`
++ a concrete index field directly, no coordinator type in between. This
+paragraph, and `PersistentTable<TKey,TRow>` (which absorbed `Table`'s old
+logic directly rather than being retired — still hand-written and
+generically reusable pending Milestone 3), are what's left of Stage 3's
+original shape. See
+[Architecture § Storage engine](02-architecture.md#storage-engine-in-memory).
 
 Next: generate this from a declarative table definition via source generator
 (see [Performance Principles §5](01-performance-principles.md#5-source-generators-are-how-we-get-all-of-the-above-and-a-nice-api)) —
@@ -174,6 +187,16 @@ don't get built before they're needed:
   serialization and the propagation sender loop's outgoing batch buffer; not
   applied to `OrderedIndex.Range()`'s allocation until `Table<TRow>`/transactions/
   locking exist and profiling actually shows it matters.
+- **`[Database]` gains an `Accessor`-style name** — for a future networked/RPC
+  access layer (`ctx.Db.Table.Insert(...)`, `ctx` being an RPC-scoped context,
+  not `DbContext` itself) a remote client can't address a database by its C#
+  type the way in-process code does, so it'll need *some* serializable name —
+  the same reason `[Table]`'s `Accessor` exists for tables. Not added to
+  `[Database]` yet: no networking layer exists to design the shape against
+  (per Hosting/Deployment above — "no networking until the core engine is
+  solid"), and database-addressing over RPC might not even end up being a
+  flat string name (could be connection-scoped instead) — better to let that
+  layer's actual design settle the question than guess now.
 
 ## How this roadmap should be used
 

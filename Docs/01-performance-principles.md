@@ -98,12 +98,15 @@ This is the intended shape for *all* of it, not just index maintenance:
 - **Index maintenance** — the generator knows at compile time which index depends
   on which field(s), so `Update` only touches the indexes whose backing field
   actually changed, instead of blindly re-registering everywhere. **Not yet
-  built** — the first generated slice always re-registers, matching
-  `Table<TKey,TRow>`'s own unconditional behavior; deferred until profiling
-  shows it matters, not assumed to matter up front.
+  built** — every generated `Ops.Apply()` still unconditionally re-registers
+  every index on `Update`, matching the standing self-collision-fix behavior
+  from Stage 3; deferred until profiling shows it matters, not assumed to
+  matter up front.
 - **Per-table accessors** — a generated `Ops` class (`WidgetOps`, `ClubOps`, ...)
-  wraps a real, non-generic `Table<TKey,TRow>`/`PersistentTable<TKey,TRow>`
-  reference, constructed once per database, not recomputed per access.
+  owns a `DenseArray<TRow>` field and a concrete primary/secondary index field
+  per index directly (no generic coordinator type in between — see
+  [Architecture § Storage engine](02-architecture.md#storage-engine-in-memory)),
+  constructed once per database, not recomputed per access.
 - **Transaction change types** — the generator emits one `Ops` class per table and
   one `Transaction` class per database, both built on the shared, generic
   `Change<TKey,TRow>`, so the call site (`tx.Widgets.Update(...)`) never has to

@@ -1,6 +1,6 @@
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueOrderedIndex<TKey> : INonUniqueHash<TKey>
+public class NonUniqueOrderedIndex<TKey>
     where TKey : notnull {
     private readonly SortedSet<(TKey Key, int Offset)> sortedSet = new SortedSet<(TKey Key, int Offset)>(
         Comparer<(TKey Key, int Offset)>.Create((a, b) => {

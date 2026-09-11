@@ -1,6 +1,6 @@
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueHashSetIndex<TKey> : INonUniqueHash<TKey>
+public class NonUniqueHashSetIndex<TKey>
     where TKey : notnull {
     private readonly Dictionary<TKey, HashSet<int>> hashMap = new Dictionary<TKey, HashSet<int>>();
 
