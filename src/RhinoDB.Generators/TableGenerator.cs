@@ -13,6 +13,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
     private const string PrimaryKeyAttributeFullName = "RhinoDB.Core.Tables.PrimaryKeyAttribute";
     private const string AutoIncrementAttributeFullName = "RhinoDB.Core.Tables.AutoIncrementAttribute";
     private const string IndexAttributeFullName = "RhinoDB.Core.Tables.IndexAttribute";
+    private const string ValidateAttributeFullName = "RhinoDB.Core.Tables.ValidateAttribute";
+    private const string DbErrorFullName = "RhinoDB.Core.DbError";
 
     static private readonly DiagnosticDescriptor MissingPrimaryKeyDiagnostic = new(
         "RHINO001", "Table row missing [PrimaryKey]",
@@ -49,6 +51,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         "RHINO008", "Evictable has no effect on Instant-kind tables",
         "'{0}' is TableKind.Instant and sets Evictable = true - Instant-kind tables have no cold storage " +
         "to evict to/from at all. Remove Evictable or use TableKind.Persistent.",
+        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    static private readonly DiagnosticDescriptor InvalidValidateMethodSignatureDiagnostic = new(
+        "RHINO009", "Invalid [Validate] method signature",
+        "'{0}.{1}' is [Validate] but must be an at-least-internal static method shaped 'static DbError? {1}({0} row)' - " +
+        "generated code calls it from a sibling class in the same assembly, so it can't be private",
         "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
@@ -207,6 +215,25 @@ public sealed class TableGenerator : IIncrementalGenerator {
             .Select(m => m!)
             .ToImmutableArray();
 
+        var validateMethodNames = ImmutableArray.CreateBuilder<string>();
+        foreach (var member in rowType.GetMembers().OfType<IMethodSymbol>()) {
+            if (!member.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == ValidateAttributeFullName)) continue;
+
+            var validSignature = member.IsStatic
+                && member.DeclaredAccessibility != Accessibility.Private
+                && member.Parameters.Length == 1
+                && SymbolEqualityComparer.Default.Equals(member.Parameters[0].Type, rowType)
+                && member.ReturnType is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } returnType
+                && returnType.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == $"global::{DbErrorFullName}";
+
+            if (!validSignature) {
+                diagnostics.Add(Diagnostic.Create(InvalidValidateMethodSignatureDiagnostic, member.Locations.FirstOrDefault() ?? Location.None, rowType.Name, member.Name));
+                continue;
+            }
+
+            validateMethodNames.Add(member.Name);
+        }
+
         if (diagnostics.Count > 0) return (null, diagnostics.ToImmutable());
 
         var model = new TableModel(
@@ -223,7 +250,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
             chunkSize,
             evictable,
             autoIncrementFields.ToImmutable(),
-            indexes);
+            indexes,
+            validateMethodNames.ToImmutable());
         return (model, ImmutableArray<Diagnostic>.Empty);
     }
 
@@ -462,6 +490,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine("                    if (checkResult.IsOk()) { lastError = DbError.DuplicateKey(); return false; }");
             sb.AppendLine("                }");
         }
+        EmitCustomValidateChecks(sb, table);
         sb.AppendLine("            } else {");
         sb.AppendLine($"                if (!c.Row.{table.PrimaryKeyName}.Equals(c.Key)) {{ lastError = DbError.PrimaryKeyImmutable(); return false; }}");
         sb.AppendLine("                var updateExistsAlready = false;");
@@ -485,11 +514,21 @@ public sealed class TableGenerator : IIncrementalGenerator {
             }
             sb.AppendLine("                }");
         }
+        EmitCustomValidateChecks(sb, table);
         sb.AppendLine("            }");
         sb.AppendLine("        }");
         sb.AppendLine("        return true;");
         sb.AppendLine("    }");
         sb.AppendLine();
+    }
+
+    static private void EmitCustomValidateChecks(StringBuilder sb, TableModel table) {
+        foreach (var methodName in table.ValidateMethodNames) {
+            sb.AppendLine("                {");
+            sb.AppendLine($"                    var customError = {table.RowTypeFullName}.{methodName}(c.Row);");
+            sb.AppendLine("                    if (customError is not null) { lastError = customError.Value; return false; }");
+            sb.AppendLine("                }");
+        }
     }
 
     static private string EmitInstantOpsClass(TableModel table) {
@@ -886,7 +925,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         string primaryKeyName, string primaryKeyTypeFullName, IndexKind primaryKeyKind,
         string primaryKeyAccessor, string accessor, int chunkSize, bool evictable,
         ImmutableArray<AutoIncrementFieldModel> autoIncrementFields,
-        ImmutableArray<IndexModel> indexes) {
+        ImmutableArray<IndexModel> indexes,
+        ImmutableArray<string> validateMethodNames) {
         public string RowTypeFullName { get; } = rowTypeFullName;
         public string RowTypeName { get; } = rowTypeName;
         public string? RowNamespace { get; } = rowNamespace;
@@ -901,6 +941,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public bool Evictable { get; } = evictable;
         public ImmutableArray<AutoIncrementFieldModel> AutoIncrementFields { get; } = autoIncrementFields;
         public ImmutableArray<IndexModel> Indexes { get; } = indexes;
+        public ImmutableArray<string> ValidateMethodNames { get; } = validateMethodNames;
     }
 
     private sealed class AutoIncrementFieldModel(string fieldName, string fieldTypeFullName, bool isSigned) {
