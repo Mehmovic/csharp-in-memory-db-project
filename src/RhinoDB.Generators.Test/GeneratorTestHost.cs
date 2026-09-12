@@ -92,7 +92,6 @@ static internal class GeneratorTestHost {
 
         references.Add(MetadataReference.CreateFromFile(typeof(TableAttribute).Assembly.Location));
         references.Add(MetadataReference.CreateFromFile(typeof(AutoIncrementCounter).Assembly.Location));
-
         return references.ToImmutableArray();
     }
 }

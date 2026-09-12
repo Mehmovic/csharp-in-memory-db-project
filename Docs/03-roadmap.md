@@ -107,11 +107,19 @@ overloads, `RunConfirmed`, ordering under single- and multi-thread concurrent
 submission, exception safety, and the no-adjacency-guarantee-across-separate-calls
 property.
 
-## Stage 5 — Cold storage (libmdbx) ⏳ not started
+## Stage 5 — Cold storage (libmdbx) ✅ done (through Milestone 3)
 
 MemoryPack serialization (positional, no version tags), per-table sub-databases,
 `Load`/`Evict`/`Peek` distinct from `Insert`/`Delete`. Imperative, per-table,
 batched schema migration — versioning tracked as generated code, not runtime tags.
+Real: native libmdbx binding, `ColdStore`/`ColdTable`/`PersistentTable<TKey,TRow>`,
+the async-durability-sync design, and — as of Milestone 3, 2026-09-12 — the table
+generator's `TableKind.Persistent` support (a generated `Ops` class drives a real
+`PersistentTable` directly, `.Storage.Load/Evict/Peek` wired through, cross-kind
+atomicity with `Instant` tables in one `Transaction.Apply()`) — see
+[Architecture — Transactions](02-architecture.md#transactions). Not yet built:
+secondary indexes on `Persistent`-kind tables (`RHINO006`), schema migration
+tooling, eager-load-on-startup.
 
 ## Stage 6 — Change propagation ⏳ designed, not built
 

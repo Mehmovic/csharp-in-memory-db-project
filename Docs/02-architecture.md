@@ -108,12 +108,43 @@ global.
 
 ## Transactions
 
-**Status: Milestones 1-2 of the table generator are real** — `Instant`-kind
+**Status: Milestones 1-3 of the table generator are real** — `Instant`-kind
 tables, secondary indexes (all 4 `IndexKind` × `Uniqueness` combinations),
-and real pre-apply cross-table validation. `Persistent`-kind tables and the
-secondary-index read-your-own-writes overlay are designed here but not yet
-built (Milestones 3 and 4). This section describes the target shape; where
-something is still a stub, it says so explicitly.
+real pre-apply cross-table validation, and `Persistent`-kind tables with
+`.Storage` (Load/Evict/Peek). The secondary-index read-your-own-writes
+overlay, and secondary indexes on `Persistent`-kind tables at all, are
+designed but not yet built (Milestone 4+). This section describes the
+target shape; where something is still a stub, it says so explicitly.
+
+**`Persistent`-kind tables drive a real `PersistentTable<TKey,TRow>`, not
+inlined storage.** Unlike `Instant`-kind tables (which own a `DenseArray<TRow>`
+and a concrete index field directly), a `[Table(TableKind.Persistent, ...)]`
+row's generated `Ops` class holds and drives a `PersistentTable<TKey,TRow>` —
+because `ColdStore`/`ColdTable`, the primitives that would otherwise need
+inlining, are `internal` to `RhinoDB.Lib` and unreachable from generated
+code living in the consuming assembly. `PersistentTable` is the one public
+facade that can reach them, so for `Persistent`-kind tables it keeps
+exactly the role `Table<TKey,TRow>` used to play for `Instant`-kind ones
+before its own retirement: a hand-written, interface/delegate-driven engine
+the generator constructs and drives. The generated `{Db}` class needs a
+`ColdStore` to build these — a `[Database]` class with at least one
+`Persistent`-kind table gets a generated `public {Db}(ColdStore cold) :
+base(cold)` constructor (and *only* that constructor — no parameterless
+one), constructing each `PersistentTable` in its body rather than a field
+initializer (field initializers can't reference even an inherited instance
+property like `Cold`, the same `CS0236` category hit during the interface
+retirement above — the constructor's own `cold` parameter is used directly
+instead). Secondary indexes on `Persistent`-kind tables are not yet
+supported (a real compile-time diagnostic, not a silent drop — see below)
+since `PersistentTable` doesn't yet report the offset/swap information a
+generated `Ops` class would need to maintain them itself, the same
+`InsertReturningOffset`/`DeleteReturningSwap` capability `Table<TKey,TRow>`
+gained before it was retired.
+
+**`.Storage` groups `Persistent`-kind-only `Load`/`Evict`/`Peek`.** These
+already only ever touch the underlying `PersistentTable` directly, never
+the staged-change log, so they need no staging or validation of their own —
+`tx.Accounts.Storage.Load(id)`, not staged through `Insert`/`Update`/`Delete`.
 
 Every `[Table]`-attributed row type gets a generated per-table `Ops`
 class; every `[Database]`-attributed class gets a generated `{Db}Transaction`
@@ -235,10 +266,11 @@ there's nothing for an `Accessor` to rename.
 **Every rule the generator relies on is a diagnostic, not a silent
 assumption or a crash.** A missing `[PrimaryKey]`, an empty `Accessor`
 string, a composite index whose fields disagree on `Kind`/`Uniqueness`, one
-with more than 3 fields, or two fields with the same explicit `Order` — each
-is a real Roslyn diagnostic (`RHINO001`-`RHINO005`) at the offending
-attribute's own location, and only *that* table is skipped, not the whole
-compilation.
+with more than 3 fields, two fields with the same explicit `Order`, or
+`[Index]` on a `Persistent`-kind table's field (not yet supported — see
+above) — each is a real Roslyn diagnostic (`RHINO001`-`RHINO006`) at the
+offending attribute's own location, and only *that* table is skipped, not
+the whole compilation.
 
 **Dirty flags, not a registry.** Each `Ops` class tracks its own `bool
 Dirty` (set the moment anything is actually staged — not on a no-op call,
