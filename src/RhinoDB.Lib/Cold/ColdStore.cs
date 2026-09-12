@@ -15,7 +15,8 @@ public sealed class ColdStore : IDisposable {
     private Task<int> pendingSync = Task.FromResult(0);
 
     internal Transaction? ActiveWriteTxn { get; private set; }
-    internal bool IsScopeActive { get; private set; }
+
+    public bool IsScopeActive { get; private set; }
 
     private ColdStore(MdbxEnvironment env) => this.env = env;
 
@@ -62,7 +63,7 @@ public sealed class ColdStore : IDisposable {
         return pendingSync;
     }
 
-    internal ColdTable<TKey, TRow> OpenTable<TKey, TRow>(string name)
+    public ColdTable<TKey, TRow> OpenTable<TKey, TRow>(string name)
         where TKey : IEquatable<TKey>, IComparable<TKey>
         where TRow : struct {
         if (tables.TryGetValue(name, out var existing)) return (ColdTable<TKey, TRow>)existing;
@@ -84,7 +85,22 @@ public sealed class ColdStore : IDisposable {
         return table;
     }
 
-    internal Result<TRow> Peek<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key)
+    public Result Put<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key, TRow row)
+        where TKey : IEquatable<TKey>, IComparable<TKey>
+        where TRow : struct
+        => table.Put(EnsureWriteTxn(), key, row);
+
+    public Result<TRow> Get<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key)
+        where TKey : IEquatable<TKey>, IComparable<TKey>
+        where TRow : struct
+        => table.Get(EnsureWriteTxn(), key);
+
+    public Result Delete<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key)
+        where TKey : IEquatable<TKey>, IComparable<TKey>
+        where TRow : struct
+        => table.Delete(EnsureWriteTxn(), key);
+
+    public Result<TRow> Peek<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key)
         where TKey : IEquatable<TKey>, IComparable<TKey>
         where TRow : struct {
         var rc = env.BeginTxn(ReadOnlyTxn, out Transaction? txn);

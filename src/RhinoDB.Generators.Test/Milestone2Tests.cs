@@ -64,10 +64,10 @@ public class Milestone2Tests {
 
     [Test]
     public async Task UniqueSecondaryIndex_ShortCode_FindsTheInsertedRow() {
-        // Two separate operations, deliberately: ShortCode reads the raw
-        // secondary index directly, not overlay-aware yet (Milestone 4's
-        // job - see the generator's comment on the accessor methods), so
-        // it only sees a row once Apply() has actually run.
+        // Two separate operations - proves the accessor also finds a row
+        // once Apply() has actually run and it's reading real storage, not
+        // just via the same-operation overlay. See Milestone4Tests.cs for
+        // the overlay-specific (same-operation) coverage.
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(

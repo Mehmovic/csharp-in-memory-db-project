@@ -12,8 +12,9 @@ not reconstructed here.
 Exactly two, and only two:
 
 - **`persistent`** — durable, libmdbx-backed. Can only be written inside an open
-  transaction — enforced at compile time via a distinct type (`PersistentTable<T>`
-  only exposes write methods when transaction-gated), not a runtime check.
+  transaction — enforced at runtime (`ColdStore.IsScopeActive`, checked explicitly
+  in generated `Apply()` code), not compile time; full compile-time enforcement
+  is a deferred, not-yet-built stretch goal (see Transactions below).
 - **`instant`** — in-memory only. Can be written either inside a transaction or
   directly.
 
@@ -108,43 +109,105 @@ global.
 
 ## Transactions
 
-**Status: Milestones 1-3 of the table generator are real** — `Instant`-kind
-tables, secondary indexes (all 4 `IndexKind` × `Uniqueness` combinations),
-real pre-apply cross-table validation, and `Persistent`-kind tables with
-`.Storage` (Load/Evict/Peek). The secondary-index read-your-own-writes
-overlay, and secondary indexes on `Persistent`-kind tables at all, are
-designed but not yet built (Milestone 4+). This section describes the
-target shape; where something is still a stub, it says so explicitly.
+**Status: Milestones 1-4 of the table generator are real, secondary indexes
+work on both table kinds, and `PersistentTable<TKey,TRow>` is gone from the
+codebase entirely.** `Instant`-kind tables, secondary indexes (all 4
+`IndexKind` × `Uniqueness` combinations) on both `Instant`- and
+`Persistent`-kind tables, real pre-apply cross-table validation,
+`Persistent`-kind tables with `.Storage` (Load/Evict/Peek, both secondary-
+index-aware), and the secondary-index read-your-own-writes overlay (also
+Persistent-kind-aware). This section describes the target shape; where
+something is still a stub, it says so explicitly.
 
-**`Persistent`-kind tables drive a real `PersistentTable<TKey,TRow>`, not
-inlined storage.** Unlike `Instant`-kind tables (which own a `DenseArray<TRow>`
-and a concrete index field directly), a `[Table(TableKind.Persistent, ...)]`
-row's generated `Ops` class holds and drives a `PersistentTable<TKey,TRow>` —
-because `ColdStore`/`ColdTable`, the primitives that would otherwise need
-inlining, are `internal` to `RhinoDB.Lib` and unreachable from generated
-code living in the consuming assembly. `PersistentTable` is the one public
-facade that can reach them, so for `Persistent`-kind tables it keeps
-exactly the role `Table<TKey,TRow>` used to play for `Instant`-kind ones
-before its own retirement: a hand-written, interface/delegate-driven engine
-the generator constructs and drives. The generated `{Db}` class needs a
-`ColdStore` to build these — a `[Database]` class with at least one
-`Persistent`-kind table gets a generated `public {Db}(ColdStore cold) :
-base(cold)` constructor (and *only* that constructor — no parameterless
-one), constructing each `PersistentTable` in its body rather than a field
-initializer (field initializers can't reference even an inherited instance
-property like `Cold`, the same `CS0236` category hit during the interface
-retirement above — the constructor's own `cold` parameter is used directly
-instead). Secondary indexes on `Persistent`-kind tables are not yet
-supported (a real compile-time diagnostic, not a silent drop — see below)
-since `PersistentTable` doesn't yet report the offset/swap information a
-generated `Ops` class would need to maintain them itself, the same
-`InsertReturningOffset`/`DeleteReturningSwap` capability `Table<TKey,TRow>`
-gained before it was retired.
+**`Persistent`-kind tables own their physical storage directly now, just
+like `Instant`-kind ones.** This used to be the one real asymmetry between
+the two kinds: `Instant`-kind tables owned a `DenseArray<TRow>` and a
+concrete index field directly, while `Persistent`-kind ones drove a
+hand-written `PersistentTable<TKey,TRow>` composing `ColdStore`/`ColdTable` —
+because those cold-storage primitives were `internal` to `RhinoDB.Lib` and
+generated code, living in the consuming assembly, couldn't reach them.
+That's no longer true: `ColdStore` now exposes a narrow public surface
+purpose-built for generated code to drive directly —
+`OpenTable<TKey,TRow>(name)`, `Put`/`Get`/`Delete`/`Peek<TKey,TRow>
+(ColdTable<TKey,TRow>, ...)`, and a public `IsScopeActive` getter — and
+`ColdTable<TKey,TRow>` itself is a public opaque handle type. Notably,
+`RhinoDB.Native.Transaction` and `ColdStore`'s own txn-lifecycle machinery
+(`EnsureWriteTxn`/`BeginScope`/`EndScope`) stay entirely `internal` —
+generated code never manages a write transaction's lifecycle itself, only
+checks `IsScopeActive` before writing (the same guard `PersistentTable` used
+to enforce internally, now an explicit check at the top of each `Apply()`
+case). A `Persistent`-kind `Ops` class's fields/constructor/`Get`/secondary-
+index accessors are now **identical in shape** to an `Instant`-kind one
+(same `storage`/`primaryIndex` fields, same memory-only read logic — see
+decision 1 below) — `isPersistent` only changes two things: two extra fields
+(`coldTable`, `cold`) and their constructor wiring, and `Apply()`'s
+Insert/Update/Delete cases doing one extra `cold.Put`/`cold.Delete` call
+after the same in-memory mutation `Instant` kind does. A cold-write failure
+does **not** roll back the already-applied in-memory mutation — a
+pre-existing, documented limitation carried over unchanged from
+`PersistentTable`, not introduced by this retirement. The generated `{Db}`
+class still needs a `ColdStore` to open each table's `ColdTable` handle — a
+`[Database]` class with at least one `Persistent`-kind table gets a
+generated `public {Db}(ColdStore cold) : base(cold)` constructor (and
+*only* that constructor — no parameterless one), opening each `ColdTable`
+in the constructor body via `cold.OpenTable<TKey,TRow>(accessor)` rather
+than a field initializer (field initializers can't reference even an
+inherited instance property like `Cold`, the same `CS0236` category hit
+during the interface retirement above — the constructor's own `cold`
+parameter is used directly instead, and stored in a shared `cold` field
+every `Persistent`-kind `Ops` instance is constructed with).
+
+`PersistentTable<TKey,TRow>` played exactly the role `Table<TKey,TRow>`
+used to play for `Instant`-kind tables before *its* retirement — a
+hand-written, interface/delegate-driven engine the generator constructed
+and drove, kept alive only by an accessibility barrier codegen couldn't
+cross. Once that barrier was removed, it was retired the same way, on your
+explicit direction: *"now let us go toward removing the Persistent table
+and put the logic into the generator totally."* Its own hand-written test
+suites (`Cold/PersistentTableTests.cs`, `Cold/LoadEvictPeekTests.cs`) are
+gone too — their still-valuable scenarios (decisions 1/3/4 proofs, delete/
+insert durability round trips, async-sync behavior, primary-key immutability)
+were ported to `RhinoDB.Generators.Test/PersistentDurabilityTests.cs`,
+proving the same guarantees hold through the generated path with nothing
+underneath. Porting that coverage surfaced a real, pre-existing gap
+independent of the retirement itself: `Validate()` never checked that an
+`Update`'s target key actually exists (for either table kind) — an `Update`
+of a genuinely nonexistent key passed `Validate()` and then silently no-op'd
+inside `Apply()` (whose own per-case error handling doesn't propagate to the
+caller, by design — `Apply()` is only ever meant to run after `Validate()`
+has already confirmed nothing can fail), reporting `Result.Ok()` for an
+update that never happened. Fixed by adding the same batch-local-then-
+committed existence scan `Insert`'s duplicate check already used, inverted.
+
+**`.Storage`'s `Load`/`Evict` read/write `storage`/`primaryIndex`/every
+secondary index field directly now, the same way `Apply()`'s `Delete` case
+already does its own swap-remove handling** — there's no engine class left
+to delegate to. `StorageAccessor` holds a reference to the enclosing `Ops`
+instance and routes `Load`/`Evict` through two private `Ops` methods:
+- **`LoadInternal`** checks `primaryIndex.GetOffset(id)` first — idempotent,
+  so an already-loaded row is a no-op that touches neither cold storage nor
+  any index a second time (inserting into a `HashIndex`-backed unique index
+  twice for the same row would be a spurious duplicate). Only on a genuine
+  cold read does it insert the row into `storage`/`primaryIndex`/every
+  secondary index at the newly assigned offset.
+- **`EvictInternal`** removes the evicted row's secondary-index entries and,
+  if `DenseArray.Delete` relocated the physically-last row into the freed
+  slot, repoints that row's entries too — all without touching cold storage,
+  since `Evict` never does (the durable copy stays; see Cold storage
+  decision 2 below).
+
+Without this Load/Evict index-maintenance, a `Load`/`Evict` call would
+silently desync a table's secondary indexes from its real memory contents —
+`Load`'d rows would be invisible to `By{Field}` accessors, and evicted rows
+(or ones relocated by an eviction's swap-remove) would leave stale or
+misdirected entries behind. Caught and fixed before this ever shipped, not
+found in production: writing the first Persistent-kind index test surfaced
+it immediately, well before `PersistentTable` itself was retired.
 
 **`.Storage` groups `Persistent`-kind-only `Load`/`Evict`/`Peek`.** These
-already only ever touch the underlying `PersistentTable` directly, never
-the staged-change log, so they need no staging or validation of their own —
-`tx.Accounts.Storage.Load(id)`, not staged through `Insert`/`Update`/`Delete`.
+never touch the staged-change log, so they need no staging or validation of
+their own — `tx.Accounts.Storage.Load(id)`, not staged through `Insert`/
+`Update`/`Delete`.
 
 Every `[Table]`-attributed row type gets a generated per-table `Ops`
 class; every `[Database]`-attributed class gets a generated `{Db}Transaction`
@@ -171,7 +234,8 @@ below — unchanged by any of this).
 
 **Reads stay direct, and see the same operation's own not-yet-applied
 writes.** An `Ops.Get` scans its own staged changes most-recent-first before
-falling through to the real `Table`/`PersistentTable` — a `Delete` entry
+falling through to real storage (`primaryIndex`/`storage`, direct fields
+either way now) — a `Delete` entry
 means "not found," an `Insert`/`Update` entry returns that staged row
 directly. This is why a staged `Change`'s key has to be final the moment it's
 staged, not resolved later at apply time (see `AutoIncrement` below) — the
@@ -204,10 +268,22 @@ exist in committed storage (because it was inserted earlier in this *same*
 batch, not yet applied) skips its own pre-check and falls through to
 `Apply()`'s in-order replay to resolve correctly — the same way this already
 worked before Milestone 2, since two-phase pre-validation doesn't change
-apply order. `Ops`'s secondary-index read accessors are direct against the
-real index and real storage only — **not** overlay-aware (they don't see
-this operation's own not-yet-applied writes by secondary key, unlike the
-primary-key `Get`) — that harder half is Milestone 4's job.
+apply order. **Real as of Milestone 4**: `Ops`'s secondary-index read
+accessors are now overlay-aware too, the harder half `ChangeSet` v1
+deliberately deferred. The check is gated on `Dirty` — the common case (no
+staged writes yet on this table) costs nothing extra, same fast path as
+before this milestone. When dirty, a backward scan (mirroring `Validate()`'s
+duplicate-key check) finds each touched key's *final* staged state in this
+batch — the last entry for that key, walking forward from it to confirm no
+later entry supersedes it — and returns an overlay hit immediately if that
+final row's indexed field matches. If nothing in the batch matches, the real
+index/storage is consulted, but a real hit is trusted only if its primary
+key was never touched by this batch at all — otherwise the real entry is
+known-stale (the batch already resolved that key to something else, or
+deleted it) and reporting it would show the caller data this operation
+itself is about to overwrite or remove. No new allocation: the scan is
+`Span`-based over the existing `changes` list, same as the rest of this
+section.
 
 **`Table<TKey,TRow>` — the generic, interface/delegate-driven engine both
 hand-written code and codegen used to share — is gone from the codebase
@@ -230,15 +306,16 @@ and the generated `Ops` class drives all of it itself — `Insert`/`Update`/
 relocates the physically-last row to fill a gap — with no interface
 dispatch and no `Func<TRow,TKey> selector` delegate call anywhere; every
 key read is a literal `row.{PrimaryKeyName}` field access, known at
-generation time. `PersistentTable<TKey,TRow>` absorbed `Table`'s old logic
-directly (merged, not composed) rather than being retired the same way —
-it's still a hand-written, generically reusable class, since Milestone 3
-hasn't wired persistent-kind codegen up yet to inline into. `IUniqueIndex<TKey>`
-and the concrete raw index types are untouched — `IUniqueIndex<TKey>` is
-still genuinely load-bearing for `PersistentTable`'s primary-key slot (a
-runtime choice between `HashIndex`/`OrderedIndex`, same reason `Table` used
-to need it), and the raw index types are still constructed directly by both
-codegen and plenty of hand-written tests.
+generation time. At this point in the timeline, `PersistentTable<TKey,TRow>`
+had absorbed `Table`'s old logic directly (merged, not composed) rather than
+being retired the same way, since Milestone 3 hadn't wired persistent-kind
+codegen up yet to inline into — it was eventually retired too, once that
+barrier was removed (see above). `IUniqueIndex<TKey>` and the concrete raw
+index types are untouched by any of this — `IUniqueIndex<TKey>` is still
+genuinely load-bearing on the primary-key slot (a runtime choice between
+`HashIndex`/`OrderedIndex`, same reason `Table` used to need it), and the
+raw index types are still constructed directly by both codegen and plenty
+of hand-written tests.
 
 **`[Index]`'s `Accessor` and `Order` parameters, and composite indexes.**
 The generated accessor method is named for the field itself by default
@@ -262,6 +339,19 @@ no *other* generated symbol that refers to it by a name distinct from the
 class's own — everything (`{Db}Transaction`, `[Table(kind, typeof(WidgetDb))]`)
 already derives from the class name the author already fully controls, so
 there's nothing for an `Accessor` to rename.
+
+**`[Table].ChunkSize`** (default `4096`) sets the generated `DenseArray<TRow>`
+storage field's chunk size — a bigger, densely-populated table can raise it
+to grow in larger strides (fewer chunk allocations); a small or
+rarely-populated one can lower it to avoid over-allocating up front.
+`DenseArray` itself rounds whatever value is given up to the next power of
+2, same as every other `chunkSize` in this codebase. A missing `ChunkSize`
+in the attribute usage isn't distinguishable from an explicit `4096` at the
+Roslyn `AttributeData` level (`NamedArguments` simply has no entry for it),
+so the generator falls back to the same `4096` default the attribute's own
+`{ get; set; } = 4096` property initializer declares — the two defaults are
+kept in sync by hand since a source generator can't read a property's C#
+initializer expression, only what's actually present in `NamedArguments`.
 
 **Every rule the generator relies on is a diagnostic, not a silent
 assumption or a crash.** A missing `[PrimaryKey]`, an empty `Accessor`
@@ -352,17 +442,21 @@ for why: the generic `Table<TKey,TRow>` that used to fill that role was
 retired from the codebase once codegen stopped needing its interface/delegate
 indirection). The generated `Ops` class drives storage and every index
 (primary and secondary) itself, unrolled per index — a delete's swap-remove
-repoints *every* index on the table, not just the primary, and `Update`
-always unconditionally re-registers every index against the new row to
-avoid a false self-collision (a found entry in a unique index is only a real
-conflict if it belongs to a different offset than the row's own).
+repoints *every* index on the table, not just the primary. `Update` only
+re-registers an index whose own field(s) actually changed (`oldRow`'s key
+expression compared against the new row's via `.Equals()`, skipping the
+Delete+Insert pair when equal — added 2026-09-12; see § Transactions'
+Apply() note for the historical bug this has to avoid). A found entry in a
+unique index during validation is only a real conflict if it belongs to a
+different offset than the row's own (the self-offset-aware check, unrelated
+to and unaffected by this apply-time optimization).
 Hand-written, non-generated code that still wants a general-purpose
 multi-index table coordinator (there is currently no such use case in the
-codebase — `PersistentTable<TKey,TRow>` inlines its own storage +
-`IUniqueIndex<TKey>` primary slot directly, the same shape `Table` used to
-have, since it's still generically reusable pending Milestone 3) can still
-compose `DenseArray<TRow>` plus the raw index types by hand; nothing about
-their removal from the generated path prevents that.
+codebase — both table kinds now inline their own storage + primary-index
+slot directly in generated code, the same shape `Table`/`PersistentTable`
+used to have as standalone classes) can still compose `DenseArray<TRow>`
+plus the raw index types by hand; nothing about their removal from the
+generated path prevents that.
 
 Indexes are declared explicitly per table, never defaulted — each one is a real
 cost (write-path maintenance), so it's a decision, not a default:
@@ -489,7 +583,7 @@ measured fsync-latency/throughput curve for the actual target hardware would
 be worse than not having the knob at all. Why this is safe to defer without
 boxing anything in: the entire mechanism is already isolated to one place,
 `ColdStore.EndScope`'s sync-firing branch — adding the delay touches nothing
-in `DbExecutionLoop`, `PersistentTable`, or any already-shipped
+in `DbExecutionLoop` or any already-shipped generated
 `Insert`/`Update`/`Delete`/`Load`/`Evict`/`Peek` code, the same containment
 that already let the original async-sync addendum land without perturbing
 anything built before it.

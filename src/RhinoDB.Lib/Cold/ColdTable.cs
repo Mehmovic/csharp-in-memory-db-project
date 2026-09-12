@@ -3,7 +3,7 @@ using RhinoDB.Native;
 
 namespace RhinoDB.Lib.Cold;
 
-internal sealed class ColdTable<TKey, TRow>(uint dbi)
+public sealed class ColdTable<TKey, TRow>(uint dbi)
     where TKey : IEquatable<TKey>, IComparable<TKey>
     where TRow : struct {
     internal uint Dbi { get; } = dbi;

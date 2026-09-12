@@ -1,12 +1,16 @@
 namespace RhinoDB.Lib.Cold.Test;
 
-// ColdStore is internal (RhinoDB.Lib.Test sees it via InternalsVisibleTo, same as
-// every other internal-surface suite in this project) - it's the per-DbContext
-// libmdbx environment wrapper PersistentTable<TKey,TRow> composes over, per
-// Docs/02-architecture.md "Cold storage". These tests exercise real libmdbx via the
-// Part A native binding against a real temp directory - no mocking layer, matching
-// how every other stage in this repo has been proven (e.g. Test.Native's real
-// dotnet test runs against the actual mdbx.dll).
+// ColdStore is the per-DbContext libmdbx environment wrapper, per
+// Docs/02-architecture.md "Cold storage" - generated code (via TableGenerator)
+// drives it directly now, through a narrow public surface (OpenTable/Put/Get/
+// Delete/Peek/IsScopeActive). This suite exercises the LOWER-level, still-internal
+// primitives directly instead (RhinoDB.Lib.Test sees them via InternalsVisibleTo,
+// same as every other internal-surface suite in this project) - EnsureWriteTxn/
+// BeginScope/EndScope/ColdTable's own Put/Get(Transaction,...) overloads - since
+// those never cross the assembly boundary generated code lives behind. These tests
+// exercise real libmdbx via the Part A native binding against a real temp
+// directory - no mocking layer, matching how every other stage in this repo has
+// been proven (e.g. Test.Native's real dotnet test runs against the actual mdbx.dll).
 public class ColdStoreTests {
     private string dir = "";
 
@@ -129,7 +133,7 @@ public class ColdStoreTests {
         store.EndScope(commit: true, forceSync: false);
     }
 
-    // ---- Scope tracking (what PersistentTable's NoActiveTransaction guard checks) ----
+    // ---- Scope tracking (what generated Apply()'s NoActiveTransaction guard checks) ----
 
     [Test]
     public void IsScopeActive_BeforeAnyBeginScope_IsFalse() {
@@ -147,5 +151,67 @@ public class ColdStoreTests {
 
         store.EndScope(commit: true, forceSync: false);
         Assert.That(store.IsScopeActive, Is.False);
+    }
+
+    // ---- Put/Get/Delete/Peek: the public wrapper surface generated code drives
+    // directly (added when PersistentTable<TKey,TRow> was retired in favor of
+    // codegen driving cold storage itself) - each wraps the ambient-txn machinery
+    // above without exposing RhinoDB.Native.Transaction across the assembly
+    // boundary. Callers check IsScopeActive themselves first (these three don't
+    // check it internally), so BeginScope() is called explicitly here too. ----
+
+    [Test]
+    public void Put_ThenGet_RoundTripsTheValue() {
+        using var store = ColdStore.Open(dir).Unwrap();
+        var accounts = store.OpenTable<int, Account>("accounts");
+        store.BeginScope();
+
+        var put = store.Put(accounts, 1, new Account(1, "alice@example.com", 100m));
+        var get = store.Get(accounts, 1);
+
+        Assert.That(put.IsOk(), Is.True);
+        Assert.That(get.Unwrap(), Is.EqualTo(new Account(1, "alice@example.com", 100m)));
+        store.EndScope(commit: true, forceSync: false);
+    }
+
+    [Test]
+    public void Get_AGenuinelyAbsentKey_ReturnsError() {
+        using var store = ColdStore.Open(dir).Unwrap();
+        var accounts = store.OpenTable<int, Account>("accounts");
+        store.BeginScope();
+
+        var get = store.Get(accounts, 999);
+
+        Assert.That(get.IsError(), Is.True);
+        store.EndScope(commit: true, forceSync: false);
+    }
+
+    [Test]
+    public void Delete_ThenGet_ReturnsError() {
+        using var store = ColdStore.Open(dir).Unwrap();
+        var accounts = store.OpenTable<int, Account>("accounts");
+        store.BeginScope();
+        store.Put(accounts, 1, new Account(1, "alice@example.com", 100m));
+
+        var delete = store.Delete(accounts, 1);
+        var get = store.Get(accounts, 1);
+
+        Assert.That(delete.IsOk(), Is.True);
+        Assert.That(get.IsError(), Is.True);
+        store.EndScope(commit: true, forceSync: false);
+    }
+
+    [Test]
+    public void Peek_AfterCommit_ReadsTheValueWithoutRequiringAnActiveScope() {
+        using var store = ColdStore.Open(dir).Unwrap();
+        var accounts = store.OpenTable<int, Account>("accounts");
+        store.BeginScope();
+        store.Put(accounts, 1, new Account(1, "alice@example.com", 100m));
+        store.EndScope(commit: true, forceSync: false);
+
+        // No BeginScope() here - Peek opens its own independent read-only txn.
+        var peek = store.Peek(accounts, 1);
+
+        Assert.That(peek.Unwrap(), Is.EqualTo(new Account(1, "alice@example.com", 100m)));
     }
 }

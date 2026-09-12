@@ -62,10 +62,11 @@ primary-key slot (`IUniqueIndex<TPk>`, `Func<TRow,TKey> selector`): the
 generator always knows a table's exact concrete primary-index type and
 primary-key field name at generation time, so it now owns `DenseArray<TRow>`
 + a concrete index field directly, no coordinator type in between. This
-paragraph, and `PersistentTable<TKey,TRow>` (which absorbed `Table`'s old
-logic directly rather than being retired — still hand-written and
-generically reusable pending Milestone 3), are what's left of Stage 3's
-original shape. See
+paragraph, and (at the time) `PersistentTable<TKey,TRow>` (which absorbed
+`Table`'s old logic directly rather than being retired the same way, since
+persistent-kind codegen didn't exist yet to inline into) were what was left
+of Stage 3's original shape. `PersistentTable` was itself retired once that
+barrier was removed — see Stage 5. See
 [Architecture § Storage engine](02-architecture.md#storage-engine-in-memory).
 
 Next: generate this from a declarative table definition via source generator
@@ -107,19 +108,33 @@ overloads, `RunConfirmed`, ordering under single- and multi-thread concurrent
 submission, exception safety, and the no-adjacency-guarantee-across-separate-calls
 property.
 
-## Stage 5 — Cold storage (libmdbx) ✅ done (through Milestone 3)
+## Stage 5 — Cold storage (libmdbx) ✅ done
 
 MemoryPack serialization (positional, no version tags), per-table sub-databases,
 `Load`/`Evict`/`Peek` distinct from `Insert`/`Delete`. Imperative, per-table,
 batched schema migration — versioning tracked as generated code, not runtime tags.
-Real: native libmdbx binding, `ColdStore`/`ColdTable`/`PersistentTable<TKey,TRow>`,
-the async-durability-sync design, and — as of Milestone 3, 2026-09-12 — the table
-generator's `TableKind.Persistent` support (a generated `Ops` class drives a real
-`PersistentTable` directly, `.Storage.Load/Evict/Peek` wired through, cross-kind
-atomicity with `Instant` tables in one `Transaction.Apply()`) — see
+Real: native libmdbx binding, `ColdStore`/`ColdTable`, the async-durability-sync
+design, the table generator's `TableKind.Persistent` support (`.Storage.Load/
+Evict/Peek` wired through, cross-kind atomicity with `Instant` tables in one
+`Transaction.Apply()`, Milestone 3), the secondary-index read-your-own-writes
+overlay on `Instant`-kind tables (Milestone 4, `By{Field}`-style accessors see
+this operation's own staged-but-unapplied writes, gated on `Dirty` so the
+no-staged-writes case costs nothing extra), secondary indexes on `Persistent`-
+kind tables too (2026-09-12, the old `RHINO006` restriction lifted), and — also
+2026-09-12 — `PersistentTable<TKey,TRow>` retired from the codebase entirely,
+on your explicit direction ("now let us go toward removing the Persistent
+table and put the logic into the generator totally"): `ColdStore` gained a
+narrow public surface (`OpenTable`/`Put`/`Get`/`Delete`/`Peek`/`IsScopeActive`)
+generated code drives directly, so a `Persistent`-kind `Ops` class's fields/
+constructor/reads are now identical in shape to an `Instant`-kind one (same
+`storage`/`primaryIndex` fields) — `isPersistent` only adds a `coldTable`/`cold`
+pair and one extra cold write-through call per `Apply()` case. Same "hand-prove
+then delete the scaffold" treatment `Table<TKey,TRow>` got. Porting
+`PersistentTable`'s own deleted test suites surfaced a real, pre-existing gap
+independent of the retirement: `Validate()` never checked that an `Update`'s
+target key actually exists (either table kind) - fixed. See
 [Architecture — Transactions](02-architecture.md#transactions). Not yet built:
-secondary indexes on `Persistent`-kind tables (`RHINO006`), schema migration
-tooling, eager-load-on-startup.
+schema migration tooling, eager-load-on-startup.
 
 ## Stage 6 — Change propagation ⏳ designed, not built
 

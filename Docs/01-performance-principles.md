@@ -97,11 +97,13 @@ This is the intended shape for *all* of it, not just index maintenance:
 
 - **Index maintenance** — the generator knows at compile time which index depends
   on which field(s), so `Update` only touches the indexes whose backing field
-  actually changed, instead of blindly re-registering everywhere. **Not yet
-  built** — every generated `Ops.Apply()` still unconditionally re-registers
-  every index on `Update`, matching the standing self-collision-fix behavior
-  from Stage 3; deferred until profiling shows it matters, not assumed to
-  matter up front.
+  actually changed, instead of blindly re-registering everywhere. **Done
+  2026-09-12**: `Ops.Apply()`'s `Update` case compares each index's key
+  expression on the old vs. new row via `.Equals()` and skips the
+  Delete+Insert pair when unchanged — see Docs/02-architecture.md § Storage
+  engine for the historical self-collision bug this had to avoid (an early
+  attempt apparently skipped under the wrong condition and left a stale
+  entry behind).
 - **Per-table accessors** — a generated `Ops` class (`WidgetOps`, `ClubOps`, ...)
   owns a `DenseArray<TRow>` field and a concrete primary/secondary index field
   per index directly (no generic coordinator type in between — see

@@ -5,10 +5,9 @@ namespace RhinoDB.Lib.Cold.Test;
 // Account is purpose-built for Stage 5 the same way Player was purpose-built to
 // hand-prove Stage 3 (see Docs/03-roadmap.md) - not retrofitted onto an existing
 // row type, so this suite can't perturb anything already green. Serialize/deserialize
-// correctness only, fully decoupled from libmdbx - no ColdStore/PersistentTable
-// involved here at all. Reused as-is by Cold/PersistentTableTests.cs and
-// Cold/ColdStoreTests.cs once those land, so every Stage 5 test targets the same
-// concrete row shape.
+// correctness only, fully decoupled from libmdbx - no ColdStore involved here at
+// all. Reused as-is by Cold/ColdStoreTests.cs, so every Stage 5 test targets the
+// same concrete row shape.
 [MemoryPackable]
 public readonly partial record struct Account(int Id, string Owner, decimal Balance);
 

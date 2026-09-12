@@ -5,13 +5,12 @@ using RhinoDB.Lib.Execution;
 namespace RhinoDB.Test.Generators;
 
 // Milestone 3: TableKind.Persistent + .Storage (Load/Evict/Peek) wired
-// through the generated Apply() path. Persistent-kind tables drive a real
-// PersistentTable<TKey,TRow> (see TableGenerator.cs's file-level comment
-// for why - ColdStore/ColdTable are internal to RhinoDB.Lib, generated
-// code in a consuming assembly can't reach them directly), so these tests
-// exercise real libmdbx-backed durability through the generated path - the
-// same rigor Cold/PersistentTableTests.cs already proved for the
-// hand-driven PersistentTable itself.
+// through the generated Apply() path. These tests exercise real
+// libmdbx-backed durability through the generated path directly - as of
+// 2026-09-12, Persistent-kind tables inline their own storage/ColdTable
+// fields the same way Instant-kind tables always have (see
+// TableGenerator.cs's file-level comment) - PersistentTable<TKey,TRow>,
+// the hand-written engine that used to sit in between, is gone.
 public class Milestone3Tests {
     private string dir = "";
 
