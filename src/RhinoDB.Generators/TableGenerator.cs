@@ -426,6 +426,20 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
+        // Sequential enumeration of every row currently in memory, in
+        // DenseArray offset order - real storage only, deliberately NOT
+        // overlay-aware (unlike Get, a full scan merging in this
+        // operation's own staged-but-unapplied changes would need to skip
+        // deleted rows and dedupe updated ones; not built until a real need
+        // shows up, matching this project's "declared explicitly, don't
+        // build ahead of a proven need" posture elsewhere). Lazy (`yield
+        // return`) since a full-table walk is already the explicitly-slow
+        // escape hatch, not a hot-path accessor.
+        sb.AppendLine($"    public IEnumerable<{row}> Iter() {{");
+        sb.AppendLine("        for (var i = 0; i < storage.Count; i++) yield return storage.Get(i);");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
         // Secondary-index read accessors - overlay-aware (Milestone 4): when
         // Dirty, this operation's own staged-but-not-yet-applied changes are
         // consulted before falling back to the real index/storage, the same
