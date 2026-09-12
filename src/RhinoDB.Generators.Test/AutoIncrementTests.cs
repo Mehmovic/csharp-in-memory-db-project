@@ -106,4 +106,192 @@ public class AutoIncrementTests {
 
         Assert.That(foundSecond, Is.True);
     }
+
+    // Proves genuine per-field independence, not just "both fields happen to
+    // move together" - Id's counter is called on every insert, Sequence's
+    // only when Sequence is left at 0. Row A supplies an explicit Sequence
+    // (its counter never fires), row B leaves both at 0. If the two counters
+    // were accidentally shared/aliased, Sequence would come back 2 on row B
+    // (matching Id's second call) instead of the correct 1 (its own first call).
+    [Test]
+    public async Task TwoAutoIncrementFieldsOnOneTable_TrackIndependentSequences() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class WidgetDb : DbContext<WidgetDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(WidgetDb))]
+            public readonly partial record struct Widget([PrimaryKey][AutoIncrement] int Id, [AutoIncrement] long Sequence, string Name);
+            """;
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
+        var dbType = asm.GetType("TestNs.WidgetDb")!;
+        var txType = asm.GetType("TestNs.WidgetDbTransaction")!;
+        var widgetType = asm.GetType("TestNs.Widget")!;
+        var db = Activator.CreateInstance(dbType)!;
+
+        var rowA = Activator.CreateInstance(widgetType, 0, 999L, "A")!;
+        var rowB = Activator.CreateInstance(widgetType, 0, 0L, "B")!;
+
+        long sequenceOfB = -1;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                dtx.Widgets.Insert((dynamic)rowA);
+                dtx.Widgets.Insert((dynamic)rowB);
+                dynamic found = dtx.Widgets.Get(2);
+                sequenceOfB = found.IsOk() ? (long)found.Unwrap().Sequence : -1;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(sequenceOfB, Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task AutoIncrementField_GuardedByAUniqueIndex_AutoAssignsDistinctValues() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class TicketDb : DbContext<TicketDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(TicketDb))]
+            public readonly partial record struct Ticket([PrimaryKey] int Id, [Index(IndexKind.Hash, Uniqueness.Unique)][AutoIncrement] int Code, string Name);
+            """;
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
+        var dbType = asm.GetType("TestNs.TicketDb")!;
+        var txType = asm.GetType("TestNs.TicketDbTransaction")!;
+        var ticketType = asm.GetType("TestNs.Ticket")!;
+        var db = Activator.CreateInstance(dbType)!;
+
+        var first = Activator.CreateInstance(ticketType, 1, 0, "First")!;
+        var second = Activator.CreateInstance(ticketType, 2, 0, "Second")!;
+
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                dtx.Tickets.Insert((dynamic)first);
+                dtx.Tickets.Insert((dynamic)second);
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        // Code() is a secondary-index accessor - not overlay-aware (that's
+        // Milestone 4), so it only sees rows after Apply() has physically
+        // run, i.e. from a later operation, not the one that staged the insert.
+        var foundBothByCode = false;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                dynamic byCode1 = dtx.Tickets.Code(1);
+                dynamic byCode2 = dtx.Tickets.Code(2);
+                foundBothByCode = byCode1.IsOk() && byCode2.IsOk();
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(foundBothByCode, Is.True);
+    }
+
+    [Test]
+    public async Task SignedAutoIncrementField_WithNegativeExplicitValue_StillAutoAssigns() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class NegDb : DbContext<NegDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(NegDb))]
+            public readonly partial record struct Item([PrimaryKey][AutoIncrement] int Id, string Name);
+            """;
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
+        var dbType = asm.GetType("TestNs.NegDb")!;
+        var txType = asm.GetType("TestNs.NegDbTransaction")!;
+        var itemType = asm.GetType("TestNs.Item")!;
+        var db = Activator.CreateInstance(dbType)!;
+
+        var negative = Activator.CreateInstance(itemType, -5, "Negative")!;
+
+        var assignedPositive = false;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                dtx.Items.Insert((dynamic)negative);
+                dynamic found = dtx.Items.Get(1);
+                assignedPositive = found.IsOk();
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(assignedPositive, Is.True);
+    }
+
+    [Test]
+    public async Task UnsignedAutoIncrementField_TriggersOnlyOnExplicitZero() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class CrateDb : DbContext<CrateDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(CrateDb))]
+            public readonly partial record struct Crate([PrimaryKey][AutoIncrement] uint Id, string Name);
+            """;
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
+        var dbType = asm.GetType("TestNs.CrateDb")!;
+        var txType = asm.GetType("TestNs.CrateDbTransaction")!;
+        var crateType = asm.GetType("TestNs.Crate")!;
+        var db = Activator.CreateInstance(dbType)!;
+
+        var zero = Activator.CreateInstance(crateType, 0u, "Zero")!;
+        var explicitValue = Activator.CreateInstance(crateType, 7u, "Seven")!;
+
+        bool autoAssignedFound, explicitPreserved;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                dtx.Crates.Insert((dynamic)zero);
+                dtx.Crates.Insert((dynamic)explicitValue);
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                dynamic byAuto = dtx.Crates.Get(1u);
+                dynamic byExplicit = dtx.Crates.Get(7u);
+                autoAssignedFound = byAuto.IsOk();
+                explicitPreserved = byExplicit.IsOk();
+                Assert.That(autoAssignedFound, Is.True);
+                Assert.That(explicitPreserved, Is.True);
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+    }
+
+    [Test]
+    public void AutoIncrementOnNonIntegerField_ReportsRHINO007() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class BadDb : DbContext<BadDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(BadDb))]
+            public readonly partial record struct Invoice([PrimaryKey] int Id, [AutoIncrement] decimal Amount);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO007"));
+    }
 }

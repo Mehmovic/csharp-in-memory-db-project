@@ -266,11 +266,12 @@ there's nothing for an `Accessor` to rename.
 **Every rule the generator relies on is a diagnostic, not a silent
 assumption or a crash.** A missing `[PrimaryKey]`, an empty `Accessor`
 string, a composite index whose fields disagree on `Kind`/`Uniqueness`, one
-with more than 3 fields, two fields with the same explicit `Order`, or
-`[Index]` on a `Persistent`-kind table's field (not yet supported — see
-above) — each is a real Roslyn diagnostic (`RHINO001`-`RHINO006`) at the
-offending attribute's own location, and only *that* table is skipped, not
-the whole compilation.
+with more than 3 fields, two fields with the same explicit `Order`, `[Index]`
+on a `Persistent`-kind table's field (not yet supported — see above), or
+`[AutoIncrement]` on a field whose type isn't one of the eight standard
+integer types — each is a real Roslyn diagnostic (`RHINO001`-`RHINO007`) at
+the offending attribute's own location, and only *that* table is skipped,
+not the whole compilation.
 
 **Dirty flags, not a registry.** Each `Ops` class tracks its own `bool
 Dirty` (set the moment anything is actually staged — not on a no-op call,
@@ -289,15 +290,24 @@ generator, unlike a hand-written generic helper, has no runtime type it
 doesn't already know at the point it emits code.
 
 **`AutoIncrement`** — an independent attribute (`[AutoIncrement]`), usually
-paired with `[PrimaryKey]` but not required to be. On `Insert`, a zero-valued
-tagged field is replaced with the next value from an `AutoIncrementCounter`
-*before* staging, via a record-struct `with` expression (every generated
-table already assumes `readonly partial record struct`, so this is free).
-Assignment happens at stage time, not apply time, for the same overlay
-reason above: deferring it would mean two same-operation zero-keyed inserts
-both read as key `0` until apply, colliding in the read-your-own-writes scan.
-The counter itself lives on the generated database class next to the
-table's `Table` field, *not* on the per-operation `Ops` instance — it has to
+paired with `[PrimaryKey]` but not required to be — a table can declare it on
+any number of fields, guarded by the primary key, a unique or non-unique
+`[Index]`, or no index at all; each tagged field gets its own independent
+`AutoIncrementCounter`. On `Insert`, a tagged field's value is replaced with
+the next value from its counter when it's at-or-below the "unset" threshold:
+`<= 0` for a signed field (negative or zero both mean "generate one" — useful
+for callers that use small negative sentinels), `== 0` for an unsigned field
+(negative is impossible, so only zero means that). The field's type must be
+one of the eight standard integer types (`sbyte`/`byte`/`short`/`ushort`/
+`int`/`uint`/`long`/`ulong`) — anything else (a `string`, `decimal`, `bool`,
+etc.) is a compile-time error (`RHINO007`), not a silent no-op. Assignment
+happens via a record-struct `with` expression (every generated table already
+assumes `readonly partial record struct`, so this is free), *before*
+staging. Assignment happens at stage time, not apply time, for the same
+overlay reason above: deferring it would mean two same-operation zero-keyed
+inserts both read as key `0` until apply, colliding in the read-your-own-writes
+scan. Each counter lives on the generated database class next to the
+table's storage fields, *not* on the per-operation `Ops` instance — it has to
 survive across every `CreateTransaction()` call, not reset each operation.
 A value consumed by an operation that later fails and gets discarded is not
 reused; gaps are expected and accepted, the same property every real auto-

@@ -85,6 +85,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         "tables are Milestone 3+ scope, not yet built (see Docs/03-roadmap.md). Remove [Index] or use TableKind.Instant.",
         "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
+    static private readonly DiagnosticDescriptor InvalidAutoIncrementTypeDiagnostic = new(
+        "RHINO007", "AutoIncrement field must be an incrementable unmanaged integer type",
+        "'{0}.{1}' is [AutoIncrement] but its type isn't one of sbyte/byte/short/ushort/int/uint/long/ulong - " +
+        "AutoIncrement needs a type the system can generate a new value for",
+        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var tableResults = context.SyntaxProvider
             .ForAttributeWithMetadataName(
@@ -125,6 +131,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private Location Loc(AttributeData attr) => attr.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? Location.None;
 
+    static private bool? ClassifyAutoIncrementType(ITypeSymbol type) => type.SpecialType switch {
+        SpecialType.System_SByte or SpecialType.System_Int16 or SpecialType.System_Int32 or SpecialType.System_Int64 => true,
+        SpecialType.System_Byte or SpecialType.System_UInt16 or SpecialType.System_UInt32 or SpecialType.System_UInt64 => false,
+        _ => null,
+    };
+
     static private (TableModel? Model, ImmutableArray<Diagnostic> Diagnostics) ToTableModel(GeneratorAttributeSyntaxContext ctx) {
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         var rowType = (INamedTypeSymbol)ctx.TargetSymbol;
@@ -160,10 +172,19 @@ public sealed class TableGenerator : IIncrementalGenerator {
             diagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(primaryKeyAttribute), $"[PrimaryKey] on '{rowType.Name}.{primaryKeyParam.Name}'"));
         var primaryKeyAccessor = pkAccessorProvided && pkAccessorValue != "" ? pkAccessorValue! : "Get";
 
-        // Independent of [PrimaryKey] - usually the same parameter, but not
-        // required to be (a separate, general-purpose attribute).
-        var autoIncrementParam = primaryCtor.Parameters.FirstOrDefault(p =>
-            p.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == AutoIncrementAttributeFullName));
+        var autoIncrementFields = ImmutableArray.CreateBuilder<AutoIncrementFieldModel>();
+        foreach (var p in primaryCtor.Parameters) {
+            var autoIncrementAttribute = p.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == AutoIncrementAttributeFullName);
+            if (autoIncrementAttribute is null) continue;
+
+            var signed = ClassifyAutoIncrementType(p.Type);
+            if (signed is null) {
+                diagnostics.Add(Diagnostic.Create(InvalidAutoIncrementTypeDiagnostic, Loc(autoIncrementAttribute), rowType.Name, p.Name));
+                continue;
+            }
+
+            autoIncrementFields.Add(new AutoIncrementFieldModel(p.Name, p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), signed.Value));
+        }
 
         // One entry per [Index]-attributed parameter, carrying its
         // declaration position (the "order fields sort by, by default"
@@ -244,8 +265,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             primaryKeyKind,
             primaryKeyAccessor,
             tableAccessor,
-            autoIncrementParam?.Name,
-            autoIncrementParam?.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            autoIncrementFields.ToImmutable(),
             indexes);
         return (model, ImmutableArray<Diagnostic>.Empty);
     }
@@ -331,7 +351,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var row = table.RowTypeFullName;
         var key = table.PrimaryKeyTypeFullName;
         var opsName = $"{table.RowTypeName}Ops";
-        var hasAutoIncrement = table.AutoIncrementFieldName is not null;
+        var autoIncrementFields = table.AutoIncrementFields;
         var uniqueIndexes = table.Indexes.Where(i => i.Uniqueness == Uniqueness.Unique).ToImmutableArray();
         var pk = table.PrimaryKeyAccessor;
         var isPersistent = table.Kind == TableKind.Persistent;
@@ -344,7 +364,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"    private readonly DenseArray<{row}> storage;");
             sb.AppendLine($"    private readonly {primaryIndexType} primaryIndex;");
         }
-        if (hasAutoIncrement) sb.AppendLine("    private readonly AutoIncrementCounter autoIncrement;");
+        foreach (var aif in autoIncrementFields)
+            sb.AppendLine($"    private readonly AutoIncrementCounter {Camel(aif.FieldName)}Counter;");
         foreach (var idx in table.Indexes)
             sb.AppendLine($"    private readonly {ConcreteIndexType(idx)} {IndexFieldName(idx)};");
         sb.AppendLine($"    private readonly List<Change<{key}, {row}>> changes = [];");
@@ -353,16 +374,17 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    internal DbError LastError => lastError;");
         sb.AppendLine();
 
-        // Constructor: [storage, primaryIndex] or [table], [autoIncrement],
-        // then one concrete-typed parameter per index - position-matched
-        // 1:1 against EmitDatabase's call site, both generated from the
-        // same TableModel.Indexes order.
+        // Constructor: [storage, primaryIndex] or [table], one
+        // AutoIncrementCounter per [AutoIncrement] field, then one
+        // concrete-typed parameter per index - position-matched 1:1 against
+        // EmitDatabase's call site, both generated from the same
+        // TableModel.AutoIncrementFields/Indexes order.
         if (isPersistent) {
             sb.Append($"    public {opsName}(PersistentTable<{key}, {row}> table");
         } else {
             sb.Append($"    public {opsName}(DenseArray<{row}> storage, {primaryIndexType} primaryIndex");
         }
-        if (hasAutoIncrement) sb.Append(", AutoIncrementCounter autoIncrement");
+        foreach (var aif in autoIncrementFields) sb.Append($", AutoIncrementCounter {Camel(aif.FieldName)}Counter");
         foreach (var idx in table.Indexes) sb.Append($", {ConcreteIndexType(idx)} {IndexFieldName(idx)}");
         sb.AppendLine(") {");
         if (isPersistent) {
@@ -371,7 +393,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine("        this.storage = storage;");
             sb.AppendLine("        this.primaryIndex = primaryIndex;");
         }
-        if (hasAutoIncrement) sb.AppendLine("        this.autoIncrement = autoIncrement;");
+        foreach (var aif in autoIncrementFields) sb.AppendLine($"        this.{Camel(aif.FieldName)}Counter = {Camel(aif.FieldName)}Counter;");
         foreach (var idx in table.Indexes) sb.AppendLine($"        this.{IndexFieldName(idx)} = {IndexFieldName(idx)};");
         sb.AppendLine("    }");
         sb.AppendLine();
@@ -434,9 +456,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         if (table.Indexes.Length > 0) sb.AppendLine();
 
         sb.AppendLine($"    public void Insert({row} row) {{");
-        if (hasAutoIncrement) {
-            sb.AppendLine($"        if (row.{table.AutoIncrementFieldName} == 0)");
-            sb.AppendLine($"            row = row with {{ {table.AutoIncrementFieldName} = ({table.AutoIncrementFieldTypeFullName})autoIncrement.Next() }};");
+        foreach (var aif in autoIncrementFields) {
+            var comparison = aif.IsSigned ? "<= 0" : "== 0";
+            sb.AppendLine($"        if (row.{aif.FieldName} {comparison})");
+            sb.AppendLine($"            row = row with {{ {aif.FieldName} = ({aif.FieldTypeFullName}){Camel(aif.FieldName)}Counter.Next() }};");
         }
         sb.AppendLine($"        changes.Add(new(ChangeKind.Insert, row.{table.PrimaryKeyName}, row));");
         sb.AppendLine("        Dirty = true;");
@@ -678,8 +701,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         foreach (var table in instantTables) {
             sb.AppendLine($"    private readonly DenseArray<{table.RowTypeFullName}> {Camel(table.Accessor)}Storage = new(chunkSize: 64);");
             sb.AppendLine($"    private readonly {PrimaryIndexType(table)} {Camel(table.Accessor)}PrimaryIndex = new();");
-            if (table.AutoIncrementFieldName is not null)
-                sb.AppendLine($"    private readonly AutoIncrementCounter {Camel(table.Accessor)}Counter = new();");
+            foreach (var aif in table.AutoIncrementFields)
+                sb.AppendLine($"    private readonly AutoIncrementCounter {Camel(table.Accessor)}{aif.FieldName}Counter = new();");
             foreach (var idx in table.Indexes) {
                 var fieldName = $"{Camel(table.Accessor)}{idx.AccessorName}Index";
                 sb.AppendLine($"    private readonly {ConcreteIndexType(idx)} {fieldName} = new();");
@@ -695,8 +718,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         // of exactly when that inherited property becomes safe to read).
         foreach (var table in persistentTables) {
             sb.AppendLine($"    private readonly PersistentTable<{table.PrimaryKeyTypeFullName}, {table.RowTypeFullName}> {Camel(table.Accessor)}Table;");
-            if (table.AutoIncrementFieldName is not null)
-                sb.AppendLine($"    private readonly AutoIncrementCounter {Camel(table.Accessor)}Counter = new();");
+            foreach (var aif in table.AutoIncrementFields)
+                sb.AppendLine($"    private readonly AutoIncrementCounter {Camel(table.Accessor)}{aif.FieldName}Counter = new();");
         }
         sb.AppendLine();
 
@@ -721,7 +744,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 args.Add($"{Camel(t.Accessor)}Storage");
                 args.Add($"{Camel(t.Accessor)}PrimaryIndex");
             }
-            if (t.AutoIncrementFieldName is not null) args.Add($"{Camel(t.Accessor)}Counter");
+            foreach (var aif in t.AutoIncrementFields) args.Add($"{Camel(t.Accessor)}{aif.FieldName}Counter");
             foreach (var idx in t.Indexes) args.Add($"{Camel(t.Accessor)}{idx.AccessorName}Index");
             return $"new {t.RowTypeName}Ops({string.Join(", ", args)})";
         })));
@@ -738,7 +761,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         TableKind kind, string ownerDatabaseFullName,
         string primaryKeyName, string primaryKeyTypeFullName, IndexKind primaryKeyKind,
         string primaryKeyAccessor, string accessor,
-        string? autoIncrementFieldName, string? autoIncrementFieldTypeFullName,
+        ImmutableArray<AutoIncrementFieldModel> autoIncrementFields,
         ImmutableArray<IndexModel> indexes) {
         public string RowTypeFullName { get; } = rowTypeFullName;
         public string RowTypeName { get; } = rowTypeName;
@@ -756,9 +779,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public string PrimaryKeyAccessor { get; } = primaryKeyAccessor;
         public string Accessor { get; } = accessor;
 
-        public string? AutoIncrementFieldName { get; } = autoIncrementFieldName;
-        public string? AutoIncrementFieldTypeFullName { get; } = autoIncrementFieldTypeFullName;
+        public ImmutableArray<AutoIncrementFieldModel> AutoIncrementFields { get; } = autoIncrementFields;
         public ImmutableArray<IndexModel> Indexes { get; } = indexes;
+    }
+
+    private sealed class AutoIncrementFieldModel(string fieldName, string fieldTypeFullName, bool isSigned) {
+        public string FieldName { get; } = fieldName;
+        public string FieldTypeFullName { get; } = fieldTypeFullName;
+        public bool IsSigned { get; } = isSigned;
     }
 
     // AccessorName is the generated method/field name for this index - the
