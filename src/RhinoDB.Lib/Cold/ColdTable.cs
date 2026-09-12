@@ -27,4 +27,17 @@ public sealed class ColdTable<TKey, TRow>(uint dbi)
         var rc = txn.Delete(Dbi, keyBytes);
         return rc == 0 ? Result.Ok() : Result.Error(MdbxErrorMapper.Map(rc));
     }
+
+    internal IEnumerable<(TKey Key, TRow Row)> ScanAll(Transaction txn) {
+        var rc = txn.OpenCursor(Dbi, out Cursor? cursor);
+        if (rc != 0) throw MdbxErrorMapper.Map(rc).ToException();
+
+        using (cursor) {
+            var getRc = cursor!.GetFirst(out var keyBytes, out var valueBytes);
+            while (getRc == 0) {
+                yield return (MemoryPackSerializer.Deserialize<TKey>(keyBytes)!, MemoryPackSerializer.Deserialize<TRow>(valueBytes)!);
+                getRc = cursor.GetNext(out keyBytes, out valueBytes);
+            }
+        }
+    }
 }

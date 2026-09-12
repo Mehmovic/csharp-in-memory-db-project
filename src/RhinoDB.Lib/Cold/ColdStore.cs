@@ -3,10 +3,10 @@ using RhinoDB.Native;
 namespace RhinoDB.Lib.Cold;
 
 public sealed class ColdStore : IDisposable {
-    private const uint SafeNoSync = 0x10000; // MDBX_SAFE_NOSYNC
-    private const uint CreateDbi = 0x40000; // MDBX_CREATE
-    private const uint ReadOnlyTxn = 0x20000; // MDBX_RDONLY / MDBX_TXN_RDONLY
-    private const ushort DefaultUnixMode = 0b110_100_100; // 0644: rw-r--r--
+    private const uint SafeNoSync = 0x10000;
+    private const uint CreateDbi = 0x40000;
+    private const uint ReadOnlyTxn = 0x20000;
+    private const ushort DefaultUnixMode = 0b110_100_100;
 
     private const int MdbxResultTrue = -1;
 
@@ -25,7 +25,7 @@ public sealed class ColdStore : IDisposable {
         if (rcCreate != 0 || env is null) return Result<ColdStore>.Error(MdbxErrorMapper.Map(rcCreate));
 
         env.SetMaxDbs(1024);
-        env.SetGeometry(-1, -1, -1, -1, -1, -1); // -1 everywhere = "keep current or use default" (mdbx.h)
+        env.SetGeometry(-1, -1, -1, -1, -1, -1);
 
         var rcOpen = env.Open(path, flags: SafeNoSync, mode: DefaultUnixMode);
         if (rcOpen == 0) return Result<ColdStore>.Ok(new ColdStore(env));
@@ -108,6 +108,16 @@ public sealed class ColdStore : IDisposable {
 
         using Transaction _ = txn;
         return table.Get(txn, key);
+    }
+
+    public IEnumerable<(TKey Key, TRow Row)> ScanAll<TKey, TRow>(ColdTable<TKey, TRow> table)
+        where TKey : IEquatable<TKey>, IComparable<TKey>
+        where TRow : struct {
+        var rc = env.BeginTxn(ReadOnlyTxn, out Transaction? txn);
+        if (rc != 0 || txn is null) throw MdbxErrorMapper.Map(rc).ToException();
+
+        using Transaction _ = txn;
+        foreach ((TKey Key, TRow Row) pair in table.ScanAll(txn)) yield return pair;
     }
 
     public void Dispose() {

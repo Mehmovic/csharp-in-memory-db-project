@@ -6,49 +6,6 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace RhinoDB.Generators;
 
-// Generated code for EVERY table - Instant or Persistent kind - owns its
-// physical storage directly: a DenseArray<TRow> field plus a concrete
-// primary-index field (HashIndex<TKey>/OrderedIndex<TKey>) on the {Db}
-// class, driven directly by the generated Ops class, with no engine class
-// in between. This used to be true only for Instant-kind tables -
-// Persistent-kind ones drove a hand-written PersistentTable<TKey,TRow>
-// composing ColdStore/ColdTable, because those cold-storage primitives were
-// `internal` to RhinoDB.Lib and generated code (living in the consuming
-// assembly) couldn't reach them. That barrier is gone: ColdStore now
-// exposes a narrow public surface purpose-built for this - `OpenTable`,
-// `Put`/`Get`/`Delete`/`Peek<TKey,TRow>(ColdTable<TKey,TRow>, ...)` - and
-// `ColdTable<TKey,TRow>` itself is a public opaque handle type. Notably,
-// `RhinoDB.Native.Transaction` and ColdStore's own txn-lifecycle machinery
-// (`EnsureWriteTxn`/`BeginScope`/`EndScope`) stay entirely internal -
-// generated code never manages a write transaction's lifecycle itself, only
-// checks `ColdStore.IsScopeActive` (now public) before writing, exactly the
-// guard PersistentTable used to enforce internally. `PersistentTable<TKey,TRow>`
-// itself is gone from the codebase entirely - the same "hand-prove a shape,
-// then delete the hand-written scaffold once codegen supersedes it"
-// discipline already applied to `Table<TKey,TRow>`.
-//
-// Practical effect: a Persistent-kind Ops class's fields/constructor/Get/
-// secondary-index accessors are now IDENTICAL in shape to an Instant-kind
-// one (same `storage`/`primaryIndex` fields, same read logic - reads still
-// never touch cold storage, decision 1) - `isPersistent` only changes two
-// things: (1) two extra fields (`coldTable`, `cold`) and their constructor
-// wiring, and (2) `Apply()`'s Insert/Update/Delete cases do one extra
-// `cold.Put`/`cold.Delete` call after the same in-memory mutation Instant
-// kind does, guarded by an explicit `cold.IsScopeActive` check at the top of
-// the case - mirroring PersistentTable's original check-before-mutating
-// order exactly (memory still isn't rolled back if the cold write itself
-// fails afterward - a pre-existing, documented limitation, not new here).
-// `.Storage.Load/Evict/Peek` (Persistent-kind only) read/write `storage`/
-// `primaryIndex`/every secondary index field directly, the same way
-// Apply()'s Delete case already does its own swap-remove handling.
-//
-// Every rule this generator relies on is a diagnostic, not an assumption or
-// a crash: ToTableModel never throws on malformed input (a missing
-// [PrimaryKey], an empty Accessor, a composite index that disagrees with
-// itself) - it reports a real compile error and that one table is skipped
-// (diagnostics non-empty => Model is null), so one broken table doesn't
-// take down the whole compilation and the author sees an actual message,
-// not a generator stack trace.
 [Generator]
 public sealed class TableGenerator : IIncrementalGenerator {
     private const string TableAttributeFullName = "RhinoDB.Core.Tables.TableAttribute";
@@ -88,22 +45,19 @@ public sealed class TableGenerator : IIncrementalGenerator {
         "AutoIncrement needs a type the system can generate a new value for",
         "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
+    static private readonly DiagnosticDescriptor EvictableOnInstantKindDiagnostic = new(
+        "RHINO008", "Evictable has no effect on Instant-kind tables",
+        "'{0}' is TableKind.Instant and sets Evictable = true - Instant-kind tables have no cold storage " +
+        "to evict to/from at all. Remove Evictable or use TableKind.Persistent.",
+        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var tableResults = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 TableAttributeFullName,
-                // `record struct Foo(...)` parses as RecordDeclarationSyntax
-                // (RecordStructDeclaration kind), not StructDeclarationSyntax -
-                // a plain `struct Foo { }` is the only thing that IS the latter.
                 predicate: static (node, _) => node is StructDeclarationSyntax or RecordDeclarationSyntax,
                 transform: static (ctx, _) => ToTableModel(ctx));
 
-        // Registered on the per-table (uncollected) pipeline, separately
-        // from the codegen output below - each table's own diagnostics are
-        // reported exactly once regardless of how many [Database] classes
-        // exist (Emit below runs once per database, over the same collected
-        // table list, which would otherwise re-report every diagnostic once
-        // per database).
         context.RegisterSourceOutput(tableResults, static (spc, result) => {
             foreach (var diagnostic in result.Diagnostics) spc.ReportDiagnostic(diagnostic);
         });
@@ -132,6 +86,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         return (false, 0);
     }
 
+    static private bool BoolNamedArg(AttributeData attr, string name) {
+        foreach (var kv in attr.NamedArguments)
+            if (kv.Key == name) return (bool)kv.Value.Value!;
+        return false;
+    }
+
     static private Location Loc(AttributeData attr) => attr.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? Location.None;
 
     static private bool? ClassifyAutoIncrementType(ITypeSymbol type) => type.SpecialType switch {
@@ -156,8 +116,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var (chunkSizeProvided, chunkSizeValue) = IntNamedArg(attribute, "ChunkSize");
         var chunkSize = chunkSizeProvided ? chunkSizeValue : 4096;
 
-        // The primary (positional) constructor - not the copy constructor a
-        // record struct also has (single parameter of the row's own type).
+        var evictable = BoolNamedArg(attribute, "Evictable");
+        if (evictable && kind == TableKind.Instant)
+            diagnostics.Add(Diagnostic.Create(EvictableOnInstantKindDiagnostic, Loc(attribute), rowType.Name));
+
         var primaryCtor = rowType.InstanceConstructors.FirstOrDefault(c =>
             c.Parameters.Length > 0 &&
             !(c.Parameters.Length == 1 && SymbolEqualityComparer.Default.Equals(c.Parameters[0].Type, rowType)));
@@ -192,9 +154,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
             autoIncrementFields.Add(new AutoIncrementFieldModel(p.Name, p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), signed.Value));
         }
 
-        // One entry per [Index]-attributed parameter, carrying its
-        // declaration position (the "order fields sort by, by default"
-        // Order falls back to) before any grouping happens.
         var indexedParams = primaryCtor.Parameters
             .Select((p, declIndex) => (Param: p, DeclIndex: declIndex))
             .Where(x => x.Param.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == IndexAttributeFullName))
@@ -217,11 +176,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
             })
             .ToImmutableArray();
 
-        // Grouped by Accessor: 2-3 fields sharing one Accessor form a single
-        // composite index over them, ordered by Order (falling back to
-        // declaration position) - a lone field is just a 1-field "composite".
-        // GroupBy preserves first-occurrence order, so index declaration
-        // order in generated output tracks row field declaration order.
         var indexes = indexedParams
             .GroupBy(x => x.Accessor)
             .Select(g => {
@@ -267,6 +221,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             primaryKeyAccessor,
             tableAccessor,
             chunkSize,
+            evictable,
             autoIncrementFields.ToImmutable(),
             indexes);
         return (model, ImmutableArray<Diagnostic>.Empty);
@@ -294,16 +249,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
         context.AddSource($"{database.SimpleName}.g.cs", EmitDatabase(database, tables));
     }
 
-    // The concrete primary-index class for a table - HashIndex/OrderedIndex
-    // are always Unique (a primary key can't be anything else).
     static private string PrimaryIndexType(TableModel table) =>
         table.PrimaryKeyKind == IndexKind.RedBlackOrdered
             ? $"OrderedIndex<{table.PrimaryKeyTypeFullName}>"
             : $"HashIndex<{table.PrimaryKeyTypeFullName}>";
 
-    // The concrete index class for a given (Kind, Uniqueness) pair - the one
-    // place this mapping is decided, used for both the {Db} class's field
-    // declarations and the Ops class's constructor parameter types.
     static private string ConcreteIndexType(IndexModel idx) {
         var keyType = KeyType(idx);
         return (idx.Kind, idx.Uniqueness) switch {
@@ -314,16 +264,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
         };
     }
 
-    // A lone field's own type, or a named ValueTuple type for a composite
-    // index - named so the tuple stays self-documenting even though
-    // generated code mostly builds/consumes it positionally.
     static private string KeyType(IndexModel idx) =>
         idx.Fields.Length == 1
             ? idx.Fields[0].FieldTypeFullName
             : $"({string.Join(", ", idx.Fields.Select(f => $"{f.FieldTypeFullName} {f.FieldName}"))})";
 
-    // The key expression to read off a row variable for this index - a
-    // single member access, or a positional tuple literal for a composite.
     static private string KeyExpr(string rowVar, IndexModel idx) =>
         idx.Fields.Length == 1
             ? $"{rowVar}.{idx.Fields[0].FieldName}"
@@ -331,8 +276,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private string IndexFieldName(IndexModel idx) => $"{Camel(idx.AccessorName)}Index";
 
-    static private string EmitOpsClass(TableModel table) {
-        var sb = new StringBuilder();
+    static private string EmitOpsClass(TableModel table) =>
+        table.Kind == TableKind.Persistent ? EmitPersistentOpsClass(table) : EmitInstantOpsClass(table);
+
+    static private void EmitOpsClassHeader(StringBuilder sb, TableModel table, bool isPersistent) {
         sb.AppendLine("// <auto-generated>");
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
@@ -340,7 +287,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using System.Runtime.InteropServices;");
         sb.AppendLine("using RhinoDB.Core;");
-        sb.AppendLine("using RhinoDB.Lib.Cold;");
+        if (isPersistent) sb.AppendLine("using RhinoDB.Lib.Cold;");
         sb.AppendLine("using RhinoDB.Lib.Indexing;");
         sb.AppendLine("using RhinoDB.Lib.Storage;");
         sb.AppendLine("using RhinoDB.Lib.Tables;");
@@ -349,69 +296,39 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"namespace {table.RowNamespace};");
             sb.AppendLine();
         }
+    }
 
-        var row = table.RowTypeFullName;
-        var key = table.PrimaryKeyTypeFullName;
-        var opsName = $"{table.RowTypeName}Ops";
-        var autoIncrementFields = table.AutoIncrementFields;
-        var uniqueIndexes = table.Indexes.Where(i => i.Uniqueness == Uniqueness.Unique).ToImmutableArray();
-        var pk = table.PrimaryKeyAccessor;
-        var isPersistent = table.Kind == TableKind.Persistent;
-        var primaryIndexType = PrimaryIndexType(table);
-
-        // storage/primaryIndex are unconditional now - Persistent kind
-        // inlines the exact same DenseArray/index fields Instant kind
-        // always has, plus a ColdTable/ColdStore pair for the cold write-
-        // through Apply() does after the same in-memory mutation.
-        sb.AppendLine($"public sealed class {opsName} {{");
-        sb.AppendLine($"    private readonly DenseArray<{row}> storage;");
+    static private void EmitStorageAndIndexFields(StringBuilder sb, TableModel table, string primaryIndexType) {
+        sb.AppendLine($"    private readonly DenseArray<{table.RowTypeFullName}> storage;");
         sb.AppendLine($"    private readonly {primaryIndexType} primaryIndex;");
-        if (isPersistent) {
-            sb.AppendLine($"    private readonly ColdTable<{key}, {row}> coldTable;");
-            sb.AppendLine("    private readonly ColdStore cold;");
-        }
-        foreach (var aif in autoIncrementFields)
+        foreach (var aif in table.AutoIncrementFields)
             sb.AppendLine($"    private readonly AutoIncrementCounter {Camel(aif.FieldName)}Counter;");
         foreach (var idx in table.Indexes)
             sb.AppendLine($"    private readonly {ConcreteIndexType(idx)} {IndexFieldName(idx)};");
+    }
+
+    static private void EmitChangeTrackingFields(StringBuilder sb, string key, string row) {
         sb.AppendLine($"    private readonly List<Change<{key}, {row}>> changes = [];");
         sb.AppendLine("    public bool Dirty { get; private set; }");
         sb.AppendLine("    private DbError lastError;");
         sb.AppendLine("    internal DbError LastError => lastError;");
         sb.AppendLine();
+    }
 
-        // Constructor: storage, primaryIndex, then [coldTable, cold] only
-        // for Persistent kind, then one AutoIncrementCounter per
-        // [AutoIncrement] field, then one concrete-typed parameter per index -
-        // position-matched 1:1 against EmitDatabase's call site, both
-        // generated from the same TableModel.AutoIncrementFields/Indexes order.
-        sb.Append($"    public {opsName}(DenseArray<{row}> storage, {primaryIndexType} primaryIndex");
-        if (isPersistent) sb.Append($", ColdTable<{key}, {row}> coldTable, ColdStore cold");
-        foreach (var aif in autoIncrementFields) sb.Append($", AutoIncrementCounter {Camel(aif.FieldName)}Counter");
+    static private void AppendAutoIncrementAndIndexParams(StringBuilder sb, TableModel table) {
+        foreach (var aif in table.AutoIncrementFields) sb.Append($", AutoIncrementCounter {Camel(aif.FieldName)}Counter");
         foreach (var idx in table.Indexes) sb.Append($", {ConcreteIndexType(idx)} {IndexFieldName(idx)}");
-        sb.AppendLine(") {");
-        sb.AppendLine("        this.storage = storage;");
-        sb.AppendLine("        this.primaryIndex = primaryIndex;");
-        if (isPersistent) {
-            sb.AppendLine("        this.coldTable = coldTable;");
-            sb.AppendLine("        this.cold = cold;");
-        }
-        foreach (var aif in autoIncrementFields) sb.AppendLine($"        this.{Camel(aif.FieldName)}Counter = {Camel(aif.FieldName)}Counter;");
-        foreach (var idx in table.Indexes) sb.AppendLine($"        this.{IndexFieldName(idx)} = {IndexFieldName(idx)};");
-        sb.AppendLine("    }");
-        sb.AppendLine();
+    }
 
-        // Read-your-own-writes: most-recent-first scan over this operation's
-        // own staged changes before falling through to real storage - the
-        // same algorithm ChangeSetTests.cs already proved, inlined per table.
-        // Span + `ref readonly` avoids a struct copy per candidate examined
-        // (a Change carries a full TRow) - see
-        // Docs/01-performance-principles.md §1/§2 and
-        // Docs/02-architecture.md § Transactions. Named "Get" by default;
-        // [PrimaryKey(Accessor = "...")] renames it. Never touches cold
-        // storage even for Persistent kind - Get/GetByOffset are memory-only
-        // by design (see Cold storage decision 1).
-        sb.AppendLine($"    public Result<{row}> {pk}({key} id) {{");
+    static private void AppendAutoIncrementAndIndexAssignments(StringBuilder sb, TableModel table) {
+        foreach (var aif in table.AutoIncrementFields) sb.AppendLine($"        this.{Camel(aif.FieldName)}Counter = {Camel(aif.FieldName)}Counter;");
+        foreach (var idx in table.Indexes) sb.AppendLine($"        this.{IndexFieldName(idx)} = {IndexFieldName(idx)};");
+    }
+
+    static private void EmitGetMethod(StringBuilder sb, TableModel table) {
+        var row = table.RowTypeFullName;
+        var key = table.PrimaryKeyTypeFullName;
+        sb.AppendLine($"    public Result<{row}> {table.PrimaryKeyAccessor}({key} id) {{");
         sb.AppendLine("        var span = CollectionsMarshal.AsSpan(changes);");
         sb.AppendLine("        for (var i = span.Length - 1; i >= 0; i--) {");
         sb.AppendLine("            ref readonly var c = ref span[i];");
@@ -425,52 +342,23 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        return storage.Get(offsetResult.Unwrap());");
         sb.AppendLine("    }");
         sb.AppendLine();
+    }
 
-        // Sequential enumeration of every row currently in memory, in
-        // DenseArray offset order - real storage only, deliberately NOT
-        // overlay-aware (unlike Get, a full scan merging in this
-        // operation's own staged-but-unapplied changes would need to skip
-        // deleted rows and dedupe updated ones; not built until a real need
-        // shows up, matching this project's "declared explicitly, don't
-        // build ahead of a proven need" posture elsewhere). Lazy (`yield
-        // return`) since a full-table walk is already the explicitly-slow
-        // escape hatch, not a hot-path accessor.
-        sb.AppendLine($"    public IEnumerable<{row}> Iter() {{");
+    static private void EmitIterMethod(StringBuilder sb, TableModel table) {
+        sb.AppendLine($"    public IEnumerable<{table.RowTypeFullName}> Iter() {{");
         sb.AppendLine("        for (var i = 0; i < storage.Count; i++) yield return storage.Get(i);");
         sb.AppendLine("    }");
         sb.AppendLine();
+    }
 
-        // Secondary-index read accessors - overlay-aware (Milestone 4): when
-        // Dirty, this operation's own staged-but-not-yet-applied changes are
-        // consulted before falling back to the real index/storage, the same
-        // read-your-own-writes guarantee the primary Get() accessor already
-        // has. The Dirty check keeps the common case (no staged writes on
-        // this table yet) exactly as cheap as before this milestone - the
-        // overlay scan only runs when there's actually something to overlay.
-        //
-        // Algorithm (backward scan, mirroring Validate()'s duplicate-key
-        // check): for each staged change, walk forward from it to see if a
-        // LATER entry in the batch already claims the same primary key - if
-        // so, this entry is stale within the batch itself and is skipped;
-        // otherwise it's that key's final staged state for this batch. A
-        // final state whose row's index-field value matches the target is
-        // an overlay hit, returned immediately (it doesn't matter what real
-        // storage/the real index currently say, this operation's own write
-        // wins). If nothing in the batch matches, fall back to the real
-        // index/storage - but the real hit might now be stale (its primary
-        // key was touched by this batch and its field no longer matches, or
-        // it was deleted), so a real hit is only trusted if its primary key
-        // was never touched by the batch at all.
-        //
-        // Works identically for Persistent kind - `storage` is a direct
-        // field either way now.
+    static private void EmitSecondaryIndexAccessors(StringBuilder sb, TableModel table) {
+        var row = table.RowTypeFullName;
         foreach (var idx in table.Indexes) {
             var parameters = string.Join(", ", idx.Fields.Select(f => $"{f.FieldTypeFullName} {Camel(f.FieldName)}"));
             var keyExpr = idx.Fields.Length == 1
                 ? Camel(idx.Fields[0].FieldName)
                 : $"({string.Join(", ", idx.Fields.Select(f => Camel(f.FieldName)))})";
             var rowKeyExpr = KeyExpr("c.Row", idx);
-            string ReadByOffset(string offsetExpr) => $"storage.Get({offsetExpr})";
             if (idx.Uniqueness == Uniqueness.Unique) {
                 sb.AppendLine($"    public Result<{row}> {idx.AccessorName}({parameters}) {{");
                 sb.AppendLine("        if (Dirty) {");
@@ -484,7 +372,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine("            }");
                 sb.AppendLine($"            var overlayOffsetResult = {IndexFieldName(idx)}.GetOffset({keyExpr});");
                 sb.AppendLine("            if (overlayOffsetResult.IsError()) return overlayOffsetResult.Void();");
-                sb.AppendLine($"            var overlayCandidate = {ReadByOffset("overlayOffsetResult.Unwrap()")};");
+                sb.AppendLine("            var overlayCandidate = storage.Get(overlayOffsetResult.Unwrap());");
                 sb.AppendLine($"            var overlayCandidateKey = overlayCandidate.{table.PrimaryKeyName};");
                 sb.AppendLine("            for (var i = 0; i < span.Length; i++) {");
                 sb.AppendLine("                if (span[i].Key.Equals(overlayCandidateKey))");
@@ -494,7 +382,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine("        }");
                 sb.AppendLine($"        var offsetResult = {IndexFieldName(idx)}.GetOffset({keyExpr});");
                 sb.AppendLine("        if (offsetResult.IsError()) return offsetResult.Void();");
-                sb.AppendLine($"        return {ReadByOffset("offsetResult.Unwrap()")};");
+                sb.AppendLine("        return storage.Get(offsetResult.Unwrap());");
                 sb.AppendLine("    }");
             } else {
                 sb.AppendLine($"    public List<{row}> {idx.AccessorName}({parameters}) {{");
@@ -510,7 +398,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine("            }");
                 sb.AppendLine($"            var overlayOffsets = {IndexFieldName(idx)}.GetOffsets({keyExpr});");
                 sb.AppendLine("            foreach (var offset in overlayOffsets) {");
-                sb.AppendLine($"                var candidate = {ReadByOffset("offset")};");
+                sb.AppendLine("                var candidate = storage.Get(offset);");
                 sb.AppendLine($"                var candidateKey = candidate.{table.PrimaryKeyName};");
                 sb.AppendLine("                var touchedByBatch = false;");
                 sb.AppendLine("                for (var i = 0; i < span.Length; i++) { if (span[i].Key.Equals(candidateKey)) { touchedByBatch = true; break; } }");
@@ -520,15 +408,19 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine("        }");
                 sb.AppendLine($"        var offsets = {IndexFieldName(idx)}.GetOffsets({keyExpr});");
                 sb.AppendLine($"        var realResult = new List<{row}>(offsets.Count);");
-                sb.AppendLine($"        foreach (var offset in offsets) realResult.Add({ReadByOffset("offset")});");
+                sb.AppendLine("        foreach (var offset in offsets) realResult.Add(storage.Get(offset));");
                 sb.AppendLine("        return realResult;");
                 sb.AppendLine("    }");
             }
         }
         if (table.Indexes.Length > 0) sb.AppendLine();
+    }
 
+    static private void EmitStagingMethods(StringBuilder sb, TableModel table) {
+        var row = table.RowTypeFullName;
+        var key = table.PrimaryKeyTypeFullName;
         sb.AppendLine($"    public void Insert({row} row) {{");
-        foreach (var aif in autoIncrementFields) {
+        foreach (var aif in table.AutoIncrementFields) {
             var comparison = aif.IsSigned ? "<= 0" : "== 0";
             sb.AppendLine($"        if (row.{aif.FieldName} {comparison})");
             sb.AppendLine($"            row = row with {{ {aif.FieldName} = ({aif.FieldTypeFullName}){Camel(aif.FieldName)}Counter.Next() }};");
@@ -538,55 +430,16 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine($"    public void Update({key} id, {row} newRow) {{ changes.Add(new(ChangeKind.Update, id, newRow)); Dirty = true; }}");
         sb.AppendLine($"    public void Delete({key} id) {{");
-        sb.AppendLine($"        var current = {pk}(id);");
+        sb.AppendLine($"        var current = {table.PrimaryKeyAccessor}(id);");
         sb.AppendLine("        if (!current.IsOk()) return;");
         sb.AppendLine("        changes.Add(new(ChangeKind.Delete, id, current.Unwrap()));");
         sb.AppendLine("        Dirty = true;");
         sb.AppendLine("    }");
         sb.AppendLine();
+    }
 
-        // Real pre-apply validation: nothing mutates during this pass, so a
-        // later table's failure (see the generated Transaction.Apply() below)
-        // never leaves this table's already-staged changes applied - the
-        // free cross-table atomicity Milestone 2 exists to prove. Checked
-        // per staged change, in order, directly against each concrete
-        // index's own GetOffset:
-        //  - Insert: does the key already exist "as of just before this
-        //    entry"? Scans backward through EARLIER entries in this same
-        //    batch first (an intervening Delete clears it, an intervening
-        //    Insert/Update means it's still live) - falls back to real
-        //    committed storage only if no prior entry in this batch mentions
-        //    the key at all. Without the batch-local scan, a same-batch
-        //    "Delete then re-Insert the same key" would be wrongly flagged
-        //    as a duplicate (the row is still physically committed until
-        //    Apply() actually runs); without ALSO checking, a same-batch
-        //    double-Insert of the same key would wrongly pass (each half
-        //    individually looks fresh against committed storage) and
-        //    silently corrupt at Apply() time instead of failing loudly here.
-        //    "Committed storage" here means memory only (never cold),
-        //    matching decision 1 - true for both kinds, since primaryIndex
-        //    is a direct field either way now.
-        //  - Update: primary-key immutability, then existence (the same
-        //    batch-local-then-committed scan Insert's duplicate check uses,
-        //    inverted - an Update whose key was never inserted or committed
-        //    anywhere reports IndexKeyNotFound here instead of silently
-        //    no-op'ing at Apply() time. Found via a real gap: Apply()'s own
-        //    per-case `break` on a failed offset lookup never propagates to
-        //    the caller - Validate() passing is what makes Apply() a "can't
-        //    fail" replay, so an unchecked Update-of-nonexistent-key used to
-        //    slip through Validate() and then silently do nothing at Apply()
-        //    time, reporting Result.Ok() for an update that never happened),
-        //    then unique-index conflicts using the row's real physical
-        //    offset *if it already has one* (skipped entirely whenever a
-        //    table simply has no unique secondary index at all). A key with
-        //    no offset yet (inserted earlier in this same batch, not yet
-        //    applied - already known to exist via the batch-local scan
-        //    above) is left to Apply()'s own in-order replay to resolve the
-        //    unique-index check correctly, same as before this validation
-        //    existed - Apply() replays in staged order, so by the time this
-        //    Update replays, the earlier Insert has already physically landed.
-        //  - Delete: nothing to check - existence was already resolved
-        //    against the overlay at stage time (see Delete above).
+    static private void EmitValidateMethod(StringBuilder sb, TableModel table) {
+        var uniqueIndexes = table.Indexes.Where(i => i.Uniqueness == Uniqueness.Unique).ToImmutableArray();
         sb.AppendLine("    internal bool Validate() {");
         sb.AppendLine("        var span = CollectionsMarshal.AsSpan(changes);");
         sb.AppendLine("        for (var i = 0; i < span.Length; i++) {");
@@ -637,52 +490,55 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        return true;");
         sb.AppendLine("    }");
         sb.AppendLine();
+    }
 
-        // Apply: unconditionally inlines the same swap-remove handling
-        // Table<TKey,TRow> used to (DenseArray.Delete can relocate the
-        // physically-last row into the freed slot, and every index -
-        // primary and secondary - must repoint to follow it) for BOTH
-        // kinds now, since storage/primaryIndex are direct fields either
-        // way. Persistent kind adds exactly one extra step per case: a
-        // `cold.Put`/`cold.Delete` call after the same in-memory mutation,
-        // guarded by an explicit `cold.IsScopeActive` check at the top of
-        // the case (mirroring PersistentTable's original check-before-
-        // mutating order - a cold-write failure does NOT roll back the
-        // already-applied in-memory mutation, a pre-existing, documented
-        // limitation carried over unchanged, not introduced here). Update
-        // only touches an index whose own field(s) actually changed -
-        // compares oldRow's key expression against the new row's via
-        // .Equals() (a single field access, or structural ValueTuple
-        // equality for a composite index) and skips the Delete+Insert pair
-        // entirely when they're equal, since the index's existing mapping
-        // already points at the right offset. Unlike an early, buggy
-        // attempt at this same optimization noted in Docs/03-roadmap.md
-        // Stage 3 (which apparently skipped re-registration under the wrong
-        // condition and left a stale entry behind - a real self-collision
-        // risk: reverting a field back to a value it held earlier could
-        // then collide with its own uncleaned stale entry), this always
-        // deletes the OLD mapping whenever the value differs, before
-        // inserting the new one - never conditionally skips the delete
-        // alone.
+    static private string EmitInstantOpsClass(TableModel table) {
+        var sb = new StringBuilder();
+        var row = table.RowTypeFullName;
+        var key = table.PrimaryKeyTypeFullName;
+        var opsName = $"{table.RowTypeName}Ops";
+        var primaryIndexType = PrimaryIndexType(table);
+
+        EmitOpsClassHeader(sb, table, isPersistent: false);
+
+        sb.AppendLine($"public sealed class {opsName} {{");
+        EmitStorageAndIndexFields(sb, table, primaryIndexType);
+        EmitChangeTrackingFields(sb, key, row);
+
+        sb.Append($"    public {opsName}(DenseArray<{row}> storage, {primaryIndexType} primaryIndex");
+        AppendAutoIncrementAndIndexParams(sb, table);
+        sb.AppendLine(") {");
+        sb.AppendLine("        this.storage = storage;");
+        sb.AppendLine("        this.primaryIndex = primaryIndex;");
+        AppendAutoIncrementAndIndexAssignments(sb, table);
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        EmitGetMethod(sb, table);
+        EmitIterMethod(sb, table);
+        EmitSecondaryIndexAccessors(sb, table);
+        EmitStagingMethods(sb, table);
+        EmitValidateMethod(sb, table);
+        EmitInstantApply(sb, table);
+
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    static private void EmitInstantApply(StringBuilder sb, TableModel table) {
         sb.AppendLine("    internal void Apply() {");
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
         sb.AppendLine("            switch (c.Kind) {");
         sb.AppendLine("                case ChangeKind.Insert: {");
-        if (isPersistent) sb.AppendLine("                    if (!cold.IsScopeActive) { lastError = DbError.NoActiveTransaction(); break; }");
         sb.AppendLine($"                    var pk = c.Row.{table.PrimaryKeyName};");
         sb.AppendLine("                    if (primaryIndex.GetOffset(pk).IsOk()) { lastError = DbError.DuplicateKey(); break; }");
         sb.AppendLine("                    var offset = storage.Insert(c.Row);");
         sb.AppendLine("                    primaryIndex.Insert(pk, offset);");
         foreach (var idx in table.Indexes)
             sb.AppendLine($"                    {IndexFieldName(idx)}.Insert({KeyExpr("c.Row", idx)}, offset);");
-        if (isPersistent) {
-            sb.AppendLine("                    var coldPutResult = cold.Put(coldTable, pk, c.Row);");
-            sb.AppendLine("                    if (coldPutResult.IsError()) { lastError = coldPutResult.GetError(); break; }");
-        }
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("                case ChangeKind.Update: {");
-        if (isPersistent) sb.AppendLine("                    if (!cold.IsScopeActive) { lastError = DbError.NoActiveTransaction(); break; }");
         sb.AppendLine("                    var offsetResult = primaryIndex.GetOffset(c.Key);");
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
@@ -695,14 +551,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"                        {IndexFieldName(idx)}.Insert({KeyExpr("c.Row", idx)}, offset);");
             sb.AppendLine("                    }");
         }
-        if (isPersistent) {
-            sb.AppendLine("                    var coldPutResult = cold.Put(coldTable, c.Key, c.Row);");
-            sb.AppendLine("                    if (coldPutResult.IsError()) { lastError = coldPutResult.GetError(); break; }");
-        }
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("                default: {");
-        if (isPersistent) sb.AppendLine("                    if (!cold.IsScopeActive) { lastError = DbError.NoActiveTransaction(); break; }");
         sb.AppendLine("                    var offsetResult = primaryIndex.GetOffset(c.Key);");
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
@@ -723,10 +574,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"                        {IndexFieldName(idx)}.Insert({KeyExpr("swappedRow", idx)}, offset);");
         }
         sb.AppendLine("                    }");
-        if (isPersistent) {
-            sb.AppendLine("                    var coldDeleteResult = cold.Delete(coldTable, c.Key);");
-            sb.AppendLine("                    if (coldDeleteResult.IsError()) { lastError = coldDeleteResult.GetError(); break; }");
-        }
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
@@ -734,79 +581,182 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        changes.Clear();");
         sb.AppendLine("        Dirty = false;");
         sb.AppendLine("    }");
+    }
 
-        // .Storage groups the Persistent-kind-only Load/Evict/Peek accessors -
-        // these read/write `storage`/`primaryIndex`/every secondary index
-        // field directly (no engine class in between anymore), never the
-        // change log, so they need no staging/validation of their own.
-        // Peek is a pure pass-through (it never mutates memory - see the
-        // Peek-bypasses-Run design note in Docs/02-architecture.md § Cold
-        // storage) - Load/Evict route through private Ops methods since
-        // they mutate storage AND every secondary index field.
-        if (isPersistent) {
-            sb.AppendLine();
-            sb.AppendLine("    public StorageAccessor Storage => new(this);");
-            sb.AppendLine($"    public readonly struct StorageAccessor({opsName} ops) {{");
-            sb.AppendLine($"        public Result Load({key} id) => ops.LoadInternal(id);");
-            sb.AppendLine($"        public Result Evict({key} id) => ops.EvictInternal(id);");
-            sb.AppendLine($"        public Result<{row}> Peek({key} id) => ops.cold.Peek(ops.coldTable, id);");
-            sb.AppendLine("    }");
-            sb.AppendLine();
+    static private string EmitPersistentOpsClass(TableModel table) {
+        var sb = new StringBuilder();
+        var row = table.RowTypeFullName;
+        var key = table.PrimaryKeyTypeFullName;
+        var opsName = $"{table.RowTypeName}Ops";
+        var primaryIndexType = PrimaryIndexType(table);
 
-            // Idempotent: a row already in memory needs no cold round trip
-            // at all - checked first so this never touches cold storage
-            // (or requires an active scope) for a no-op call, and so a
-            // repeat Load never double-inserts into a secondary index.
-            sb.AppendLine($"    private Result LoadInternal({key} id) {{");
-            sb.AppendLine("        if (primaryIndex.GetOffset(id).IsOk()) return Result.Ok();");
-            sb.AppendLine("        if (!cold.IsScopeActive) return Result.Error(DbError.NoActiveTransaction());");
-            sb.AppendLine("        var coldResult = cold.Get(coldTable, id);");
-            sb.AppendLine("        if (coldResult.IsError()) return coldResult.Void();");
-            sb.AppendLine("        var row = coldResult.Unwrap();");
-            sb.AppendLine("        var offset = storage.Insert(row);");
-            sb.AppendLine("        primaryIndex.Insert(id, offset);");
-            foreach (var idx in table.Indexes)
-                sb.AppendLine($"        {IndexFieldName(idx)}.Insert({KeyExpr("row", idx)}, offset);");
-            sb.AppendLine("        return Result.Ok();");
-            sb.AppendLine("    }");
-            sb.AppendLine();
+        EmitOpsClassHeader(sb, table, isPersistent: true);
 
-            // Removes the row's own secondary-index entries and, if
-            // DenseArray.Delete relocated another row to fill the freed
-            // slot, repoints that row's entries too - the same swap-remove
-            // handling Apply()'s Delete case does, just without any cold-
-            // storage interaction (Evict never touches cold storage - the
-            // durable copy stays, see Cold storage decision 2). Idempotent:
-            // a row not currently in memory is treated as already evicted.
-            sb.AppendLine($"    private Result EvictInternal({key} id) {{");
-            sb.AppendLine("        var offsetResult = primaryIndex.GetOffset(id);");
-            sb.AppendLine("        if (offsetResult.IsError())");
-            sb.AppendLine("            return offsetResult.GetError().Kind == ErrorKind.IndexKeyNotFound ? Result.Ok() : offsetResult.Void();");
-            sb.AppendLine("        var offset = offsetResult.Unwrap();");
-            sb.AppendLine("        var row = storage.Get(offset);");
-            sb.AppendLine("        var lastOffset = storage.LastOffset;");
-            sb.AppendLine("        var swapped = storage.Delete(offset);");
-            sb.AppendLine("        primaryIndex.Delete(id);");
-            foreach (var idx in table.Indexes) {
-                var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("row", idx) : $"{KeyExpr("row", idx)}, offset";
-                sb.AppendLine($"        {IndexFieldName(idx)}.Delete({deleteArgs});");
-            }
-            sb.AppendLine("        if (swapped is { } swappedRow) {");
-            sb.AppendLine($"            var swappedPk = swappedRow.{table.PrimaryKeyName};");
-            sb.AppendLine("            primaryIndex.Delete(swappedPk);");
-            sb.AppendLine("            primaryIndex.Insert(swappedPk, offset);");
-            foreach (var idx in table.Indexes) {
-                var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("swappedRow", idx) : $"{KeyExpr("swappedRow", idx)}, lastOffset";
-                sb.AppendLine($"            {IndexFieldName(idx)}.Delete({deleteArgs});");
-                sb.AppendLine($"            {IndexFieldName(idx)}.Insert({KeyExpr("swappedRow", idx)}, offset);");
-            }
-            sb.AppendLine("        }");
-            sb.AppendLine("        return Result.Ok();");
-            sb.AppendLine("    }");
-        }
+        sb.AppendLine($"public sealed class {opsName} {{");
+        EmitStorageAndIndexFields(sb, table, primaryIndexType);
+        sb.AppendLine($"    private readonly ColdTable<{key}, {row}> coldTable;");
+        sb.AppendLine("    private readonly ColdStore cold;");
+        EmitChangeTrackingFields(sb, key, row);
+
+        sb.Append($"    public {opsName}(DenseArray<{row}> storage, {primaryIndexType} primaryIndex, ColdTable<{key}, {row}> coldTable, ColdStore cold");
+        AppendAutoIncrementAndIndexParams(sb, table);
+        sb.AppendLine(") {");
+        sb.AppendLine("        this.storage = storage;");
+        sb.AppendLine("        this.primaryIndex = primaryIndex;");
+        sb.AppendLine("        this.coldTable = coldTable;");
+        sb.AppendLine("        this.cold = cold;");
+        AppendAutoIncrementAndIndexAssignments(sb, table);
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        EmitGetMethod(sb, table);
+        EmitIterMethod(sb, table);
+        EmitSecondaryIndexAccessors(sb, table);
+        EmitStagingMethods(sb, table);
+        EmitValidateMethod(sb, table);
+        EmitPersistentApply(sb, table);
+        EmitBulkLoadMethods(sb, table);
+        if (table.Evictable) EmitStorageAccessor(sb, table, opsName);
 
         sb.AppendLine("}");
         return sb.ToString();
+    }
+
+    static private void EmitPersistentApply(StringBuilder sb, TableModel table) {
+        sb.AppendLine("    internal void Apply() {");
+        sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
+        sb.AppendLine("            switch (c.Kind) {");
+        sb.AppendLine("                case ChangeKind.Insert: {");
+        sb.AppendLine("                    if (!cold.IsScopeActive) { lastError = DbError.NoActiveTransaction(); break; }");
+        sb.AppendLine($"                    var pk = c.Row.{table.PrimaryKeyName};");
+        sb.AppendLine("                    if (primaryIndex.GetOffset(pk).IsOk()) { lastError = DbError.DuplicateKey(); break; }");
+        sb.AppendLine("                    var offset = storage.Insert(c.Row);");
+        sb.AppendLine("                    primaryIndex.Insert(pk, offset);");
+        foreach (var idx in table.Indexes)
+            sb.AppendLine($"                    {IndexFieldName(idx)}.Insert({KeyExpr("c.Row", idx)}, offset);");
+        sb.AppendLine("                    var coldPutResult = cold.Put(coldTable, pk, c.Row);");
+        sb.AppendLine("                    if (coldPutResult.IsError()) { lastError = coldPutResult.GetError(); break; }");
+        sb.AppendLine("                    break;");
+        sb.AppendLine("                }");
+        sb.AppendLine("                case ChangeKind.Update: {");
+        sb.AppendLine("                    if (!cold.IsScopeActive) { lastError = DbError.NoActiveTransaction(); break; }");
+        sb.AppendLine("                    var offsetResult = primaryIndex.GetOffset(c.Key);");
+        sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
+        sb.AppendLine("                    var offset = offsetResult.Unwrap();");
+        sb.AppendLine("                    var oldRow = storage.Get(offset);");
+        sb.AppendLine("                    storage.Set(offset, c.Row);");
+        foreach (var idx in table.Indexes) {
+            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
+            sb.AppendLine($"                    if (!{KeyExpr("oldRow", idx)}.Equals({KeyExpr("c.Row", idx)})) {{");
+            sb.AppendLine($"                        {IndexFieldName(idx)}.Delete({deleteArgs});");
+            sb.AppendLine($"                        {IndexFieldName(idx)}.Insert({KeyExpr("c.Row", idx)}, offset);");
+            sb.AppendLine("                    }");
+        }
+        sb.AppendLine("                    var coldPutResult = cold.Put(coldTable, c.Key, c.Row);");
+        sb.AppendLine("                    if (coldPutResult.IsError()) { lastError = coldPutResult.GetError(); break; }");
+        sb.AppendLine("                    break;");
+        sb.AppendLine("                }");
+        sb.AppendLine("                default: {");
+        sb.AppendLine("                    if (!cold.IsScopeActive) { lastError = DbError.NoActiveTransaction(); break; }");
+        sb.AppendLine("                    var offsetResult = primaryIndex.GetOffset(c.Key);");
+        sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
+        sb.AppendLine("                    var offset = offsetResult.Unwrap();");
+        sb.AppendLine("                    var lastOffset = storage.LastOffset;");
+        sb.AppendLine("                    var swapped = storage.Delete(offset);");
+        sb.AppendLine("                    primaryIndex.Delete(c.Key);");
+        foreach (var idx in table.Indexes) {
+            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("c.Row", idx) : $"{KeyExpr("c.Row", idx)}, offset";
+            sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
+        }
+        sb.AppendLine("                    if (swapped is { } swappedRow) {");
+        sb.AppendLine($"                        var swappedPk = swappedRow.{table.PrimaryKeyName};");
+        sb.AppendLine("                        primaryIndex.Delete(swappedPk);");
+        sb.AppendLine("                        primaryIndex.Insert(swappedPk, offset);");
+        foreach (var idx in table.Indexes) {
+            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("swappedRow", idx) : $"{KeyExpr("swappedRow", idx)}, lastOffset";
+            sb.AppendLine($"                        {IndexFieldName(idx)}.Delete({deleteArgs});");
+            sb.AppendLine($"                        {IndexFieldName(idx)}.Insert({KeyExpr("swappedRow", idx)}, offset);");
+        }
+        sb.AppendLine("                    }");
+        sb.AppendLine("                    var coldDeleteResult = cold.Delete(coldTable, c.Key);");
+        sb.AppendLine("                    if (coldDeleteResult.IsError()) { lastError = coldDeleteResult.GetError(); break; }");
+        sb.AppendLine("                    break;");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine("        changes.Clear();");
+        sb.AppendLine("        Dirty = false;");
+        sb.AppendLine("    }");
+    }
+
+    static private void EmitBulkLoadMethods(StringBuilder sb, TableModel table) {
+        var row = table.RowTypeFullName;
+        sb.AppendLine();
+        sb.AppendLine($"    internal void LoadRow({row} row) {{");
+        sb.AppendLine($"        var pk = row.{table.PrimaryKeyName};");
+        sb.AppendLine("        var offset = storage.Insert(row);");
+        sb.AppendLine("        primaryIndex.Insert(pk, offset);");
+        foreach (var idx in table.Indexes)
+            sb.AppendLine($"        {IndexFieldName(idx)}.Insert({KeyExpr("row", idx)}, offset);");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        sb.AppendLine("    internal void BulkLoadFromCold() {");
+        sb.AppendLine("        foreach (var pair in cold.ScanAll(coldTable)) LoadRow(pair.Row);");
+        sb.AppendLine("    }");
+    }
+
+    static private void EmitStorageAccessor(StringBuilder sb, TableModel table, string opsName) {
+        var row = table.RowTypeFullName;
+        var key = table.PrimaryKeyTypeFullName;
+        sb.AppendLine();
+        sb.AppendLine("    public StorageAccessor Storage => new(this);");
+        sb.AppendLine($"    public readonly struct StorageAccessor({opsName} ops) {{");
+        sb.AppendLine($"        public Result Load({key} id) => ops.LoadInternal(id);");
+        sb.AppendLine($"        public Result Evict({key} id) => ops.EvictInternal(id);");
+        sb.AppendLine($"        public Result<{row}> Peek({key} id) => ops.cold.Peek(ops.coldTable, id);");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        sb.AppendLine($"    private Result LoadInternal({key} id) {{");
+        sb.AppendLine("        if (primaryIndex.GetOffset(id).IsOk()) return Result.Ok();");
+        sb.AppendLine("        if (!cold.IsScopeActive) return Result.Error(DbError.NoActiveTransaction());");
+        sb.AppendLine("        var coldResult = cold.Get(coldTable, id);");
+        sb.AppendLine("        if (coldResult.IsError()) return coldResult.Void();");
+        sb.AppendLine("        var row = coldResult.Unwrap();");
+        sb.AppendLine("        var offset = storage.Insert(row);");
+        sb.AppendLine("        primaryIndex.Insert(id, offset);");
+        foreach (var idx in table.Indexes)
+            sb.AppendLine($"        {IndexFieldName(idx)}.Insert({KeyExpr("row", idx)}, offset);");
+        sb.AppendLine("        return Result.Ok();");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        sb.AppendLine($"    private Result EvictInternal({key} id) {{");
+        sb.AppendLine("        var offsetResult = primaryIndex.GetOffset(id);");
+        sb.AppendLine("        if (offsetResult.IsError())");
+        sb.AppendLine("            return offsetResult.GetError().Kind == ErrorKind.IndexKeyNotFound ? Result.Ok() : offsetResult.Void();");
+        sb.AppendLine("        var offset = offsetResult.Unwrap();");
+        sb.AppendLine("        var row = storage.Get(offset);");
+        sb.AppendLine("        var lastOffset = storage.LastOffset;");
+        sb.AppendLine("        var swapped = storage.Delete(offset);");
+        sb.AppendLine("        primaryIndex.Delete(id);");
+        foreach (var idx in table.Indexes) {
+            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("row", idx) : $"{KeyExpr("row", idx)}, offset";
+            sb.AppendLine($"        {IndexFieldName(idx)}.Delete({deleteArgs});");
+        }
+        sb.AppendLine("        if (swapped is { } swappedRow) {");
+        sb.AppendLine($"            var swappedPk = swappedRow.{table.PrimaryKeyName};");
+        sb.AppendLine("            primaryIndex.Delete(swappedPk);");
+        sb.AppendLine("            primaryIndex.Insert(swappedPk, offset);");
+        foreach (var idx in table.Indexes) {
+            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("swappedRow", idx) : $"{KeyExpr("swappedRow", idx)}, lastOffset";
+            sb.AppendLine($"            {IndexFieldName(idx)}.Delete({deleteArgs});");
+            sb.AppendLine($"            {IndexFieldName(idx)}.Insert({KeyExpr("swappedRow", idx)}, offset);");
+        }
+        sb.AppendLine("        }");
+        sb.AppendLine("        return Result.Ok();");
+        sb.AppendLine("    }");
     }
 
     static private string EmitDatabase(DatabaseModel database, ImmutableArray<TableModel> tables) {
@@ -814,6 +764,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("// <auto-generated>");
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
+        sb.AppendLine("using System.Collections.Generic;");
+        sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using RhinoDB.Core;");
         sb.AppendLine("using RhinoDB.Lib.Cold;");
         sb.AppendLine("using RhinoDB.Lib.Execution;");
@@ -853,8 +805,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var persistentTables = tables.Where(t => t.Kind == TableKind.Persistent).ToImmutableArray();
 
         sb.AppendLine($"public partial class {database.SimpleName} {{");
-        // Instant-kind fields are self-contained `new ConcreteType()`
-        // initializers with no reference to any sibling field.
         foreach (var table in instantTables) {
             sb.AppendLine($"    private readonly DenseArray<{table.RowTypeFullName}> {Camel(table.Accessor)}Storage = new(chunkSize: {table.ChunkSize});");
             sb.AppendLine($"    private readonly {PrimaryIndexType(table)} {Camel(table.Accessor)}PrimaryIndex = new();");
@@ -865,20 +815,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine($"    private readonly {ConcreteIndexType(idx)} {fieldName} = new();");
             }
         }
-        // Persistent-kind fields are the SAME DenseArray/primary-index
-        // shape Instant-kind has, plus a ColdTable field. Unlike
-        // storage/primaryIndex, ColdTable can't be a field initializer's
-        // `new(...)` - opening it needs a real ColdStore, only available
-        // once the base DbContext<TTx>(ColdStore) constructor has already
-        // run (a field initializer can't reference even an inherited
-        // instance property - the same CS0236 category hit during
-        // Milestone 2's interface retirement) - so it's assigned in the
-        // constructor body below instead, using the constructor's own
-        // `cold` parameter directly (never `this.Cold`, sidestepping the
-        // question of exactly when that inherited property becomes safe to
-        // read). The shared `cold` field itself (one per database, not one
-        // per table) is what every Persistent-kind Ops instance uses for
-        // its own IsScopeActive check / Put/Get/Delete/Peek calls.
         foreach (var table in persistentTables) {
             sb.AppendLine($"    private readonly DenseArray<{table.RowTypeFullName}> {Camel(table.Accessor)}Storage = new(chunkSize: {table.ChunkSize});");
             sb.AppendLine($"    private readonly {PrimaryIndexType(table)} {Camel(table.Accessor)}PrimaryIndex = new();");
@@ -917,9 +853,29 @@ public sealed class TableGenerator : IIncrementalGenerator {
             return $"new {t.RowTypeName}Ops({string.Join(", ", args)})";
         })));
         sb.AppendLine(");");
+
+        if (persistentTables.Length > 0) sb.AppendLine($"    internal {txName} CreateLoaderTransaction() => CreateTransaction();");
         sb.AppendLine("}");
 
+        if (persistentTables.Length > 0) EmitLoader(sb, database, persistentTables);
+
         return sb.ToString();
+    }
+
+    static private void EmitLoader(StringBuilder sb, DatabaseModel database, ImmutableArray<TableModel> persistentTables) {
+        var loaderName = $"{database.SimpleName}Loader";
+        var nonEvictable = persistentTables.Where(t => !t.Evictable).ToImmutableArray();
+
+        sb.AppendLine();
+        sb.AppendLine($"public class {loaderName} {{");
+        sb.AppendLine($"    public virtual Task LoadAsync({database.SimpleName} db) {{");
+        sb.AppendLine("        var tx = db.CreateLoaderTransaction();");
+        sb.AppendLine("        var tasks = new List<Task>();");
+        foreach (var table in nonEvictable)
+            sb.AppendLine($"        tasks.Add(Task.Run(() => tx.{table.Accessor}.BulkLoadFromCold()));");
+        sb.AppendLine("        return Task.WhenAll(tasks);");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
     }
 
     static private string Camel(string name) => name.Length == 0 ? name : char.ToLowerInvariant(name[0]) + name.Substring(1);
@@ -928,7 +884,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         string rowTypeFullName, string rowTypeName, string? rowNamespace,
         TableKind kind, string ownerDatabaseFullName,
         string primaryKeyName, string primaryKeyTypeFullName, IndexKind primaryKeyKind,
-        string primaryKeyAccessor, string accessor, int chunkSize,
+        string primaryKeyAccessor, string accessor, int chunkSize, bool evictable,
         ImmutableArray<AutoIncrementFieldModel> autoIncrementFields,
         ImmutableArray<IndexModel> indexes) {
         public string RowTypeFullName { get; } = rowTypeFullName;
@@ -939,18 +895,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public string PrimaryKeyName { get; } = primaryKeyName;
         public string PrimaryKeyTypeFullName { get; } = primaryKeyTypeFullName;
         public IndexKind PrimaryKeyKind { get; } = primaryKeyKind;
-
-        // The generated primary-key read method's name (default "Get") and
-        // the generated property exposing this table's Ops on the
-        // database's Transaction (default "{RowTypeName}s") - see
-        // PrimaryKeyAttribute.Accessor / TableAttribute.Accessor.
         public string PrimaryKeyAccessor { get; } = primaryKeyAccessor;
         public string Accessor { get; } = accessor;
-
-        // The generated DenseArray<TRow> storage field's chunk size - see
-        // TableAttribute.ChunkSize (default 4096).
         public int ChunkSize { get; } = chunkSize;
-
+        public bool Evictable { get; } = evictable;
         public ImmutableArray<AutoIncrementFieldModel> AutoIncrementFields { get; } = autoIncrementFields;
         public ImmutableArray<IndexModel> Indexes { get; } = indexes;
     }
@@ -961,11 +909,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public bool IsSigned { get; } = isSigned;
     }
 
-    // AccessorName is the generated method/field name for this index - the
-    // shared Accessor value for a composite index, or a lone field's own
-    // name (see IndexAttribute.Accessor). Fields is 1 entry for a plain
-    // index, 2-3 for a composite one, already sorted by Order/declaration
-    // position.
     private sealed class IndexModel(string accessorName, IndexKind kind, Uniqueness uniqueness, ImmutableArray<IndexFieldModel> fields) {
         public string AccessorName { get; } = accessorName;
         public IndexKind Kind { get; } = kind;
@@ -985,10 +928,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
     }
 
     private enum TableKind { Instant, Persistent }
-
-    // Mirrors RhinoDB.Core.Tables.IndexKind/Uniqueness - kept in sync by
-    // hand (this project doesn't reference RhinoDB.Core, it only reads
-    // attribute metadata by name).
     private enum IndexKind { Hash, RedBlackOrdered }
     private enum Uniqueness { Unique, NonUnique }
 }

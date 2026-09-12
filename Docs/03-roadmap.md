@@ -132,9 +132,19 @@ pair and one extra cold write-through call per `Apply()` case. Same "hand-prove
 then delete the scaffold" treatment `Table<TKey,TRow>` got. Porting
 `PersistentTable`'s own deleted test suites surfaced a real, pre-existing gap
 independent of the retirement: `Validate()` never checked that an `Update`'s
-target key actually exists (either table kind) - fixed. See
-[Architecture — Transactions](02-architecture.md#transactions). Not yet built:
-schema migration tooling, eager-load-on-startup.
+target key actually exists (either table kind) - fixed. Also 2026-09-12,
+closing out this stage's last open item: **eager-load-on-startup**, via
+`[Table].Evictable` (default `false`) and a generated `{Db}Loader` class -
+see [Architecture — Restart & recovery](02-architecture.md#restart--recovery)
+for the full design (real libmdbx cursor bindings added to `RhinoDB.Native`
+for the underlying full-table scan, concurrent per-table loads since libmdbx
+is multi-reader, an unchecked bulk-insert fast path that skips `Validate()`
+since eager-loaded data already passed those checks once). Also added this
+same day: `Iter()` on every generated table (sequential enumeration of every
+row currently in memory, real-storage-only) and `[Table].ChunkSize` (default
+4096, was hardcoded). See
+[Architecture — Transactions](02-architecture.md#transactions). Not yet
+built: schema migration tooling.
 
 ## Stage 6 — Change propagation ⏳ designed, not built
 

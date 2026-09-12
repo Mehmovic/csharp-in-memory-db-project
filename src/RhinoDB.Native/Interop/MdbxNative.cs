@@ -47,5 +47,14 @@ static internal partial class MdbxNative {
     static public partial int mdbx_del(nint txn, uint dbi, in MdbxVal key, nint data);
 
     [LibraryImport(LibraryName)]
+    static public partial int mdbx_cursor_open(nint txn, uint dbi, out nint cursor);
+
+    [LibraryImport(LibraryName)]
+    static public partial void mdbx_cursor_close(nint cursor);
+
+    [LibraryImport(LibraryName)]
+    static public partial int mdbx_cursor_get(nint cursor, ref MdbxVal key, ref MdbxVal data, int op);
+
+    [LibraryImport(LibraryName)]
     static public partial nint mdbx_strerror(int errnum);
 }

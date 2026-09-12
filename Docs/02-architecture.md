@@ -532,8 +532,9 @@ row's actual state changed; `Load`/`Evict` touch memory only, and `Peek` is a
 read-only point lookup straight into libmdbx that returns a row's current value
 *without* loading it into memory — so a broad query (a leaderboard scan over
 offline accounts) doesn't force every row it touches into the working set just to
-read it. Recovery starts empty except for a small, fixed, eagerly-loaded set on
-startup (the `OnStart` hook) — no bulk warm-up.
+read it. Recovery starts empty except for every non-`Evictable` table, which the
+generated `{Db}Loader` brings back in full before anything else runs (see
+Restart & recovery below) — `Evictable` tables get no automatic warm-up at all.
 
 **`Evict` must wait for its table's last `Optimistic` commit before dropping a
 row from memory.** "Every committed write already reached libmdbx by eviction
@@ -658,42 +659,53 @@ copy-on-write commit model (see Cold storage above) already guarantees cold
 storage reflects some prior, fully-committed state after any crash — RhinoDB
 doesn't layer a second recovery mechanism on top of it. In-memory state is
 never itself persisted (no memory-mapped heap, no snapshot file) — a crash
-simply discards it, and a fresh process starts every `Table` completely
-empty, the same as a brand-new database would. There is nothing to "recover"
-in memory, only cold storage to reopen and, deliberately, *not* bulk-load
-from.
+simply discards it, and a fresh process starts every table completely empty,
+the same as a brand-new database would.
 
-**The `OnStart` hook is how a table gets anything back into memory before
-traffic arrives, and it runs through the ordinary execution path, not a
-special pre-loop step.** Concretely: `OnStart` is scheduled as the first
-operation submitted to a `DbContext`'s `Run` pipeline, and hosting code awaits
-its completion before accepting external requests — reusing the existing
-single-writer serialization (no new concurrency primitive) to guarantee
-whatever it loads is visible before anything else runs, for free. What it
-loads is entirely application-specific (the roadmap's soccer-manager target
-might warm "clubs with an active session," a chat server might warm nothing
-at all) — the engine's job is only to provide the primitive (`Load`) and the
-guaranteed-first hook point, not to guess what's worth pre-warming for an
-application it doesn't know about.
+**Built 2026-09-12: `[Table].Evictable` (default `false`) plus a generated
+`{Db}Loader` class replace the old speculative "`OnStart` hook" sketch with
+a real, concrete mechanism.** A `Persistent`-kind table with `Evictable =
+false` doesn't even generate `.Storage` (Load/Evict/Peek) — the *only* way
+such a table could ever hold any data is a full eager load, so the generator
+also emits `{Db}Loader.LoadAsync({Db} db)`, `public virtual`, whose default
+implementation calls a new internal `BulkLoadFromCold()` on every non-
+evictable table's `Ops` — a full cursor scan of that table's cold
+sub-database (`ColdStore.ScanAll`, backed by real libmdbx cursor bindings)
+feeding every row straight into `storage`/`primaryIndex`/every secondary
+index, skipping `Validate()`'s duplicate-key/uniqueness checks entirely
+(each row already passed them the first time it was ever written, so
+re-checking would just repeat proven-safe work) and skipping the staged-
+change log too (there's no operation to roll back, no cold write-through to
+redo — the data is already durable, that's the whole reason it's being
+loaded). Per-table loads run concurrently (`Task.Run` per table inside
+`LoadAsync`) since libmdbx is multi-reader — separate `ScanAll` calls never
+contend with each other, and different tables' storage/index fields are
+always disjoint, so there's no shared state between them either. A consumer
+awaits `loader.LoadAsync(db)` once at startup, before accepting traffic —
+reusing no special engine hook, just an ordinary async call the hosting code
+sequences itself.
+
+**`Evictable = true` opts a table *out* of that automatic full load and
+exposes `.Storage` instead**, so the consumer manages residency by hand
+(e.g. loading specific rows on demand inside RPC handlers) — the design this
+doc originally sketched as the default for every table. A subclass
+overriding `LoadAsync` can still call the base implementation and then reach
+into an `Evictable` table's own `BulkLoadFromCold()` directly (via its
+`Ops`, obtained through a same-assembly-only `CreateLoaderTransaction()`
+wrapper) if it wants to eager-load that one too — the choice is explicit and
+per-table, not baked into the engine's defaults.
 
 **Restart is the routine, whole-table version of the eviction hazard already
 documented above, not a new one.** A unique secondary index only enforces
-against currently-loaded rows; after *any* restart, every row outside the
-eager-load set is in exactly the state a deliberately-`Evict`ed row is in —
-unenforced, until reloaded. Where `Evict` is a deliberate, presumably rare
-application action, a restart is routine (every deploy, every crash) and
-typically unloads *most* of the table at once, not one row — the same
-insert-a-colliding-value corruption already described for `Evict` is not a
-one-off edge case here, it's the default post-restart state for anything not
-in the eager-load set. **Concrete rule, not just a caution**: a `persistent`
-table carrying a unique secondary index that must actually hold should eager-
-load its *entire* contents in `OnStart`, not a partial set — partial or no
-eager-load is only safe for tables with no unique secondary index (where a
-stale value can be wrong to read but can't corrupt a uniqueness guarantee) or
-where an application has independently verified staleness there is
-acceptable. This isn't a new mechanism to build — `Load` already exists — it's
-a stated requirement on how `OnStart` is used per table, worth a comment at
-the `[Table]` declaration site once that exists, not just here.
+against currently-loaded rows; after *any* restart, a table left partially
+loaded (an `Evictable` one the consumer didn't fully reload) is in exactly
+the state a deliberately-`Evict`ed row is in — unenforced, until reloaded.
+This is exactly why `Evictable = false` is the *default*: a table that never
+opts into partial residency can never be caught half-loaded after a restart,
+since the loader always brings it back in full before anything else runs.
+The hazard only exists at all for a table that explicitly chose `Evictable =
+true` and the consumer's own residency management leaves gaps — a stated
+trade-off of that choice, not a gap in the engine.
 
 **`Optimistic` writes have a real, bounded data-loss window across a crash —
 name it plainly rather than leaving it implied.** An `Optimistic` `Run` call

@@ -30,7 +30,7 @@ public class Milestone3Tests {
         [Database]
         public partial class BankDb : DbContext<BankDbTransaction> { }
 
-        [Table(TableKind.Persistent, typeof(BankDb))]
+        [Table(TableKind.Persistent, typeof(BankDb), Evictable = true)]
         public readonly partial record struct Account([PrimaryKey] int Id, int OwnerId, decimal Balance);
 
         [Table(TableKind.Instant, typeof(BankDb))]

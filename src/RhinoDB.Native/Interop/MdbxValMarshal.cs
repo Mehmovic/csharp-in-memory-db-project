@@ -31,4 +31,24 @@ static internal unsafe class MdbxValMarshal {
             return MdbxNative.mdbx_del(txn, dbi, in keyVal, 0);
         }
     }
+
+    static public int CursorGetFirst(nint cursor, out byte[] key, out byte[] value) => CursorGet(cursor, MdbxCursorOp.First, out key, out value);
+    static public int CursorGetNext(nint cursor, out byte[] key, out byte[] value) => CursorGet(cursor, MdbxCursorOp.Next, out key, out value);
+
+    static private int CursorGet(nint cursor, int op, out byte[] key, out byte[] value) {
+        MdbxVal keyVal = default;
+        MdbxVal dataVal = default;
+        var rc = MdbxNative.mdbx_cursor_get(cursor, ref keyVal, ref dataVal, op);
+        if (rc != 0) {
+            key = [];
+            value = [];
+            return rc;
+        }
+
+        key = new byte[keyVal.Length];
+        new ReadOnlySpan<byte>((void*)keyVal.Data, (int)keyVal.Length).CopyTo(key);
+        value = new byte[dataVal.Length];
+        new ReadOnlySpan<byte>((void*)dataVal.Data, (int)dataVal.Length).CopyTo(value);
+        return rc;
+    }
 }
