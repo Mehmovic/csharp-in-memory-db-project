@@ -175,6 +175,49 @@ touched by this batch and its field no longer matches, or it was deleted),
 so a real hit is only trusted if its primary key was never touched by the
 batch at all.
 
+## `ToTableModel` — `[Validate]` method discovery
+
+A row's `[Validate]`-tagged static methods are business-rule checks that
+plug into the same `Validate()`/`Result` pipeline the structural checks
+(duplicate key, primary-key immutability, unique-index conflicts) already
+use — a non-null `DbError?` return fails validation exactly like those do,
+getting the same free cross-table atomicity for free (a later table's
+failure leaves an earlier table's staged Insert unapplied). The signature is
+enforced structurally, not just at the call site, because a bad one would
+otherwise surface as a confusing `CS0122`/type-mismatch *inside generated
+code* rather than a clean diagnostic on the author's own source:
+
+- Must be `static` and return `DbError?` (checked via
+  `OriginalDefinition.SpecialType == SpecialType.System_Nullable_T` plus the
+  type argument, not a string compare on the whole type - more robust
+  against `SymbolDisplayFormat` rendering differences than comparing against
+  a literal `"DbError?"` string would be).
+- Must take exactly one parameter of the row's own type.
+- Must NOT be `private` — generated code calls it from a sibling class
+  (`{Row}Ops`) in the same assembly, so `internal` is the minimum viable
+  accessibility; `private` would compile fine on the row type itself and
+  only fail later, from inside generated code the author never looks at.
+
+Multiple `[Validate]` methods on one row are all wired in independently
+(`EmitCustomValidateChecks` loops over `TableModel.ValidateMethodNames`) —
+useful for keeping unrelated business rules (e.g. "balance can't go
+negative" vs. "name can't be blank") as separate, independently testable
+methods rather than one large one.
+
+## `EmitCustomValidateChecks`
+
+Called from both the Insert and Update branches of `Validate()`, never
+Delete (there's no new row content to validate against a row being
+removed). Runs *after* the existing structural checks in each branch, not
+before — a business-rule violation is only worth surfacing once the
+operation is already known to be structurally valid, avoiding a confusing
+scenario where a duplicate-key error and a business-rule error could both
+plausibly apply and the caller sees whichever happened to be checked first
+for the wrong reason. Each check gets its own `{ }` block scoping a local
+`customError` variable, rather than a shared variable with numeric
+suffixes, since that's simpler to generate correctly for an arbitrary
+number of `[Validate]` methods.
+
 ## `EmitValidateMethod`
 
 Real pre-apply validation: nothing mutates during this pass, so a later

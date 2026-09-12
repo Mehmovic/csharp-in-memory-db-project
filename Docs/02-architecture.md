@@ -78,7 +78,8 @@ tables — persistent or instant, the durability kind is irrelevant here, see
 Table kinds above — are registered to it. Scaling is horizontal, not
 intra-process: parallelism comes from running multiple independent `DbContext`s,
 each fully serial internally, coordinating with each other, if at all, only
-through the async change-propagation channel below, never a shared lock. One
+through the async Inter-Database Communication (IDC) channel below, never a
+shared lock. One
 database is one actor; more scale means more databases, not more concurrency
 inside one.
 
@@ -720,7 +721,17 @@ should be a named, understood property when choosing `Optimistic` vs.
 tick-position update losing at most one in-flight write on a crash is fine;
 "player spent 500 gold" is not, and belongs on `Confirmed`.
 
-## Change propagation (designed, not yet built)
+## Inter-Database Communication (IDC) (designed, not yet built)
+
+**Renamed 2026-09-13 from "Change propagation"** — that name conflated two
+separate concerns: actor-to-actor delivery (this section, database/shard to
+database/shard) and server-to-client delivery ([Roadmap Stage
+8](03-roadmap.md#stage-8--viewtable-only-client-access-subscribe-and-diff)).
+They share the same underlying change-emission mechanism described below but
+are independent pipelines with independent wire-format needs — see "Three
+serialization pipelines" further down. `PropagationMode`
+(`Optimistic`/`Confirmed`, the per-`Run`-call durability choice) is unrelated
+and keeps its name.
 
 Every mutation enqueues a change (table, key, kind, captured value) inline at
 commit time — ordering falls out of single-writer serialization for free, no
@@ -734,16 +745,132 @@ This is also the only bridge between two `DbContext`s — there is no synchronou
 cross-context transaction; anything spanning two database instances is async,
 message-passing coordination, never a shared lock.
 
-For an instant-only change, or an `Optimistic` transaction, propagation is
+For an instant-only change, or an `Optimistic` transaction, IDC delivery is
 immediate — enqueued right after the in-memory mutation, not waiting on a
-libmdbx write. For a `Confirmed` transaction, propagation waits until *after*
-its commit actually succeeds — otherwise a subscriber could be told about a
+libmdbx write. For a `Confirmed` transaction, delivery waits until *after*
+its commit actually succeeds — otherwise a peer could be told about a
 change that then fails to durably land, exactly what `Confirmed` exists to
 prevent. This costs nothing extra: `Confirmed` already blocks the single-writer
 loop on that same await, so nothing else can interleave regardless of when
-propagation happens within it. See [Roadmap Stage
-8](03-roadmap.md#stage-8--viewtable-only-client-access-subscribe-and-diff) for
-how this becomes the basis of a subscribe-once/diffs-after client access model.
+delivery happens within it.
+
+### Three serialization pipelines, not one
+
+- **Cold storage** — plain MemoryPack, fixed, never configurable. Unrelated to
+  IDC; mentioned here only to draw the boundary.
+- **IDC (this section)** — `[Database].Idc` declares `WireFormat.MemoryPack`
+  (default) or `VersionedMemoryPack`. Actor-to-actor only: bytes never leave
+  the set of `DbContext`s an operator controls, so a RhinoDB-specific encoding
+  is fine.
+- **Client access** (Stage 8) — its own, separate wire-format declaration
+  (`VersionedMemoryPack`, or `MessagePack` for non-C# clients). Deliberately
+  independent from IDC's choice — a database's peers and its clients can have
+  entirely different version/language constraints, so coupling the two would
+  force a lowest-common-denominator format on both.
+
+### Fully generated wire (de)serialization — no hand-declared type, no third-party generator dependency
+
+A first design pass had the table generator emit a `[MemoryPackable]`-attributed
+wire struct for MemoryPack's own generator to complete. Rejected once we
+confirmed this isn't merely fragile, it's a hard limitation of the incremental
+generator model: a generator's `ForAttributeWithMetadataName` pipeline only
+ever scans the *original* user-written syntax trees present when the driver
+starts — never another generator's `AddSource` output, regardless of
+registration order. Two generators can coexist in one compilation (as
+`TableGenerator` and `DbErrorGenerator` already do in this repo) only by each
+independently scanning hand-written attributes; neither can consume the
+other's generated code.
+
+Fix, for plain `WireFormat.MemoryPack`: the table generator emits
+`Serialize`/`Deserialize` methods that call MemoryPack's own public low-level
+primitives directly — `MemoryPackWriter<TBufferWriter>`/`MemoryPackReader`,
+the same building blocks MemoryPack's generator itself would have called,
+field by field, in declaration order (default MemoryPack is positional). No
+intermediate wire *type* is generated at all, and no dependency on MemoryPack's
+generator running in combination with ours — we call its runtime library
+directly, the same way its own generated code would have. This is safe
+specifically because IDC is RhinoDB-to-RhinoDB only: we own both ends of the
+wire, so replicating a simple, stable, positional encoding ourselves carries
+little drift risk (a future incompatible change to MemoryPack's low-level
+writer/reader API would need a new RhinoDB version regardless of which
+approach was used).
+
+`MessagePack` (Stage 8, client-facing, genuinely external non-C# consumers) is
+deliberately **not** given the same treatment. Interop correctness with real
+external clients matters more there than the boilerplate savings, so that path
+keeps a hand-declared, attributed DTO processed by the real MessagePack-CSharp
+generator — a subtle hand-rolled encoding bug would break someone else's
+client in a way that's much harder to catch than an internal IDC mismatch.
+`VersionedMemoryPack` is a later increment either way — its tagged, per-field
+encoding is more intricate to replicate correctly than plain MemoryPack's.
+
+### Location-transparent transport
+
+IDC must not know or care whether a peer database lives in the same process, a
+different process on the same machine, or a different machine entirely — one
+`IIdcTransport` interface, three implementations, swappable without touching
+sender/receiver logic:
+
+```csharp
+public interface IIdcTransport {
+    ValueTask SendAsync(DatabaseId target, TableId table, ChangeEnvelope envelope, CancellationToken ct);
+    IAsyncEnumerable<(DatabaseId Source, TableId Table, ChangeEnvelope Envelope)> Receive(CancellationToken ct);
+}
+public readonly record struct ChangeEnvelope(ChangeKind Kind, byte[] Key, byte[]? Row, long Sequence);
+```
+
+- `InProcessIdcTransport` — same process, a `Channel<T>` directly between two
+  `DbContext`s.
+- `LocalIpcIdcTransport` — same machine, separate process — named pipe or Unix
+  domain socket.
+- `NetworkIdcTransport` — different machine — TCP/QUIC/gRPC.
+
+Deferred, profile-gated optimization: `InProcessIdcTransport` *may* skip
+serialization entirely and hand the receiver an already-constructed value
+directly, since same-process is the one case where paying for bytes at all is
+a choice, not a requirement (a raw byte-level memcpy across independently
+declared types was considered and rejected — layout isn't guaranteed identical
+just because two types' fields look the same; a value-copy handoff is the
+safe version of the same idea). Not built until profiling shows serialization
+overhead actually matters in the in-process case.
+
+### Declarative surface
+
+Nothing beyond these two attributes is hand-written — wire (de)serialization,
+the sender hook at commit time, and the receiver's apply-through-`Run` loop are
+all generated:
+
+```csharp
+[Database(Idc = WireFormat.MemoryPack)]
+public partial class GameDb : DbContext<GameDbTransaction> { }
+
+[Table(TableKind.Persistent, typeof(GameDb), IdcDelivery = DeliveryGuarantee.Reliable)]
+public readonly partial record struct Club([PrimaryKey] int Id, string Name, decimal Balance);
+```
+
+Sender/receiver shape (illustrative, not yet built):
+
+```csharp
+// sender - hooked exactly where Change<TKey,TRow> is already enqueued at commit time
+void OnCommitted(TableId table, Change<int, Club> change) {
+    var envelope = new ChangeEnvelope(change.Kind, ClubIdc.SerializeKey(change.Key),
+        change.Kind == ChangeKind.Delete ? null : ClubIdc.Serialize(change.Row), NextSequence());
+    foreach (var peer in subscribers[table])
+        _ = transport.SendAsync(peer, table, envelope, ct);   // per-table DeliveryGuarantee governs retry/ack
+}
+
+// receiver - identical regardless of which IIdcTransport is behind it
+await foreach (var (source, table, envelope) in transport.Receive(ct)) {
+    await peerDb.Run((ctx, tx) => {
+        if (envelope.Kind == ChangeKind.Delete) tx.Clubs.Delete(ClubIdc.DeserializeKey(envelope.Key));
+        else tx.Clubs.Update(ClubIdc.Deserialize(envelope.Row).Id, ClubIdc.Deserialize(envelope.Row));
+        return Result.Ok();
+    }, PropagationMode.Optimistic);   // trusted path - source already validated it once
+}
+```
+
+See [Roadmap Stage 6](03-roadmap.md#stage-6--inter-database-communication-idc)
+for status and sequencing against Stages 7-8.
 
 ## Hosting
 

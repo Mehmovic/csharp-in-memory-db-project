@@ -6,8 +6,28 @@ rushed, but not directionless either. Each stage has a concrete definition of do
 below is fixed: each stage genuinely needs the ones above it to exist first.
 
 ```
-storage → indexes → transactions → libmdbx (cold storage) → propagation → networking
+storage → indexes → transactions → libmdbx (cold storage) → IDC → networking
 ```
+
+**Build order revised 2026-09-13, diverging from stage numbering.** The
+diagram above is the *dependency* order the numbering was originally chosen
+to match; the actual *build* order is now: Stages 1-5 (done) → **Stage 7 +
+Stage 8 together** (HTTP/WebSocket hosting, with the full subscribe-and-diff
+client model, not a stub) → a tiny proof-of-concept game → **Stage 6, scoped
+down** (IDC for in-process and same-machine peers only — cross-machine IDC
+and the eventual UDP/RUDP transport layer both explicitly deferred to the
+Backlog). This is not a numbering error to fix: Stage 8 never actually
+depended on Stage 6 — it only ever needed `Change<TKey,TRow>` (real since
+Stage 5) and its own transport (Stage 7's HTTP/WebSocket host), never IDC's
+actor-to-actor transport. The old text saying otherwise was an artifact of
+when "change propagation" was one ambiguous stage covering both actor-to-actor
+and server-to-client delivery, before the 2026-09-13 IDC/client-access split
+(see [Architecture — Inter-Database Communication](02-architecture.md#inter-database-communication-idc)).
+Rationale for building this way: prove the whole stack works end to end with
+a minimal real game before investing further in the harder, still-fully-
+unbuilt distributed-systems work (IDC, then cross-machine IDC, then a custom
+UDP transport) — that work is valuable for *scaling* a shipped game, not a
+prerequisite for a first one.
 
 ## Stage 1 — Storage engine ✅ done
 
@@ -143,10 +163,42 @@ since eager-loaded data already passed those checks once). Also added this
 same day: `Iter()` on every generated table (sequential enumeration of every
 row currently in memory, real-storage-only) and `[Table].ChunkSize` (default
 4096, was hardcoded). See
-[Architecture — Transactions](02-architecture.md#transactions). Not yet
-built: schema migration tooling.
+[Architecture — Transactions](02-architecture.md#transactions).
 
-## Stage 6 — Change propagation ⏳ designed, not built
+2026-09-13: **Milestone 5 — `DbError.Custom` business-rule validation, wired
+into the generated `Validate()`/`Result` path.** A row type declares one or
+more `internal`-or-more-visible `static DbError? Method(RowType row)` methods
+tagged `[Validate]`; the generator calls every one of them, for both Insert
+and Update (not Delete — nothing to check against a row being removed), right
+after the existing structural checks (duplicate key, primary-key immutability,
+unique-index conflicts) in that same table's `Validate()` — a non-null return
+sets `lastError` and fails validation exactly like a structural check would,
+so a business-rule violation gets the same free cross-table atomicity
+guarantee (a later table's failure leaves an earlier table's staged Insert
+unapplied) the structural checks already had. New `RHINO009` diagnostic
+catches the two ways this can go wrong before it becomes a `CS0122` inside
+generated code: wrong signature, or an accessibility below `internal`
+(generated code calls it from a sibling class in the same assembly, so
+`private` can never work). Not yet built: schema migration tooling.
+
+## Stage 6 — Inter-Database Communication (IDC) ⏳ designed, not built, built after Stage 7+8
+
+Renamed 2026-09-13 from "Change propagation" — that name was ambiguous between
+this stage (actor-to-actor, i.e. database/shard-to-database/shard) and Stage 8
+(server-to-client). They share the same underlying change-emission mechanism
+but are separate concerns with independent wire-format needs; only this stage
+is "IDC" now. `PropagationMode` (`Optimistic`/`Confirmed`, a per-`Run`-call
+durability choice) is unrelated and keeps its name.
+
+**Scoped down 2026-09-13, and moved after Stage 7+8 in build order** (see the
+build-order note at the top of this doc): first slice covers only
+`InProcessIdcTransport` and a same-machine local-IPC transport (named pipe or
+Unix domain socket) — `NetworkIdcTransport` (cross-machine) and a future
+UDP/RUDP transport layer are both explicitly deferred to the Backlog, not
+part of this stage's definition of done. `VersionedMemoryPack` is deferred
+alongside cross-machine IDC for the same reason — version skew across
+processes restarted together from one deploy is a much weaker requirement
+than skew across a network boundary during a rolling upgrade.
 
 The generic, non-boxing `Change<TKey,TRow>` shape and per-table typed `Ops`
 buffers this stage was always meant to use — **not** the `object`/`Action`-typed
@@ -157,21 +209,83 @@ built for the table generator's transaction/batch-apply system (see
 shrinks to delivery/fan-out on top of what's already there, not inventing the
 shape itself.
 
+**Design settled 2026-09-13** (not yet built — recorded ahead of
+implementation since the shape affects the declarative surface):
+
+- **Three independent serialization pipelines, not one.** (1) Cold storage:
+  plain MemoryPack, fixed, never configurable — unrelated to this stage. (2)
+  IDC (this stage): `[Database].Idc` declares `WireFormat.MemoryPack` (default)
+  or `VersionedMemoryPack` — actor-to-actor only, never seen outside the
+  process/machine boundary the operator controls. (3) Client access (Stage 8):
+  its own, separate wire-format declaration (`VersionedMemoryPack` or
+  `MessagePack` for non-C# clients) — genuinely independent from IDC's choice,
+  since a database's peers and its clients can have entirely different
+  version/language constraints.
+- **Fully generated, no hand-declared wire type.** A first design pass had the
+  generator emit a `[MemoryPackable]`-attributed wire struct for a *third-party*
+  generator (MemoryPack's own) to complete — rejected once we confirmed this
+  isn't just fragile, it's a hard limitation of the incremental generator
+  model: a generator's `ForAttributeWithMetadataName` pipeline only ever scans
+  the *original* user-written syntax, never another generator's `AddSource`
+  output, regardless of registration order. Fix: for plain `WireFormat
+  .MemoryPack`, the table generator emits `Serialize`/`Deserialize` methods
+  that call MemoryPack's own public low-level primitives directly
+  (`MemoryPackWriter<TBufferWriter>`/`MemoryPackReader` — the same building
+  blocks MemoryPack's generator itself would have called, field by field, in
+  declaration order since default MemoryPack is positional) — no intermediate
+  wire *type* needed at all, no dependency on MemoryPack's generator running
+  in combination with ours. This is safe specifically *because* IDC is
+  RhinoDB-to-RhinoDB only — we own both ends of the wire, so replicating a
+  simple, stable, positional encoding ourselves carries little drift risk.
+  `MessagePack` (Stage 8, client-facing, genuinely external non-C# consumers)
+  is deliberately **not** given the same treatment — interop correctness with
+  real external clients matters more there than the boilerplate savings, so
+  that path keeps a hand-declared, attributed DTO processed by the real
+  MessagePack-CSharp generator. `VersionedMemoryPack` is a later increment
+  either way (more intricate tagged encoding to replicate correctly).
+- **Location-transparent transport.** IDC must not know or care whether a peer
+  database lives in the same process, a different process on the same
+  machine, or a different machine — one `IIdcTransport` interface
+  (`SendAsync`/`Receive` over an opaque envelope: kind, serialized key,
+  serialized row, sequence number) with three implementations
+  (in-process `Channel<T>`, local IPC — named pipe/Unix domain socket, and
+  network — TCP/QUIC/gRPC), swappable without touching sender/receiver logic.
+  Deferred, profile-gated optimization: the in-process transport *may* skip
+  serialization and hand the receiver an already-constructed value directly,
+  since same-process is the one case where paying for bytes at all is a
+  choice, not a requirement — not built until proven to matter.
+- **Declarative surface** (attributes only — see
+  [Architecture — Inter-Database Communication](02-architecture.md#inter-database-communication-idc)
+  for the full pseudocode):
+  ```csharp
+  [Database(Idc = WireFormat.MemoryPack)]
+  public partial class GameDb : DbContext<GameDbTransaction> { }
+
+  [Table(TableKind.Persistent, typeof(GameDb), IdcDelivery = DeliveryGuarantee.Reliable)]
+  public readonly partial record struct Club([PrimaryKey] int Id, string Name, decimal Balance);
+  ```
+  Nothing else is hand-written — wire (de)serialization, the sender hook at
+  commit time, and the receiver's apply-through-`Run` loop are all generated.
+
 Per-table delivery-guarantee declaration (`Reliable` vs. lossy), per-connection
 sender loop with opportunistic last-write-per-key merge.
 
-## Stage 7 — Networking / hosting ⏳ not started
+## Stage 7 — Networking / hosting ⏳ not started, built together with Stage 8
 
-Minimal direct HTTP/WebSocket host once the core engine and propagation are solid.
-Not before — networking is explicitly deferred so early effort stays on the parts
-of the design that are actually novel and risky.
+Minimal direct HTTP/WebSocket host. Built together with Stage 8 (not before
+it, and not after — the two ship as one push, per the 2026-09-13 build-order
+decision at the top of this doc): the goal of this combined push is a fully
+working HTTP + WebSocket layer with the *real* Stage 8 subscribe-and-diff
+client model behind it, proven against a tiny real game, before any IDC work
+starts. Not a stub or a raw request/response placeholder — the full model
+described in Stage 8 below.
 
-## Stage 8 — View/Table-only client access, subscribe-and-diff ⏳ designed, not built
+## Stage 8 — View/Table-only client access, subscribe-and-diff ⏳ designed, not built, built together with Stage 7
 
 Decided 2026-09-07, queued here rather than folded into Stage 5. Clients never
 fetch via an ad-hoc RPC query — the only client-facing read path is subscribing
 to a `View`/`Table`: one full snapshot on first subscribe, then only `Change<TKey,TRow>`
-diffs (Stage 6's shape) afterward. Same "single call point" discipline already
+diffs afterward. Same "single call point" discipline already
 used for writes (`DbContext.Run`) and for cold reads (`Peek`), applied to the
 client boundary — no code path that bypasses the diffing machinery, so the
 bandwidth win (heavy cost paid once at subscribe time, not on every read) is
@@ -179,10 +293,17 @@ structural, not just a convention. A raw JSON/HTTP query API may come later, but
 as an additive transport over the same View snapshot/diff mechanism, not a
 redesign of it.
 
-Needs Stage 6 (the diff shape itself) and Stage 7 (a transport to push over) to
-exist first — mechanically this stage is "who's allowed to read, and how" layered
-on top of both, not new storage or propagation machinery of its own. Also needs a
-subscription-matching/fan-out engine (routing each committed change to the
+**Dependency corrected 2026-09-13**: this stage does *not* need Stage 6 (IDC)
+— that was an artifact of when "change propagation" was one ambiguous stage.
+It needs `Change<TKey,TRow>` (real since Stage 5's table generator work) and
+Stage 7 (a transport to push over), which is why the two are now built
+together, ahead of Stage 6 rather than after it. Client access has its own
+wire-format pipeline (`VersionedMemoryPack`/`MessagePack` — see
+[Architecture — Inter-Database Communication § Three serialization
+pipelines](02-architecture.md#three-serialization-pipelines-not-one)),
+independent from whatever IDC ends up using — a database's peers and its
+clients can have entirely different version/language constraints. Also needs
+a subscription-matching/fan-out engine (routing each committed change to the
 subscriptions that care about it) and a reconnect/catch-up story for a client
 that missed diffs while disconnected — real scope, not a thin wrapper.
 
@@ -217,9 +338,21 @@ don't get built before they're needed:
 - **Spatial index** (quad-tree/R-tree/geohash) — only if a real bounding-box/
   proximity query need shows up that composite-key `Range` can't serve.
 - **`ArrayPool<T>` pooling** — identified good fits are libmdbx commit
-  serialization and the propagation sender loop's outgoing batch buffer; not
+  serialization and IDC/client-access sender loops' outgoing batch buffers; not
   applied to `OrderedIndex.Range()`'s allocation until `Table<TRow>`/transactions/
   locking exist and profiling actually shows it matters.
+- **Cross-machine IDC (`NetworkIdcTransport`) and `VersionedMemoryPack`** —
+  Stage 6 as first built (2026-09-13 scope decision) only covers in-process and
+  same-machine peers. Extending `IIdcTransport` with a network implementation
+  (TCP/QUIC/gRPC) and adding version-tolerant encoding for the rolling-upgrade
+  case both wait until an actual multi-machine deployment need exists — see
+  [Architecture — Inter-Database Communication](02-architecture.md#inter-database-communication-idc).
+- **UDP/RUDP transport layer** — a custom UDP-based (unreliable or
+  selectively-reliable) transport for latency-sensitive live-match-tick state,
+  as an alternative to WebSocket for that traffic class. Deferred until Stage
+  7/8's WebSocket-based client access is proven against a real game and an
+  actual latency/bandwidth problem shows up that WebSocket can't serve well
+  enough — not built speculatively ahead of that evidence.
 - **`[Database]` gains an `Accessor`-style name** — for a future networked/RPC
   access layer (`ctx.Db.Table.Insert(...)`, `ctx` being an RPC-scoped context,
   not `DbContext` itself) a remote client can't address a database by its C#
