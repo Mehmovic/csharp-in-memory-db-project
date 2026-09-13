@@ -533,13 +533,14 @@ are durable, not the parent directory's record that the file exists — a crash
 right after creating a brand-new file can leave its data physically on disk but
 practically unreachable (no directory entry pointing to it), even though the
 file itself was fsynced. This is a well-documented, historically recurring
-class of database bug (SQLite, PostgreSQL, and — per a 2026-09
-investigation prompted by a LinkedIn post about it — SpacetimeDB have all hit
-it). Checked directly against RhinoDB's own vendored libmdbx source (the whole
-~1.7MB tree, not just its docs) for this specific mechanism: no `O_DIRECTORY`,
-no directory-fd `fsync`, no evidence libmdbx does this itself. **The exposure
-is architecturally much narrower here than in a segment-rotating WAL design
-like SpacetimeDB's**, though: libmdbx creates its `mdbx.dat`/`mdbx.lck` files
+class of database bug (SQLite, PostgreSQL, and other real-world databases
+have all hit it — this project's own 2026-09 investigation was prompted by a
+LinkedIn post describing the same class of bug in a WAL-segment-rotating
+database design). Checked directly against RhinoDB's own vendored libmdbx
+source (the whole ~1.7MB tree, not just its docs) for this specific
+mechanism: no `O_DIRECTORY`, no directory-fd `fsync`, no evidence libmdbx
+does this itself. **The exposure is architecturally much narrower here than
+in a segment-rotating WAL design**, though: libmdbx creates its `mdbx.dat`/`mdbx.lck` files
 exactly once, the first time `ColdStore.Open` runs against a directory that
 doesn't have them yet — every `Insert`/`Update`/`Delete`/`Confirmed` commit
 after that writes into the *same*, already-existing file via copy-on-write,

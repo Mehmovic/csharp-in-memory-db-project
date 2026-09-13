@@ -28,8 +28,9 @@ a benchmark's `GlobalSetup`) can pre-size past it and avoid paying for a
 growth/remap event mid-measurement. **Not** what explained the small-tier-
 slower-than-large-tier `Insert`/`Update` pattern first observed in
 `RhinoDB.Run.Server.Benchmark` - see `Docs/03-roadmap.md`'s 2026-09-13
-entry for the real root cause (a first-write-to-a-region cost, most likely
-Windows Defender real-time scanning, unrelated to libmdbx geometry). Kept as
+entry for the real cause (a first-write-to-a-region cost, unrelated to
+libmdbx geometry; originally suspected Windows Defender, since **disproven**
+by a direct exclusion test on 2026-09-14 - root cause still open). Kept as
 a real, independently-useful knob regardless.
 
 ## `commitCoalescingWindow` / `EndScope` / `ScheduleCoalescedSync` / `RunCoalescedBatch`
@@ -78,9 +79,9 @@ answered, independent of that follow-up.
 ## `Open` — `isFreshDirectory` / parent-directory fsync
 
 Added 2026-09-13, prompted by a LinkedIn post about the same class of bug in
-SpacetimeDB (fsync a newly-created file, but not the directory entry that
-makes it findable - a crash can leave the file durable but practically
-unreachable). Checked RhinoDB's actual exposure directly: grepped the entire
+a WAL-segment-rotating database design (fsync a newly-created file, but not
+the directory entry that makes it findable - a crash can leave the file
+durable but practically unreachable). Checked RhinoDB's actual exposure directly: grepped the entire
 vendored libmdbx source for any directory-fd fsync - found none, and
 libmdbx's own docs don't mention it either, so this was a real, unaddressed
 gap, not something already covered underneath. Full risk analysis (why it's

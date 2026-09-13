@@ -37,12 +37,14 @@ Inserts 20,000 throwaway rows (a key range disjoint from the real seeded
 data, e.g. negative IDs) under `Confirmed`, independent of `RecordCount`,
 right after seeding. Found necessary by measurement, not assumed: a freshly-
 created file's never-before-written regions cost roughly 10x more to write
-to on this dev machine than already-settled ones (Windows Defender real-time
-scanning is the leading suspect, confirmed active via `Get-MpComputerStatus`
-- see `Docs/03-roadmap.md`'s 2026-09-13 entry for the full two-experiment
-diagnosis), which is what actually produced the earlier backwards-looking
-small-tier-slower-than-large-tier pattern - nothing to do with `RecordCount`
-or libmdbx geometry at all. This warm-up fixes `Update` (which always
+to on this dev machine than already-settled ones - see
+`Docs/03-roadmap.md`'s 2026-09-13 entry for the full two-experiment
+diagnosis. **Windows Defender real-time scanning was suspected as the cause
+and directly tested (2026-09-14) via a real folder exclusion - ruled out,
+made no meaningful difference.** Root cause of the ~10x cost is still open;
+regardless of cause, this is what actually produced the earlier
+backwards-looking small-tier-slower-than-large-tier pattern - nothing to do
+with `RecordCount` or libmdbx geometry at all. This warm-up fixes `Update` (which always
 rewrites the same fixed `lookupKey`, so once warm-up settles that page every
 subsequent `Update` is cheap) but **does not** fix `Insert` - `Insert`
 always writes a brand-new, monotonically increasing key, so it inherently

@@ -309,15 +309,31 @@ about the benchmark itself and one about the engine:
   primary keys) will keep hitting fresh, unsettled pages forever, so its
   real steady-state cost on a machine like this one is genuinely closer to
   the ~1 ms figure, not the ~150 μs figure - that's not a benchmark artifact
-  to explain away, it's what continuous-insert actually costs here. Leading
-  suspect for *why* an unsettled region costs ~10x more: Windows Defender's
-  real-time protection, confirmed active on the dev machine
-  (`Get-MpComputerStatus`), a well-known source of first-write-to-a-region
-  overhead on Windows; generic OS cold-page-cache effects can't be fully
-  ruled out as a contributor either, but neither implicates the database,
-  and both are very likely specific to this Windows dev machine, not the
+  to explain away, it's what continuous-insert actually costs here.
+
+  **Root cause of *why* an unsettled region costs ~10x more: originally
+  suspected Windows Defender, since disproven by direct test (2026-09-14).**
+  At the time, Defender's real-time protection was confirmed active on the
+  dev machine (`Get-MpComputerStatus`) and named as the leading suspect - a
+  well-known source of first-write-to-a-region overhead on Windows. Tested
+  directly once elevated access was available: added a real Defender
+  exclusion (`Add-MpPreference -ExclusionPath`) covering the benchmark's
+  entire temp directory, verified the excluded path matched where the
+  benchmark actually writes, and re-ran `ThroughputBenchmarks
+  .PersistentOptimisticConcurrentInserts` (10,000 concurrent inserts,
+  `--job short`) both before and after. **Result: no meaningful change**
+  (10,367.6 ms → 9,464.4 ms - within normal run-to-run variance, not the
+  order-of-magnitude improvement a true fix would show). Windows Defender is
+  therefore **ruled out** as the dominant cause - the real root cause is
+  still open. Leading remaining candidate: a more fundamental OS/filesystem
+  cost tied to first-touch of a newly-dirtied memory-mapped page (page fault
+  handling, or NTFS extending a sparse file's actual on-disk allocation) -
+  not Windows-Defender-specific, and not yet confirmed either, without
+  deeper profiling (ETW/Process Monitor) than this project has invested so
+  far. Still very likely specific to this Windows dev machine and not the
   actual deployment target (Linux server, per this doc's own build-order
-  notes), where this mechanism doesn't exist.
+  notes) either way - that part of the original conclusion stands regardless
+  of which specific Windows mechanism turns out to be responsible.
 
   `PersistentTableBenchmarks.Setup` keeps a permanent version of the general
   warm-up (20,000 rows, disjoint key range, `Confirmed`) since a real
@@ -419,13 +435,13 @@ regressions.
 
 2026-09-13: **Fixed a real, if narrow, durability gap: fsyncing a newly-created
 cold-storage file doesn't make its directory entry durable.** Prompted by a
-LinkedIn post about the same class of bug in SpacetimeDB (create a WAL segment
-file, fsync it, but not the parent directory - a crash can leave the file's
-bytes on disk but practically unreachable). Checked RhinoDB's own exposure
-directly rather than assuming either way: grepped the entire vendored libmdbx
-source for any directory-fd fsync - found none, and libmdbx's own docs don't
-mention it either. **RhinoDB's exposure is architecturally much narrower than
-SpacetimeDB's**, though: libmdbx creates its files exactly once, on a fresh
+LinkedIn post about the same class of bug in a WAL-segment-rotating database
+design (create a WAL segment file, fsync it, but not the parent directory -
+a crash can leave the file's bytes on disk but practically unreachable).
+Checked RhinoDB's own exposure directly rather than assuming either way:
+grepped the entire vendored libmdbx source for any directory-fd fsync -
+found none, and libmdbx's own docs don't mention it either. **RhinoDB's
+exposure is architecturally much narrower**, though: libmdbx creates its files exactly once, on a fresh
 directory's first-ever `ColdStore.Open` - not repeatedly like a segment-
 rotating WAL - so even an unaddressed gap could only bite at that one
 first-launch moment, not on every write.
@@ -539,6 +555,61 @@ cached-singleton behavior was already outside this redesign's scope and
 stayed untouched. Full solution 319/319 (7 new `PooledOperationTests.cs`
 cases), zero regressions. Full writeup: `Docs/01-performance-principles.md`
 § "No closures on the hot path".
+
+2026-09-14: **Sustained-throughput benchmark added (`ThroughputBenchmarks.cs`),
+prompted by a question about how RhinoDB's engine throughput compares to a
+published ~300,000 transactions/second claim from another high-performance
+database.** Every prior benchmark in this project measures
+*latency* (one isolated request, dominated by the fixed cost of crossing
+into RhinoDB's single-writer thread); a "transactions/second" claim is a
+*throughput* number (many concurrent submitters keeping the writer queue
+continuously saturated, so that fixed per-request cost amortizes away) -
+genuinely different questions, and nothing measured the second one before
+this. Mirrors `ConfirmedCoalescingBenchmarks`' concurrent-fan-out shape at a
+much larger scale (10,000 concurrent operations, vs. 16), Optimistic-only
+for Persistent (`Confirmed`'s fsync cost is already a separately-measured,
+separate bottleneck).
+
+**Measured**: `InstantConcurrentInserts` ~2.9M ops/sec, `InstantConcurrentUpdates`
+~2.76M ops/sec - both roughly 9-10x *above* the 300k/sec comparison point,
+confirming the "far behind" premise didn't survive an apples-to-apples
+measurement; the ~3μs single-request latency number was simply never the
+right number to compare against a throughput claim.
+`PersistentOptimisticConcurrentInserts` (~964 ops/sec) shows the same
+already-documented fresh-page-write cost from the 2026-09-13 investigation
+(each concurrent insert here touches a brand-new key/page, ~10x more
+expensive than an already-settled one on this Windows dev machine) -
+`PersistentOptimisticConcurrentUpdates` (~20,800 ops/sec, touching the same
+already-warmed key repeatedly) shows no such gap, the same finding
+reappearing in a new measurement, not a new problem. One real, worth-naming
+caveat about this benchmark's own numbers: its allocation figures
+(~270-420 B/op) are higher than `PooledRunNoOp`'s 80 B specifically because
+`Task.WhenAll` requires real `Task`s, so every concurrent call pays `.AsTask()`
+- the documented, intentional cost of genuine fan-out, not a regression in
+the underlying mechanism. Full writeup:
+`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/ThroughputBenchmarks.md`.
+Benchmark-only addition, no production code touched - full solution still
+319/319.
+
+**Important methodology caveat, raised in review**: the ~300k/sec comparison
+figure is a full end-to-end measurement from the other database's own
+published benchmark - real network/client stack (a TypeScript client, 64
+concurrent connections, pipelined up to 40 requests each), a multi-row
+balance-transfer transaction with validation, on a dedicated 24-vCPU
+machine. RhinoDB's numbers above are a bare in-process `db.Run()` call with
+no network layer at all (Stage 7+8 isn't built yet) and a single-row write.
+The Instant-table throughput comparison above is directionally informative
+but not yet a like-for-like number against theirs - a fair comparison needs
+RhinoDB's own network layer built first.
+
+2026-09-14, same day: **the Windows Defender hypothesis for
+`PersistentOptimisticConcurrentInserts`' slowness was tested directly and
+ruled out** - see the correction in the 2026-09-13 entry above ("Root cause
+of *why* an unsettled region costs ~10x more"). A real Defender exclusion
+covering the benchmark's temp directory made no meaningful difference
+(10,367.6 ms → 9,464.4 ms for the same 10,000-operation batch - within
+normal run-to-run variance). The root cause of the fresh-page-write cost is
+still open.
 
 ## Stage 6 — Inter-Database Communication (IDC) ⏳ designed, not built, built after Stage 7+8
 
