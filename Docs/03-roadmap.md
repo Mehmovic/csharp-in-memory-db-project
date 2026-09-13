@@ -179,7 +179,31 @@ unapplied) the structural checks already had. New `RHINO009` diagnostic
 catches the two ways this can go wrong before it becomes a `CS0122` inside
 generated code: wrong signature, or an accessibility below `internal`
 (generated code calls it from a sibling class in the same assembly, so
-`private` can never work). Not yet built: schema migration tooling.
+`private` can never work).
+
+2026-09-13: **`RhinoDB.Run.Server.Benchmark`** — BenchmarkDotNet project,
+`[MemoryDiagnoser]`, exercising real generated Instant- and Persistent-kind
+tables (not a hand-rolled stand-in) through `Get`/`Insert`/`Update` and, for
+Persistent, both `Optimistic` and `Confirmed` propagation. `RecordCount` scales
+each benchmark via `[ParamsSource]` (`BenchmarkScale.RecordCounts()`, not a
+plain `[Params(...)]`) — 100/10k/1M run by default; 100M and 1B are gated
+behind the `RHINODB_BENCH_INCLUDE_BILLION=1` environment variable, since the
+top tier's memory/time cost turned out to exceed what a normal dev machine can
+run casually (found by actually trying it, not guessed in advance) — the
+ladder itself stays real and available, not deleted, just opt-in. Seeding
+reuses the same public `Run`/`Insert` API a real consumer would, in
+100k-row-per-`Run`-call batches to keep setup wall-time tractable at the top
+tier (`GlobalSetup` cost isn't part of the reported measurement regardless).
+Needed one small engine addition: `ColdStore.Open` gained an optional
+`sizeUpperBytes` parameter (default `-1`, preserving prior behavior for every
+existing caller) — libmdbx's default geometry doesn't reserve enough address
+space for a billion-row persistent table, and `sizeUpper` is a virtual-address
+reservation (mmap-based, pages fault in lazily), not upfront disk usage, so
+sizing it generously (128 GB in the benchmark) costs nothing until actually
+used. Verified end-to-end with a fast `--job Dry` smoke run at small scale
+(`InsertConfirmed` already shows the expected fsync-cost signal vs.
+`InsertOptimistic` at that scale — ~4.5ms vs ~1.9ms). Not yet built: schema
+migration tooling.
 
 ## Stage 6 — Inter-Database Communication (IDC) ⏳ designed, not built, built after Stage 7+8
 
