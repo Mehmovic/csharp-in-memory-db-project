@@ -47,8 +47,8 @@ Five index types, all key-to-offset direct (no indirection):
   (`Dictionary<TKey,HashSet<int>>`, O(1) delete) is the sole non-unique-hash
   implementation now and the one `[Index(IndexKind.Hash)]` maps to; the
   `List`-backed variant was never reachable through the declarative surface
-  and RhinoDB's own CSB+-tree (Backlog, below) is the intended eventual upgrade
-  path anyway, not a second hand-maintained hash variant.
+  and RhinoDB's own future radix-tree upgrade (Backlog, below) is the intended
+  eventual path anyway, not a second hand-maintained hash variant.
 
 No `TRow` type parameter on the indexes themselves — they're pure key-to-offset
 maps with no storage access of their own; `Table<TPk,TRow>` (Stage 3) is what
@@ -399,18 +399,29 @@ match/league update propagation. See [Overview](00-overview.md#the-real-target-a
 Tracked deliberately as *not yet* rather than *never*, so they don't get lost and
 don't get built before they're needed:
 
-- **B+tree replacement for `OrderedIndex`** — only if a specific table's measured
-  profile proves `SortedSet` insufficient. `SortedSet`/`SortedDictionary` are
-  red-black trees — correct, O(log n), but one key per heap-scattered node, so a
-  range scan is real pointer-chasing. The concrete upgrade target, if this is ever
-  triggered: not a plain B+tree (values-in-leaves-only, the textbook baseline —
-  what libmdbx itself uses, right for *disk* pages) but a cache-sensitive variant
-  suited to this being an in-memory, single-writer, read-optimized-range-scan
-  structure — a CSB+-tree (children stored contiguously instead of one pointer
-  each, more keys per cache line) with FAST's technique (SIMD compare against
-  several keys at once per node, via `System.Runtime.Intrinsics`, node width sized
-  to the target register's element count) grafted onto CSB+-tree's ordinary
-  incrementally-mutable node layout rather than FAST's own bulk-load assumption.
+- **Radix-tree replacement for `OrderedIndex`** — only if a specific table's
+  measured profile proves `SortedSet` insufficient. `SortedSet`/`SortedDictionary`
+  are red-black trees — correct, O(log n), but one key per heap-scattered node,
+  so a range scan is real pointer-chasing. **Decided 2026-09-13: Adaptive Radix
+  Tree (ART, Leis/Kemper/Neumann 2013), not a CSB+-tree**, if this is ever
+  triggered — a prior version of this entry named a CSB+-tree (contiguous
+  children, FAST's SIMD-compare-multiple-keys technique layered on top);
+  superseded once ART was compared against it directly. ART is genuinely
+  production-proven (DuckDB's and HyPer's main in-memory index) where
+  CSB+-tree/FAST is largely academic with no known major production
+  deployment, and ART's design target — a live, continuously-mutated
+  main-memory OLTP structure — matches RhinoDB's actual read-*and*-write
+  workload far better than FAST's bulk-load-then-scan assumption. For
+  RhinoDB's actual key shapes (fixed-width primitives, small composite
+  tuples), ART's radix descent (O(key-length-in-bytes), no comparisons) is
+  likely to outperform a comparison-based tree outright, not just tie on
+  cache behavior — no rebalancing either, since its shape is derived from key
+  bytes, not a balance invariant (replaced by adaptive node growth: Node4 →
+  16 → 48 → 256 as fanout increases, plus path compression). The one real,
+  bounded added cost: keys need a byte-order-preserving encoding before
+  insertion (trivial for `uint`/`ulong`/strings, a known bit-flip transform
+  for signed integers and floats, straightforward concatenation for
+  composite tuples) — built once per key "shape," not per table.
 - **Generation counter on `DenseArray` slots** — only if row references are ever
   cached across calls instead of always being re-looked-up by key. Would catch a
   stale handle pointing at a since-reused slot (after a swap-remove) rather than
