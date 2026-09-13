@@ -39,8 +39,8 @@ public class AutoIncrementTests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Gadgets.Insert((dynamic)gadget);
-                dynamic found = dtx.Gadgets.Get(1);
+                dtx.Gadget.Insert((dynamic)gadget);
+                dynamic found = dtx.Gadget.Get(1);
                 assignedId = found.IsOk() ? 1 : -1;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -59,9 +59,9 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Gadgets.Insert((dynamic)first);
-                dtx.Gadgets.Insert((dynamic)second);
-                foundBoth = dtx.Gadgets.Get(1).IsOk() && dtx.Gadgets.Get(2).IsOk();
+                dtx.Gadget.Insert((dynamic)first);
+                dtx.Gadget.Insert((dynamic)second);
+                foundBoth = dtx.Gadget.Get(1).IsOk() && dtx.Gadget.Get(2).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -77,8 +77,8 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Gadgets.Insert((dynamic)gadget);
-                found = dtx.Gadgets.Get(42).IsOk();
+                dtx.Gadget.Insert((dynamic)gadget);
+                found = dtx.Gadget.Get(42).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -90,17 +90,17 @@ public class AutoIncrementTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Gadgets.Insert((dynamic)NewGadget(asm, 0, "One")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Gadget.Insert((dynamic)NewGadget(asm, 0, "One")); return Result.Ok(); },
             PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Gadgets.Insert((dynamic)NewGadget(asm, 0, "Two")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Gadget.Insert((dynamic)NewGadget(asm, 0, "Two")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var foundSecond = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                foundSecond = dtx.Gadgets.Get(2).IsOk();
+                foundSecond = dtx.Gadget.Get(2).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -140,9 +140,9 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widgets.Insert((dynamic)rowA);
-                dtx.Widgets.Insert((dynamic)rowB);
-                dynamic found = dtx.Widgets.Get(2);
+                dtx.Widget.Insert((dynamic)rowA);
+                dtx.Widget.Insert((dynamic)rowB);
+                dynamic found = dtx.Widget.Get(2);
                 sequenceOfB = found.IsOk() ? (long)found.Unwrap().Sequence : -1;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -176,8 +176,8 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Tickets.Insert((dynamic)first);
-                dtx.Tickets.Insert((dynamic)second);
+                dtx.Ticket.Insert((dynamic)first);
+                dtx.Ticket.Insert((dynamic)second);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -188,8 +188,8 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dynamic byCode1 = dtx.Tickets.Code(1);
-                dynamic byCode2 = dtx.Tickets.Code(2);
+                dynamic byCode1 = dtx.Ticket.Code(1);
+                dynamic byCode2 = dtx.Ticket.Code(2);
                 foundBothByCode = byCode1.IsOk() && byCode2.IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -223,8 +223,8 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Items.Insert((dynamic)negative);
-                dynamic found = dtx.Items.Get(1);
+                dtx.Item.Insert((dynamic)negative);
+                dynamic found = dtx.Item.Get(1);
                 assignedPositive = found.IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -259,15 +259,15 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Crates.Insert((dynamic)zero);
-                dtx.Crates.Insert((dynamic)explicitValue);
+                dtx.Crate.Insert((dynamic)zero);
+                dtx.Crate.Insert((dynamic)explicitValue);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dynamic byAuto = dtx.Crates.Get(1u);
-                dynamic byExplicit = dtx.Crates.Get(7u);
+                dynamic byAuto = dtx.Crate.Get(1u);
+                dynamic byExplicit = dtx.Crate.Get(7u);
                 autoAssignedFound = byAuto.IsOk();
                 explicitPreserved = byExplicit.IsOk();
                 Assert.That(autoAssignedFound, Is.True);

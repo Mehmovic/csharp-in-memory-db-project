@@ -33,8 +33,8 @@ public class PrimaryKeyKindTests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Rankings.Insert((dynamic)ranking);
-                found = dtx.Rankings.Get(7).IsOk();
+                dtx.Ranking.Insert((dynamic)ranking);
+                found = dtx.Ranking.Get(7).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

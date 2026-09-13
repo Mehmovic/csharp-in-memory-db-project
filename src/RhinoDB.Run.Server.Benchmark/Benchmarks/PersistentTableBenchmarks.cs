@@ -36,7 +36,7 @@ public class PersistentTableBenchmarks {
             var start = seeded;
             var end = Math.Min(seeded + SeedBatchSize, RecordCount);
             db.Run((ctx, tx) => {
-                for (var i = start; i < end; i++) tx.PersistentWidgets.Insert(new PersistentWidget(i, i));
+                for (var i = start; i < end; i++) tx.PersistentWidget.Insert(new PersistentWidget(i, i));
                 return Result.Ok();
             }, PropagationMode.Optimistic).GetAwaiter().GetResult();
             seeded = end;
@@ -51,21 +51,21 @@ public class PersistentTableBenchmarks {
 
     [Benchmark]
     public Task<Result<PersistentWidget>> Get() =>
-        db.Run<PersistentWidget>((ctx, tx) => tx.PersistentWidgets.Get(lookupKey), PropagationMode.Optimistic);
+        db.Run<PersistentWidget>((ctx, tx) => tx.PersistentWidget.Get(lookupKey), PropagationMode.Optimistic);
 
     [Benchmark]
     public Task<Result> InsertOptimistic() {
         var id = ++nextInsertId;
-        return db.Run((ctx, tx) => { tx.PersistentWidgets.Insert(new PersistentWidget(id, id)); return Result.Ok(); }, PropagationMode.Optimistic);
+        return db.Run((ctx, tx) => { tx.PersistentWidget.Insert(new PersistentWidget(id, id)); return Result.Ok(); }, PropagationMode.Optimistic);
     }
 
     [Benchmark]
     public Task<Result> InsertConfirmed() {
         var id = ++nextInsertId;
-        return db.Run((ctx, tx) => { tx.PersistentWidgets.Insert(new PersistentWidget(id, id)); return Result.Ok(); }, PropagationMode.Confirmed);
+        return db.Run((ctx, tx) => { tx.PersistentWidget.Insert(new PersistentWidget(id, id)); return Result.Ok(); }, PropagationMode.Confirmed);
     }
 
     [Benchmark]
     public Task<Result> Update() =>
-        db.Run((ctx, tx) => { tx.PersistentWidgets.Update(lookupKey, new PersistentWidget(lookupKey, ++nextInsertId)); return Result.Ok(); }, PropagationMode.Optimistic);
+        db.Run((ctx, tx) => { tx.PersistentWidget.Update(lookupKey, new PersistentWidget(lookupKey, ++nextInsertId)); return Result.Ok(); }, PropagationMode.Optimistic);
 }

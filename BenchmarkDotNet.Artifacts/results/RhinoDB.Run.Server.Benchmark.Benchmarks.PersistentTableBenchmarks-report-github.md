@@ -10,13 +10,8 @@ Job=Dry  IterationCount=1  LaunchCount=1
 RunStrategy=ColdStart  UnrollFactor=1  WarmupCount=1  
 
 ```
-| Method           | RecordCount | Mean     | Error | Allocated |
-|----------------- |------------ |---------:|------:|----------:|
-| **Get**              | **100**         | **2.566 ms** |    **NA** |         **-** |
-| InsertOptimistic | 100         | 1.909 ms |    NA |         - |
-| InsertConfirmed  | 100         | 5.007 ms |    NA |         - |
-| Update           | 100         | 3.431 ms |    NA |         - |
-| **Get**              | **1000**        | **2.464 ms** |    **NA** |         **-** |
-| InsertOptimistic | 1000        | 1.826 ms |    NA |         - |
-| InsertConfirmed  | 1000        | 4.461 ms |    NA |         - |
-| Update           | 1000        | 3.662 ms |    NA |         - |
+| Method | RecordCount | Mean     | Error | Allocated |
+|------- |------------ |---------:|------:|----------:|
+| **Get**    | **100**         | **3.803 ms** |    **NA** |         **-** |
+| **Get**    | **10000**       | **3.618 ms** |    **NA** |         **-** |
+| **Get**    | **1000000**     | **2.222 ms** |    **NA** |         **-** |

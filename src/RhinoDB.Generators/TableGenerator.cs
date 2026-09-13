@@ -59,12 +59,18 @@ public sealed class TableGenerator : IIncrementalGenerator {
         "generated code calls it from a sibling class in the same assembly, so it can't be private",
         "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
+    static private readonly DiagnosticDescriptor DuplicateAccessorDiagnostic = new(
+        "RHINO010", "Duplicate table Accessor within one database",
+        "'{0}' has two or more tables using Accessor '{1}' - each table's Accessor must be unique within its owning database",
+        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var tableResults = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 TableAttributeFullName,
                 predicate: static (node, _) => node is StructDeclarationSyntax or RecordDeclarationSyntax,
-                transform: static (ctx, _) => ToTableModel(ctx));
+                transform: static (ctx, _) => ToTableModels(ctx))
+            .SelectMany(static (results, _) => results);
 
         context.RegisterSourceOutput(tableResults, static (spc, result) => {
             foreach (var diagnostic in result.Diagnostics) spc.ReportDiagnostic(diagnostic);
@@ -108,25 +114,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
         _ => null,
     };
 
-    static private (TableModel? Model, ImmutableArray<Diagnostic> Diagnostics) ToTableModel(GeneratorAttributeSyntaxContext ctx) {
-        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+    static private ImmutableArray<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)> ToTableModels(GeneratorAttributeSyntaxContext ctx) {
+        var rowDiagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         var rowType = (INamedTypeSymbol)ctx.TargetSymbol;
-        var attribute = ctx.Attributes[0];
-
-        var kind = (TableKind)(int)attribute.ConstructorArguments[0].Value!;
-        var databaseType = (INamedTypeSymbol)attribute.ConstructorArguments[1].Value!;
-
-        var (tableAccessorProvided, tableAccessorValue) = StringNamedArg(attribute, "Accessor");
-        if (tableAccessorProvided && tableAccessorValue == "")
-            diagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(attribute), $"[Table] on '{rowType.Name}'"));
-        var tableAccessor = tableAccessorProvided && tableAccessorValue != "" ? tableAccessorValue! : $"{rowType.Name}s";
-
-        var (chunkSizeProvided, chunkSizeValue) = IntNamedArg(attribute, "ChunkSize");
-        var chunkSize = chunkSizeProvided ? chunkSizeValue : 4096;
-
-        var evictable = BoolNamedArg(attribute, "Evictable");
-        if (evictable && kind == TableKind.Instant)
-            diagnostics.Add(Diagnostic.Create(EvictableOnInstantKindDiagnostic, Loc(attribute), rowType.Name));
 
         var primaryCtor = rowType.InstanceConstructors.FirstOrDefault(c =>
             c.Parameters.Length > 0 &&
@@ -135,8 +125,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var primaryKeyParam = primaryCtor?.Parameters.FirstOrDefault(p =>
             p.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == PrimaryKeyAttributeFullName));
         if (primaryCtor is null || primaryKeyParam is null) {
-            diagnostics.Add(Diagnostic.Create(MissingPrimaryKeyDiagnostic, ctx.TargetNode.GetLocation(), rowType.Name));
-            return (null, diagnostics.ToImmutable());
+            rowDiagnostics.Add(Diagnostic.Create(MissingPrimaryKeyDiagnostic, ctx.TargetNode.GetLocation(), rowType.Name));
+            return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
         }
 
         var primaryKeyAttribute = primaryKeyParam.GetAttributes().First(a => a.AttributeClass?.ToDisplayString() == PrimaryKeyAttributeFullName);
@@ -145,7 +135,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             : IndexKind.Hash;
         var (pkAccessorProvided, pkAccessorValue) = StringNamedArg(primaryKeyAttribute, "Accessor");
         if (pkAccessorProvided && pkAccessorValue == "")
-            diagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(primaryKeyAttribute), $"[PrimaryKey] on '{rowType.Name}.{primaryKeyParam.Name}'"));
+            rowDiagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(primaryKeyAttribute), $"[PrimaryKey] on '{rowType.Name}.{primaryKeyParam.Name}'"));
         var primaryKeyAccessor = pkAccessorProvided && pkAccessorValue != "" ? pkAccessorValue! : "Get";
 
         var autoIncrementFields = ImmutableArray.CreateBuilder<AutoIncrementFieldModel>();
@@ -155,7 +145,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
             var signed = ClassifyAutoIncrementType(p.Type);
             if (signed is null) {
-                diagnostics.Add(Diagnostic.Create(InvalidAutoIncrementTypeDiagnostic, Loc(autoIncrementAttribute), rowType.Name, p.Name));
+                rowDiagnostics.Add(Diagnostic.Create(InvalidAutoIncrementTypeDiagnostic, Loc(autoIncrementAttribute), rowType.Name, p.Name));
                 continue;
             }
 
@@ -173,7 +163,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                     : Uniqueness.NonUnique;
                 var (accessorProvided, accessorValue) = StringNamedArg(indexAttribute, "Accessor");
                 if (accessorProvided && accessorValue == "")
-                    diagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(indexAttribute), $"[Index] on '{rowType.Name}.{x.Param.Name}'"));
+                    rowDiagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(indexAttribute), $"[Index] on '{rowType.Name}.{x.Param.Name}'"));
                 var accessor = accessorProvided && accessorValue != "" ? accessorValue! : x.Param.Name;
                 var order = indexAttribute.NamedArguments
                     .Where(kv => kv.Key == "Order")
@@ -190,18 +180,18 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 var group = g.ToImmutableArray();
 
                 if (group.Length > 3) {
-                    diagnostics.Add(Diagnostic.Create(CompositeIndexTooManyFieldsDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name, group.Length));
+                    rowDiagnostics.Add(Diagnostic.Create(CompositeIndexTooManyFieldsDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name, group.Length));
                     return null;
                 }
 
                 if (group.Any(x => x.Kind != group[0].Kind || x.Uniqueness != group[0].Uniqueness)) {
-                    diagnostics.Add(Diagnostic.Create(CompositeIndexKindMismatchDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name));
+                    rowDiagnostics.Add(Diagnostic.Create(CompositeIndexKindMismatchDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name));
                     return null;
                 }
 
                 var explicitOrders = group.Where(x => x.Order != -1).Select(x => x.Order).ToImmutableArray();
                 if (explicitOrders.Length != explicitOrders.Distinct().Count()) {
-                    diagnostics.Add(Diagnostic.Create(DuplicateOrderDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name));
+                    rowDiagnostics.Add(Diagnostic.Create(DuplicateOrderDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name));
                     return null;
                 }
 
@@ -227,32 +217,57 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 && returnType.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == $"global::{DbErrorFullName}";
 
             if (!validSignature) {
-                diagnostics.Add(Diagnostic.Create(InvalidValidateMethodSignatureDiagnostic, member.Locations.FirstOrDefault() ?? Location.None, rowType.Name, member.Name));
+                rowDiagnostics.Add(Diagnostic.Create(InvalidValidateMethodSignatureDiagnostic, member.Locations.FirstOrDefault() ?? Location.None, rowType.Name, member.Name));
                 continue;
             }
 
             validateMethodNames.Add(member.Name);
         }
 
-        if (diagnostics.Count > 0) return (null, diagnostics.ToImmutable());
+        if (rowDiagnostics.Count > 0) return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
 
-        var model = new TableModel(
-            rowType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            rowType.Name,
-            rowType.ContainingNamespace.IsGlobalNamespace ? null : rowType.ContainingNamespace.ToDisplayString(),
-            kind,
-            databaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            primaryKeyParam.Name,
-            primaryKeyParam.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            primaryKeyKind,
-            primaryKeyAccessor,
-            tableAccessor,
-            chunkSize,
-            evictable,
-            autoIncrementFields.ToImmutable(),
-            indexes,
-            validateMethodNames.ToImmutable());
-        return (model, ImmutableArray<Diagnostic>.Empty);
+        var results = ImmutableArray.CreateBuilder<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)>();
+        foreach (var attribute in ctx.Attributes) {
+            var attrDiagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+
+            var kind = (TableKind)(int)attribute.ConstructorArguments[0].Value!;
+            var databaseType = (INamedTypeSymbol)attribute.ConstructorArguments[1].Value!;
+
+            var (tableAccessorProvided, tableAccessorValue) = StringNamedArg(attribute, "Accessor");
+            if (tableAccessorProvided && tableAccessorValue == "")
+                attrDiagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(attribute), $"[Table] on '{rowType.Name}'"));
+            var tableAccessor = tableAccessorProvided && tableAccessorValue != "" ? tableAccessorValue! : rowType.Name;
+
+            var (chunkSizeProvided, chunkSizeValue) = IntNamedArg(attribute, "ChunkSize");
+            var chunkSize = chunkSizeProvided ? chunkSizeValue : 4096;
+
+            var evictable = BoolNamedArg(attribute, "Evictable");
+            if (evictable && kind == TableKind.Instant)
+                attrDiagnostics.Add(Diagnostic.Create(EvictableOnInstantKindDiagnostic, Loc(attribute), rowType.Name));
+
+            if (attrDiagnostics.Count > 0) {
+                results.Add((null, attrDiagnostics.ToImmutable()));
+                continue;
+            }
+
+            var model = new TableModel(
+                rowType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                rowType.ContainingNamespace.IsGlobalNamespace ? null : rowType.ContainingNamespace.ToDisplayString(),
+                kind,
+                databaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                primaryKeyParam.Name,
+                primaryKeyParam.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                primaryKeyKind,
+                primaryKeyAccessor,
+                tableAccessor,
+                chunkSize,
+                evictable,
+                autoIncrementFields.ToImmutable(),
+                indexes,
+                validateMethodNames.ToImmutable());
+            results.Add((model, ImmutableArray<Diagnostic>.Empty));
+        }
+        return results.ToImmutable();
     }
 
     static private DatabaseModel ToDatabaseModel(GeneratorAttributeSyntaxContext ctx) {
@@ -271,8 +286,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
             .Where(t => t.OwnerDatabaseFullName == database.FullName)
             .ToImmutableArray();
 
+        var duplicateAccessors = tables.GroupBy(t => t.Accessor).Where(g => g.Count() > 1).Select(g => g.Key).ToImmutableArray();
+        if (duplicateAccessors.Length > 0) {
+            foreach (var accessor in duplicateAccessors)
+                context.ReportDiagnostic(Diagnostic.Create(DuplicateAccessorDiagnostic, Location.None, database.SimpleName, accessor));
+            return;
+        }
+
         foreach (var table in tables)
-            context.AddSource($"{table.RowTypeName}Ops.g.cs", EmitOpsClass(table));
+            context.AddSource($"{database.SimpleName}{table.Accessor}Ops.g.cs", EmitOpsClass(table, database.SimpleName));
 
         context.AddSource($"{database.SimpleName}.g.cs", EmitDatabase(database, tables));
     }
@@ -304,8 +326,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private string IndexFieldName(IndexModel idx) => $"{Camel(idx.AccessorName)}Index";
 
-    static private string EmitOpsClass(TableModel table) =>
-        table.Kind == TableKind.Persistent ? EmitPersistentOpsClass(table) : EmitInstantOpsClass(table);
+    static private string EmitOpsClass(TableModel table, string ownerSimpleName) =>
+        table.Kind == TableKind.Persistent ? EmitPersistentOpsClass(table, ownerSimpleName) : EmitInstantOpsClass(table, ownerSimpleName);
 
     static private void EmitOpsClassHeader(StringBuilder sb, TableModel table, bool isPersistent) {
         sb.AppendLine("// <auto-generated>");
@@ -531,11 +553,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
         }
     }
 
-    static private string EmitInstantOpsClass(TableModel table) {
+    static private string EmitInstantOpsClass(TableModel table, string ownerSimpleName) {
         var sb = new StringBuilder();
         var row = table.RowTypeFullName;
         var key = table.PrimaryKeyTypeFullName;
-        var opsName = $"{table.RowTypeName}Ops";
+        var opsName = $"{ownerSimpleName}{table.Accessor}Ops";
         var primaryIndexType = PrimaryIndexType(table);
 
         EmitOpsClassHeader(sb, table, isPersistent: false);
@@ -622,11 +644,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
     }
 
-    static private string EmitPersistentOpsClass(TableModel table) {
+    static private string EmitPersistentOpsClass(TableModel table, string ownerSimpleName) {
         var sb = new StringBuilder();
         var row = table.RowTypeFullName;
         var key = table.PrimaryKeyTypeFullName;
-        var opsName = $"{table.RowTypeName}Ops";
+        var opsName = $"{ownerSimpleName}{table.Accessor}Ops";
         var primaryIndexType = PrimaryIndexType(table);
 
         EmitOpsClassHeader(sb, table, isPersistent: true);
@@ -821,10 +843,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
         sb.AppendLine($"public sealed class {txName} : ITransaction {{");
         foreach (var table in tables)
-            sb.AppendLine($"    public readonly {table.RowTypeName}Ops {table.Accessor};");
+            sb.AppendLine($"    public readonly {database.SimpleName}{table.Accessor}Ops {table.Accessor};");
         sb.AppendLine();
         sb.Append($"    internal {txName}(");
-        sb.Append(string.Join(", ", tables.Select(t => $"{t.RowTypeName}Ops {Camel(t.Accessor)}")));
+        sb.Append(string.Join(", ", tables.Select(t => $"{database.SimpleName}{t.Accessor}Ops {Camel(t.Accessor)}")));
         sb.AppendLine(") {");
         foreach (var table in tables)
             sb.AppendLine($"        {table.Accessor} = {Camel(table.Accessor)};");
@@ -879,7 +901,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
         sb.Append($"    protected override {txName} CreateTransaction() => new {txName}(");
         sb.Append(string.Join(", ", tables.Select(t => {
-            var args = new System.Collections.Generic.List<string> {
+            var args = new List<string> {
                 $"{Camel(t.Accessor)}Storage",
                 $"{Camel(t.Accessor)}PrimaryIndex",
             };
@@ -889,7 +911,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             }
             foreach (var aif in t.AutoIncrementFields) args.Add($"{Camel(t.Accessor)}{aif.FieldName}Counter");
             foreach (var idx in t.Indexes) args.Add($"{Camel(t.Accessor)}{idx.AccessorName}Index");
-            return $"new {t.RowTypeName}Ops({string.Join(", ", args)})";
+            return $"new {database.SimpleName}{t.Accessor}Ops({string.Join(", ", args)})";
         })));
         sb.AppendLine(");");
 
@@ -920,7 +942,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
     static private string Camel(string name) => name.Length == 0 ? name : char.ToLowerInvariant(name[0]) + name.Substring(1);
 
     private sealed class TableModel(
-        string rowTypeFullName, string rowTypeName, string? rowNamespace,
+        string rowTypeFullName, string? rowNamespace,
         TableKind kind, string ownerDatabaseFullName,
         string primaryKeyName, string primaryKeyTypeFullName, IndexKind primaryKeyKind,
         string primaryKeyAccessor, string accessor, int chunkSize, bool evictable,
@@ -928,7 +950,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         ImmutableArray<IndexModel> indexes,
         ImmutableArray<string> validateMethodNames) {
         public string RowTypeFullName { get; } = rowTypeFullName;
-        public string RowTypeName { get; } = rowTypeName;
         public string? RowNamespace { get; } = rowNamespace;
         public TableKind Kind { get; } = kind;
         public string OwnerDatabaseFullName { get; } = ownerDatabaseFullName;

@@ -58,8 +58,8 @@ public class LoaderTests {
                 var insert = await (Task<Result>)GeneratorTestHost.RunTransactional(
                     db, txType, (ctx, tx) => {
                         dynamic dtx = tx;
-                        dtx.Clubs.Insert((dynamic)NewClub(asm, 1, 80));
-                        dtx.Clubs.Insert((dynamic)NewClub(asm, 2, 75));
+                        dtx.Club.Insert((dynamic)NewClub(asm, 1, 80));
+                        dtx.Club.Insert((dynamic)NewClub(asm, 2, 75));
                         return Result.Ok();
                     }, PropagationMode.Confirmed);
                 Assert.That(insert.IsOk(), Is.True);
@@ -75,8 +75,8 @@ public class LoaderTests {
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 reopenedDb, txType, (ctx, tx) => {
                     dynamic dtx = tx;
-                    club1Found = dtx.Clubs.Get(1).IsOk();
-                    club2Found = dtx.Clubs.Get(2).IsOk();
+                    club1Found = dtx.Club.Get(1).IsOk();
+                    club2Found = dtx.Club.Get(2).IsOk();
                     return Result.Ok();
                 }, PropagationMode.Optimistic);
 
@@ -102,7 +102,7 @@ public class LoaderTests {
                 var db = Activator.CreateInstance(dbType, cold)!;
 
                 await (Task<Result>)GeneratorTestHost.RunTransactional(
-                    db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 100m)); return Result.Ok(); },
+                    db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 100m)); return Result.Ok(); },
                     PropagationMode.Confirmed);
             }
 
@@ -114,7 +114,7 @@ public class LoaderTests {
 
             var found = false;
             await (Task<Result>)GeneratorTestHost.RunTransactional(
-                reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Accounts.Get(1).IsOk(); return Result.Ok(); },
+                reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
                 PropagationMode.Optimistic);
 
             Assert.That(found, Is.False, "An Evictable table must not be eager-loaded by the default loader.");
@@ -138,7 +138,7 @@ public class LoaderTests {
                 var db = Activator.CreateInstance(dbType, cold)!;
 
                 await (Task<Result>)GeneratorTestHost.RunTransactional(
-                    db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 100m)); return Result.Ok(); },
+                    db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 100m)); return Result.Ok(); },
                     PropagationMode.Confirmed);
             }
 
@@ -154,7 +154,7 @@ public class LoaderTests {
 
             var createLoaderTx = dbType.GetMethod("CreateLoaderTransaction", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             dynamic tx = createLoaderTx.Invoke(reopenedDb, null)!;
-            dynamic accountsOps = tx.Accounts;
+            dynamic accountsOps = tx.Account;
             var bulkLoad = ((object)accountsOps).GetType().GetMethod("BulkLoadFromCold", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             bulkLoad.Invoke(accountsOps, null);
 

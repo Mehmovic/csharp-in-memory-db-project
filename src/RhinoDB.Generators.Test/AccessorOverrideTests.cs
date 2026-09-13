@@ -5,7 +5,7 @@ namespace RhinoDB.Test.Generators;
 
 // [PrimaryKey(Accessor = ...)] renames the generated Get method;
 // [Table(..., Accessor = ...)] renames the generated property exposing a
-// table's Ops on the database's Transaction (default "{RowTypeName}s").
+// table's Ops on the database's Transaction (default "{RowTypeName}").
 public class AccessorOverrideTests {
     private const string Source = """
         using RhinoDB.Core.Tables;

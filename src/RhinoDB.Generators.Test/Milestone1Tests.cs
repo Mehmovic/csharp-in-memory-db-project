@@ -42,12 +42,12 @@ public class Milestone1Tests {
         var widget = NewWidget(asm, 1, "Ada", 10);
 
         var insertResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Insert((dynamic)widget); return Result.Ok(); }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)widget); return Result.Ok(); }, PropagationMode.Optimistic);
         Assert.That(insertResult.IsOk(), Is.True);
 
         var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic got = ((dynamic)tx).Widgets.Get(1);
+                dynamic got = ((dynamic)tx).Widget.Get(1);
                 return got.IsOk() ? Result.Ok() : Result.Error((DbError)got.GetError());
             }, PropagationMode.Optimistic);
         Assert.That(getResult.IsOk(), Is.True);
@@ -60,14 +60,14 @@ public class Milestone1Tests {
         var updated = NewWidget(asm, 1, "Ada", 42);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Insert((dynamic)original); return Result.Ok(); }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)original); return Result.Ok(); }, PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Update(1, (dynamic)updated); return Result.Ok(); }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Update(1, (dynamic)updated); return Result.Ok(); }, PropagationMode.Optimistic);
 
         int stock = -1;
         var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic got = ((dynamic)tx).Widgets.Get(1);
+                dynamic got = ((dynamic)tx).Widget.Get(1);
                 stock = (int)got.Unwrap().Stock;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -82,14 +82,14 @@ public class Milestone1Tests {
         var widget = NewWidget(asm, 1, "Ada", 10);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Insert((dynamic)widget); return Result.Ok(); }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)widget); return Result.Ok(); }, PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Delete(1); return Result.Ok(); }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Delete(1); return Result.Ok(); }, PropagationMode.Optimistic);
 
         var foundAfterDelete = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic got = ((dynamic)tx).Widgets.Get(1);
+                dynamic got = ((dynamic)tx).Widget.Get(1);
                 foundAfterDelete = got.IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -108,8 +108,8 @@ public class Milestone1Tests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widgets.Insert((dynamic)widget);
-                foundWithinSameOperation = dtx.Widgets.Get(1).IsOk();
+                dtx.Widget.Insert((dynamic)widget);
+                foundWithinSameOperation = dtx.Widget.Get(1).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

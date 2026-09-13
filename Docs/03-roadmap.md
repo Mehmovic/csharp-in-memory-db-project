@@ -202,8 +202,65 @@ reservation (mmap-based, pages fault in lazily), not upfront disk usage, so
 sizing it generously (128 GB in the benchmark) costs nothing until actually
 used. Verified end-to-end with a fast `--job Dry` smoke run at small scale
 (`InsertConfirmed` already shows the expected fsync-cost signal vs.
-`InsertOptimistic` at that scale — ~4.5ms vs ~1.9ms). Not yet built: schema
-migration tooling.
+`InsertOptimistic` at that scale — ~4.5ms vs ~1.9ms).
+
+2026-09-13: **`[Table]` can now be applied more than once to the same row
+type, one application per owner database.** `TableAttribute` gained
+`AllowMultiple = true`; `ToTableModels` (renamed from `ToTableModel`, plural
+now that one row can yield several `TableModel`s) splits row-level analysis
+(primary key, `[AutoIncrement]` fields, indexes, `[Validate]` methods — all
+independent of which database is asking) from per-attribute analysis (`Kind`,
+owner database, `Accessor`, `ChunkSize`, `Evictable` — genuinely different per
+application), computing the row-level part once and emitting one `TableModel`
+per `[Table]` application. Row-level diagnostics (missing `[PrimaryKey]`, bad
+`[Index]`/`[AutoIncrement]`/`[Validate]`) are still reported exactly once even
+with multiple `[Table]` attributes present, since they're collected before
+the per-attribute loop and short-circuit it entirely.
+
+This forced a real generator fix, not just a model-shape change: the
+generated `Ops` class name (and its `AddSource` hint name) used to be just
+`{RowTypeName}Ops` — fine when a row belonged to one database, but a
+hint-name and type-name collision the moment the same row belongs to two
+(`Emit` runs once per database, and Roslyn requires hint names to be unique
+across a generator's *entire* output in one compilation, not just within one
+`Emit` call). An initial fix qualified by database name alone
+(`{DatabaseSimpleName}{RowTypeName}Ops`) — that closes the cross-database
+collision but not a second one you caught immediately in review: two
+`[Table]` attributes on the same row targeting the *same* database with two
+different `Accessor`s (e.g. `PrimaryPlayers`/`BackupPlayers`, both backed by
+`Player`) would still collide, since the row type name alone doesn't
+distinguish them. Fixed by keying on `Accessor` instead of `RowTypeName`
+(`{DatabaseSimpleName}{Accessor}Ops`) — `Accessor` is what genuinely must be
+unique per database already (it's the generated `Transaction` property name),
+so this closes both collision cases with one change. Also added: **`RHINO010`**
+("Duplicate table Accessor within one database") — checked once per database
+in `Emit`, after collecting all its tables, since the collision is between two
+tables, not a property of either one alone; catches the mistake cleanly
+instead of it surfacing as a confusing `CS0102` duplicate-member error inside
+generated code. No consumer-facing cost from the rename either way: nothing
+outside generated code ever names the `Ops` class directly, access is always
+through the owning database's own `Transaction.{Accessor}` property. Found
+`TableModel.RowTypeName` had become fully dead code once nothing built the
+`Ops` name from it anymore (verified via `grep`, not assumed) — deleted
+outright, including its constructor parameter, rather than left unused.
+`RowTypeFullName` (the fully-qualified version, still needed throughout for
+field/parameter type declarations) is unaffected.
+
+2026-09-13: **`[Table]`'s default `Accessor` changed from pluralized
+(`{RowTypeName}s`, e.g. `Widgets`) to singular (`{RowTypeName}`, e.g.
+`Widget`)** — your explicit direction, on the reasoning that the generator
+should pick the more minimal, predictable default and let `Accessor`
+express pluralization or any other naming style when a consumer wants it,
+rather than the generator silently mutating the row's own name. Purely a
+default-value change in `ToTableModels` (`tableAccessor = ... : rowType.Name`,
+was `$"{rowType.Name}s"`) - `Accessor` itself was always available to
+override either direction. Every existing test and the benchmark project
+relied on the old pluralized default (`tx.Widgets`, `tx.Clubs`, `tx.Players`,
+etc.) and needed updating to the new singular form (`tx.Widget`, `tx.Club`,
+`tx.Player`) - a real, wide sweep (78 of 99 `RhinoDB.Generators.Test` tests
+broke immediately, confirming just how many call sites depend on this
+default), done mechanically per file and reverified fully green afterward,
+not left partially migrated. Not yet built: schema migration tooling.
 
 ## Stage 6 — Inter-Database Communication (IDC) ⏳ designed, not built, built after Stage 7+8
 

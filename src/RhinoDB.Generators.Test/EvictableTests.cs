@@ -24,7 +24,7 @@ public class EvictableTests {
             """;
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
-        var opsType = asm.GetType("TestNs.AccountOps")!;
+        var opsType = asm.GetType("TestNs.VaultDbAccountOps")!;
 
         Assert.That(opsType.GetProperty("Storage"), Is.Null, "A non-evictable table's Ops class must not declare a Storage property at all.");
     }
@@ -45,7 +45,7 @@ public class EvictableTests {
             """;
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
-        var opsType = asm.GetType("TestNs.AccountOps")!;
+        var opsType = asm.GetType("TestNs.VaultDbAccountOps")!;
 
         Assert.That(opsType.GetProperty("Storage"), Is.Null);
     }
@@ -66,7 +66,7 @@ public class EvictableTests {
             """;
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
-        var opsType = asm.GetType("TestNs.AccountOps")!;
+        var opsType = asm.GetType("TestNs.VaultDbAccountOps")!;
 
         Assert.That(opsType.GetProperty("Storage"), Is.Not.Null);
     }

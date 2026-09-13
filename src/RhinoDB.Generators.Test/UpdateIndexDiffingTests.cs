@@ -62,10 +62,10 @@ public class UpdateIndexDiffingTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Update(1, (dynamic)NewClub(asm, 1, "Arsenal FC", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Update(1, (dynamic)NewClub(asm, 1, "Arsenal FC", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         // Separate operation - hits the real index, not the overlay, so this
@@ -73,7 +73,7 @@ public class UpdateIndexDiffingTests {
         // needing a redundant Delete+Insert to keep it correct.
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Clubs.ShortCode("ARS").IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = ((dynamic)tx).Club.ShortCode("ARS").IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
@@ -84,17 +84,17 @@ public class UpdateIndexDiffingTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Update(1, (dynamic)NewClub(asm, 1, "Arsenal", "GUN")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Update(1, (dynamic)NewClub(asm, 1, "Arsenal", "GUN")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         // Revert - if the away-move ever left a stale "ARS" -> offset entry
         // behind (the historical bug this optimization must avoid), this
         // would either fail as a false duplicate or leave two entries.
         var revert = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Update(1, (dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Update(1, (dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
         Assert.That(revert.IsOk(), Is.True);
 
@@ -102,8 +102,8 @@ public class UpdateIndexDiffingTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                arsFound = dtx.Clubs.ShortCode("ARS").IsOk();
-                gunFound = dtx.Clubs.ShortCode("GUN").IsOk();
+                arsFound = dtx.Club.ShortCode("ARS").IsOk();
+                gunFound = dtx.Club.ShortCode("GUN").IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -118,17 +118,17 @@ public class UpdateIndexDiffingTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Players.Update(1, (dynamic)NewPlayer(asm, 1, "Alicia", 10)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Update(1, (dynamic)NewPlayer(asm, 1, "Alicia", 10)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var count = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { count = ((dynamic)tx).Players.ClubId(10).Count; return Result.Ok(); },
+            db, txType, (ctx, tx) => { count = ((dynamic)tx).Player.ClubId(10).Count; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(count, Is.EqualTo(2), "Both players must still resolve under club 10 after an unrelated-field update.");
@@ -139,21 +139,21 @@ public class UpdateIndexDiffingTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Players.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10)); return Result.Ok(); },
             PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Players.Update(1, (dynamic)NewPlayer(asm, 1, "Alice", 20)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Update(1, (dynamic)NewPlayer(asm, 1, "Alice", 20)); return Result.Ok(); },
             PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Players.Update(1, (dynamic)NewPlayer(asm, 1, "Alice", 10)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Update(1, (dynamic)NewPlayer(asm, 1, "Alice", 10)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         int club10Count = -1, club20Count = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                club10Count = dtx.Players.ClubId(10).Count;
-                club20Count = dtx.Players.ClubId(20).Count;
+                club10Count = dtx.Player.ClubId(10).Count;
+                club20Count = dtx.Player.ClubId(20).Count;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

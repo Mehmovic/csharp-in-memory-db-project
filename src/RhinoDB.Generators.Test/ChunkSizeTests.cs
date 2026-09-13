@@ -47,7 +47,7 @@ public class ChunkSizeTests {
     public void ChunkSize_NotSpecified_DefaultsTo4096() {
         var (asm, _) = GeneratorTestHost.CompileAndLoad(DefaultSource);
 
-        var capacity = StorageCapacity(asm, "TestNs.DefaultChunkDb", "widgetsStorage");
+        var capacity = StorageCapacity(asm, "TestNs.DefaultChunkDb", "widgetStorage");
 
         Assert.That(capacity, Is.EqualTo(4096));
     }
@@ -56,7 +56,7 @@ public class ChunkSizeTests {
     public void ChunkSize_ExplicitValue_RoundsUpToTheNextPowerOfTwoAndBecomesTheInitialCapacity() {
         var (asm, _) = GeneratorTestHost.CompileAndLoad(ExplicitSource);
 
-        var capacity = StorageCapacity(asm, "TestNs.ExplicitChunkDb", "widgetsStorage");
+        var capacity = StorageCapacity(asm, "TestNs.ExplicitChunkDb", "widgetStorage");
 
         Assert.That(capacity, Is.EqualTo(128), "DenseArray rounds a 100 chunkSize up to 128 (the next power of 2).");
     }

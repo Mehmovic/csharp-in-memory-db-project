@@ -43,9 +43,9 @@ public class StagingSemanticsTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widgets.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
-                dtx.Widgets.Update(1, (dynamic)NewWidget(asm, 1, "Ada", 42));
-                stock = (int)dtx.Widgets.Get(1).Unwrap().Stock;
+                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
+                dtx.Widget.Update(1, (dynamic)NewWidget(asm, 1, "Ada", 42));
+                stock = (int)dtx.Widget.Get(1).Unwrap().Stock;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -60,9 +60,9 @@ public class StagingSemanticsTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widgets.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
-                dtx.Widgets.Delete(1);
-                foundWithinSameOperation = dtx.Widgets.Get(1).IsOk();
+                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
+                dtx.Widget.Delete(1);
+                foundWithinSameOperation = dtx.Widget.Get(1).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -77,16 +77,16 @@ public class StagingSemanticsTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Insert((dynamic)NewWidget(asm, 1, "Ada", 10)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var stock = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widgets.Delete(1);
-                dtx.Widgets.Insert((dynamic)NewWidget(asm, 1, "Ada", 99));
-                stock = (int)dtx.Widgets.Get(1).Unwrap().Stock;
+                dtx.Widget.Delete(1);
+                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 99));
+                stock = (int)dtx.Widget.Get(1).Unwrap().Stock;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -98,7 +98,7 @@ public class StagingSemanticsTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Insert((dynamic)NewWidget(asm, 2, "Bob", 5)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 2, "Bob", 5)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var foundOne = false;
@@ -106,10 +106,10 @@ public class StagingSemanticsTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widgets.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
-                dtx.Widgets.Delete(2);
-                foundOne = dtx.Widgets.Get(1).IsOk();
-                foundTwoAfterDelete = dtx.Widgets.Get(2).IsOk();
+                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
+                dtx.Widget.Delete(2);
+                foundOne = dtx.Widget.Get(1).IsOk();
+                foundTwoAfterDelete = dtx.Widget.Get(2).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

@@ -76,24 +76,79 @@ regardless of how many `[Database]` classes exist (`Emit` runs once per
 database, over the same collected table list, which would otherwise
 re-report every diagnostic once per database).
 
-## `ToTableModel` — `primaryCtor`
+## `ToTableModels` — `primaryCtor`
 
 The primary (positional) constructor - not the copy constructor a record
 struct also has (single parameter of the row's own type).
 
-## `ToTableModel` — `indexedParams`
+## `ToTableModels` — `indexedParams`
 
 One entry per `[Index]`-attributed parameter, carrying its declaration
 position (the "order fields sort by, by default" `Order` falls back to)
 before any grouping happens.
 
-## `ToTableModel` — `indexes` grouping
+## `ToTableModels` — `indexes` grouping
 
 Grouped by Accessor: 2-3 fields sharing one Accessor form a single composite
 index over them, ordered by `Order` (falling back to declaration position) -
 a lone field is just a 1-field "composite". `GroupBy` preserves
 first-occurrence order, so index declaration order in generated output
 tracks row field declaration order.
+
+## `ToTableModels` — row-level vs. per-attribute split (multi-database `[Table]`)
+
+`[Table]` allows `AllowMultiple = true` - the same row type can belong to
+several databases, one `[Table]` application each. `ToTableModels` (plural,
+renamed from the original `ToTableModel`) splits analysis into two phases to
+support this without duplicating diagnostics: everything intrinsic to the
+row itself - primary key, `[AutoIncrement]` fields, indexes,
+`[Validate]` methods - is computed exactly once regardless of how many
+`[Table]` applications exist, since none of it depends on which database is
+asking. Only `Kind`, the owner database, `Accessor`, `ChunkSize`, and
+`Evictable` are read per-attribute, inside a loop over `ctx.Attributes`,
+producing one `TableModel` per application. Row-level diagnostics (missing
+`[PrimaryKey]`, bad `[Index]`/`[AutoIncrement]`/`[Validate]`) short-circuit
+the whole method before that loop even starts - so a row with three `[Table]`
+applications and no primary key still reports `RHINO001` exactly once, not
+three times.
+
+## `Emit` — Ops class naming across multiple databases and multiple accessors
+
+The generated `Ops` class name (and its `AddSource` hint name) is
+`{DatabaseSimpleName}{Accessor}Ops`, not `{RowTypeName}Ops`. Required, not
+stylistic, and needed fixing twice:
+
+1. `Emit` runs once per `[Database]`, and Roslyn requires `AddSource` hint
+   names to be unique across a generator's *entire* output in one
+   compilation - not just within one `Emit` invocation - so a row type
+   belonging to two databases produces two `AddSource(...)` calls for the
+   same nominal name and crashes the build, plus a duplicate-type compile
+   error even before that (both classes would land in the row's own
+   namespace). First fix: qualify by owner database's simple name
+   (`{DatabaseSimpleName}{RowTypeName}Ops`).
+2. That alone still collides for two `[Table]` attributes on the *same* row
+   targeting the *same* database with two different `Accessor`s (e.g.
+   `PrimaryPlayers`/`BackupPlayers`, both backed by `Player`) - the row type
+   name doesn't distinguish them. Fixed by keying on `Accessor` instead of
+   `RowTypeName` - `Accessor` is already required to be locally meaningful
+   (it's the generated `Transaction` property name), so using it here closes
+   both collision cases with one change, and reads more naturally besides
+   (`GameDbPrimaryPlayersOps` is "the Ops class behind GameDb's
+   PrimaryPlayers property").
+
+Duplicate `Accessor` values within one database (a real mistake, not a
+by-design case) are caught explicitly as `RHINO010` before either `AddSource`
+call runs, checked once per database after collecting all its tables (the
+collision is between two tables, not a property of either one alone) -
+otherwise it would surface as a `CS0102` duplicate-member error inside
+generated code, or worse, an `AddSource` hint-name crash, instead of a clean
+diagnostic pointing at the actual mistake.
+
+Qualifying by owner database and accessor costs nothing on the consumer side:
+nothing outside generated code ever names the `Ops` class directly - every
+access goes through the owning database's own `Transaction.{Accessor}`
+property, which is exactly why this was safe to change twice without
+touching any hand-written call site.
 
 ## `PrimaryIndexType`
 
@@ -175,7 +230,7 @@ touched by this batch and its field no longer matches, or it was deleted),
 so a real hit is only trusted if its primary key was never touched by the
 batch at all.
 
-## `ToTableModel` — `[Validate]` method discovery
+## `ToTableModels` — `[Validate]` method discovery
 
 A row's `[Validate]`-tagged static methods are business-rule checks that
 plug into the same `Validate()`/`Result` pipeline the structural checks

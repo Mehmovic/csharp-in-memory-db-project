@@ -71,12 +71,12 @@ public class Milestone2Tests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Clubs.ShortCode("ARS").IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = ((dynamic)tx).Club.ShortCode("ARS").IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
@@ -87,11 +87,11 @@ public class Milestone2Tests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Insert((dynamic)NewClub(asm, 2, "Arsenal Reserves", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 2, "Arsenal Reserves", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsError(), Is.True);
@@ -105,11 +105,11 @@ public class Milestone2Tests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Update(1, (dynamic)NewClub(asm, 1, "Arsenal FC", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Update(1, (dynamic)NewClub(asm, 1, "Arsenal FC", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsOk(), Is.True);
@@ -124,15 +124,15 @@ public class Milestone2Tests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 3, "Carol", 20));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 3, "Carol", 20));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
         var team10Count = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { team10Count = ((dynamic)tx).Players.ClubId(10).Count; return Result.Ok(); },
+            db, txType, (ctx, tx) => { team10Count = ((dynamic)tx).Player.ClubId(10).Count; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(team10Count, Is.EqualTo(2));
@@ -145,8 +145,8 @@ public class Milestone2Tests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -163,8 +163,8 @@ public class Milestone2Tests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 1, "AliceAgain", 10));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "AliceAgain", 10));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -180,7 +180,7 @@ public class Milestone2Tests {
 
         // Pre-seed Arsenal so a colliding ShortCode fails Clubs' Validate().
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         // One operation: Players' insert would succeed on its own; Clubs'
@@ -191,8 +191,8 @@ public class Milestone2Tests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 1, "Alice", 1));
-                dtx.Clubs.Insert((dynamic)NewClub(asm, 2, "Arsenal Reserves", "ARS"));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 1));
+                dtx.Club.Insert((dynamic)NewClub(asm, 2, "Arsenal Reserves", "ARS"));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -200,7 +200,7 @@ public class Milestone2Tests {
 
         var playerFound = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { playerFound = ((dynamic)tx).Players.Get(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { playerFound = ((dynamic)tx).Player.Get(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(playerFound, Is.False,
@@ -214,7 +214,7 @@ public class Milestone2Tests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Fixtures.Insert((dynamic)NewFixture(asm, 1, homeClubId: 10, awayClubId: 20)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Fixture.Insert((dynamic)NewFixture(asm, 1, homeClubId: 10, awayClubId: 20)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         // Fixture's Order (see Source above) deliberately reverses
@@ -226,7 +226,7 @@ public class Milestone2Tests {
         // inserted and come back NotFound.
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Fixtures.HomeAway(20, 10).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = ((dynamic)tx).Fixture.HomeAway(20, 10).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
@@ -237,11 +237,11 @@ public class Milestone2Tests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Fixtures.Insert((dynamic)NewFixture(asm, 1, homeClubId: 10, awayClubId: 20)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Fixture.Insert((dynamic)NewFixture(asm, 1, homeClubId: 10, awayClubId: 20)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Fixtures.Insert((dynamic)NewFixture(asm, 2, homeClubId: 10, awayClubId: 20)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Fixture.Insert((dynamic)NewFixture(asm, 2, homeClubId: 10, awayClubId: 20)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsError(), Is.True);
@@ -257,8 +257,8 @@ public class Milestone2Tests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Fixtures.Insert((dynamic)NewFixture(asm, 1, homeClubId: 10, awayClubId: 20));
-                dtx.Fixtures.Insert((dynamic)NewFixture(asm, 2, homeClubId: 20, awayClubId: 10));
+                dtx.Fixture.Insert((dynamic)NewFixture(asm, 1, homeClubId: 10, awayClubId: 20));
+                dtx.Fixture.Insert((dynamic)NewFixture(asm, 2, homeClubId: 20, awayClubId: 10));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -275,18 +275,18 @@ public class Milestone2Tests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Fixtures.Insert((dynamic)NewFixture(asm, 1, homeClubId: 10, awayClubId: 20));
-                dtx.Fixtures.Insert((dynamic)NewFixture(asm, 2, homeClubId: 30, awayClubId: 40));
+                dtx.Fixture.Insert((dynamic)NewFixture(asm, 1, homeClubId: 10, awayClubId: 20));
+                dtx.Fixture.Insert((dynamic)NewFixture(asm, 2, homeClubId: 30, awayClubId: 40));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Fixtures.Delete(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Fixture.Delete(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Fixtures.HomeAway(40, 30).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = ((dynamic)tx).Fixture.HomeAway(40, 30).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.True, "The swap-relocated row's composite index entry must still resolve at its new offset.");

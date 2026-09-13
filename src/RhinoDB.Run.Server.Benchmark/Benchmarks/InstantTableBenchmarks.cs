@@ -29,7 +29,7 @@ public class InstantTableBenchmarks {
             var start = seeded;
             var end = Math.Min(seeded + SeedBatchSize, RecordCount);
             db.Run((ctx, tx) => {
-                for (var i = start; i < end; i++) tx.InstantWidgets.Insert(new InstantWidget(i, i));
+                for (var i = start; i < end; i++) tx.InstantWidget.Insert(new InstantWidget(i, i));
                 return Result.Ok();
             }, PropagationMode.Optimistic).GetAwaiter().GetResult();
             seeded = end;
@@ -38,15 +38,15 @@ public class InstantTableBenchmarks {
 
     [Benchmark]
     public Task<Result<InstantWidget>> Get() =>
-        db.Run<InstantWidget>((ctx, tx) => tx.InstantWidgets.Get(lookupKey), PropagationMode.Optimistic);
+        db.Run<InstantWidget>((ctx, tx) => tx.InstantWidget.Get(lookupKey), PropagationMode.Optimistic);
 
     [Benchmark]
     public Task<Result> Insert() {
         var id = ++nextInsertId;
-        return db.Run((ctx, tx) => { tx.InstantWidgets.Insert(new InstantWidget(id, id)); return Result.Ok(); }, PropagationMode.Optimistic);
+        return db.Run((ctx, tx) => { tx.InstantWidget.Insert(new InstantWidget(id, id)); return Result.Ok(); }, PropagationMode.Optimistic);
     }
 
     [Benchmark]
     public Task<Result> Update() =>
-        db.Run((ctx, tx) => { tx.InstantWidgets.Update(lookupKey, new InstantWidget(lookupKey, ++nextInsertId)); return Result.Ok(); }, PropagationMode.Optimistic);
+        db.Run((ctx, tx) => { tx.InstantWidget.Update(lookupKey, new InstantWidget(lookupKey, ++nextInsertId)); return Result.Ok(); }, PropagationMode.Optimistic);
 }

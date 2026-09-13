@@ -55,16 +55,16 @@ public class IterTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widgets.Insert((dynamic)NewWidget(asm, 1, "A"));
-                dtx.Widgets.Insert((dynamic)NewWidget(asm, 2, "B"));
-                dtx.Widgets.Insert((dynamic)NewWidget(asm, 3, "C"));
+                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "A"));
+                dtx.Widget.Insert((dynamic)NewWidget(asm, 2, "B"));
+                dtx.Widget.Insert((dynamic)NewWidget(asm, 3, "C"));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
         var names = new List<string>();
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                foreach (var widget in ((dynamic)tx).Widgets.Iter()) names.Add((string)widget.Name);
+                foreach (var widget in ((dynamic)tx).Widget.Iter()) names.Add((string)widget.Name);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -81,18 +81,18 @@ public class IterTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widgets.Insert((dynamic)NewWidget(asm, 1, "A"));
-                dtx.Widgets.Insert((dynamic)NewWidget(asm, 2, "B"));
+                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "A"));
+                dtx.Widget.Insert((dynamic)NewWidget(asm, 2, "B"));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widgets.Delete(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Delete(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var names = new List<string>();
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                foreach (var widget in ((dynamic)tx).Widgets.Iter()) names.Add((string)widget.Name);
+                foreach (var widget in ((dynamic)tx).Widget.Iter()) names.Add((string)widget.Name);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -113,15 +113,15 @@ public class IterTests {
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 db, txType, (ctx, tx) => {
                     dynamic dtx = tx;
-                    dtx.Accounts.Insert((dynamic)NewAccount(asm, 1, 100m));
-                    dtx.Accounts.Insert((dynamic)NewAccount(asm, 2, 200m));
+                    dtx.Account.Insert((dynamic)NewAccount(asm, 1, 100m));
+                    dtx.Account.Insert((dynamic)NewAccount(asm, 2, 200m));
                     return Result.Ok();
                 }, PropagationMode.Optimistic);
 
             var balances = new List<decimal>();
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 db, txType, (ctx, tx) => {
-                    foreach (var account in ((dynamic)tx).Accounts.Iter()) balances.Add((decimal)account.Balance);
+                    foreach (var account in ((dynamic)tx).Account.Iter()) balances.Add((decimal)account.Balance);
                     return Result.Ok();
                 }, PropagationMode.Optimistic);
 

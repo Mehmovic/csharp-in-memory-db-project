@@ -65,7 +65,7 @@ public class PersistentDurabilityTests {
             txType = asm.GetType("TestNs.VaultDbTransaction")!;
             var db = Activator.CreateInstance(dbType, cold)!;
             await (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
                 PropagationMode.Confirmed);
         }
 
@@ -74,7 +74,7 @@ public class PersistentDurabilityTests {
 
         var found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Accounts.Get(1).IsOk(); return Result.Ok(); },
+            reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.False, "A fresh in-memory table has an empty primaryIndex even though the row is durably present - Get must not silently reach for cold storage.");
@@ -92,7 +92,7 @@ public class PersistentDurabilityTests {
             txType = asm.GetType("TestNs.VaultDbTransaction")!;
             var db = Activator.CreateInstance(dbType, cold)!;
             await (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
                 PropagationMode.Confirmed);
         }
 
@@ -100,7 +100,7 @@ public class PersistentDurabilityTests {
         var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            reopenedDb, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Update(1, (dynamic)NewAccount(asm, 1, 1, 500m)); return Result.Ok(); },
+            reopenedDb, txType, (ctx, tx) => { ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 500m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsError(), Is.True);
@@ -115,11 +115,11 @@ public class PersistentDurabilityTests {
         var (db, txType, asm) = NewDb(cold);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Update(1, (dynamic)NewAccount(asm, 2, 1, 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 2, 1, 100m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsError(), Is.True);
@@ -139,7 +139,7 @@ public class PersistentDurabilityTests {
             var db = Activator.CreateInstance(dbType, cold)!;
 
             var insert = await (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
                 PropagationMode.Optimistic);
             Assert.That(insert.IsOk(), Is.True);
         }
@@ -151,8 +151,8 @@ public class PersistentDurabilityTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             reopenedDb, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                loaded = dtx.Accounts.Storage.Load(1).IsOk();
-                found = dtx.Accounts.Get(1).IsOk();
+                loaded = dtx.Account.Storage.Load(1).IsOk();
+                found = dtx.Account.Get(1).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -171,10 +171,10 @@ public class PersistentDurabilityTests {
             var db = Activator.CreateInstance(dbType, cold)!;
 
             await (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
                 PropagationMode.Confirmed);
             var delete = await (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Delete(1); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Delete(1); return Result.Ok(); },
                 PropagationMode.Confirmed);
             Assert.That(delete.IsOk(), Is.True);
         }
@@ -184,7 +184,7 @@ public class PersistentDurabilityTests {
 
         var loaded = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            reopenedDb, txType, (ctx, tx) => { loaded = ((dynamic)tx).Accounts.Storage.Load(1).IsOk(); return Result.Ok(); },
+            reopenedDb, txType, (ctx, tx) => { loaded = ((dynamic)tx).Account.Storage.Load(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(loaded, Is.False, "A deleted row's cold copy must genuinely be gone after reopening, not just absent in the closed process' memory.");
@@ -198,20 +198,20 @@ public class PersistentDurabilityTests {
         var (db, txType, asm) = NewDb(cold);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
             PropagationMode.Confirmed);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Storage.Evict(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Evict(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var goneFromMemory = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { goneFromMemory = !((dynamic)tx).Accounts.Get(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { goneFromMemory = !((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
         Assert.That(goneFromMemory, Is.True, "Sanity: genuinely gone from memory now, only reachable through Load/Peek.");
 
         var insert = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 999m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 999m)); return Result.Ok(); },
             PropagationMode.Confirmed);
         Assert.That(insert.IsOk(), Is.True, "Insert over a cold-only key must succeed, not reject as a duplicate (decision 3).");
 
@@ -219,8 +219,8 @@ public class PersistentDurabilityTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Accounts.Storage.Load(1);
-                balance = (decimal)dtx.Accounts.Get(1).Unwrap().Balance;
+                dtx.Account.Storage.Load(1);
+                balance = (decimal)dtx.Account.Get(1).Unwrap().Balance;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
         Assert.That(balance, Is.EqualTo(999m), "The durable copy must be the overwritten value, not the original evicted one.");
@@ -235,7 +235,7 @@ public class PersistentDurabilityTests {
 
         Result loadResult = default!;
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { loadResult = ((dynamic)tx).Accounts.Storage.Load(999); return Result.Ok(); },
+            db, txType, (ctx, tx) => { loadResult = ((dynamic)tx).Account.Storage.Load(999); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsOk(), Is.True);
@@ -250,7 +250,7 @@ public class PersistentDurabilityTests {
 
         Result evictResult = default!;
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { evictResult = ((dynamic)tx).Accounts.Storage.Evict(999); return Result.Ok(); },
+            db, txType, (ctx, tx) => { evictResult = ((dynamic)tx).Account.Storage.Evict(999); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsOk(), Is.True);
@@ -264,7 +264,7 @@ public class PersistentDurabilityTests {
 
         dynamic peekResult = null!;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { peekResult = ((dynamic)tx).Accounts.Storage.Peek(999); return Result.Ok(); },
+            db, txType, (ctx, tx) => { peekResult = ((dynamic)tx).Account.Storage.Peek(999); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That((bool)peekResult.IsError(), Is.True);
@@ -284,8 +284,8 @@ public class PersistentDurabilityTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m));
-                accountsOps = dtx.Accounts;
+                dtx.Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m));
+                accountsOps = dtx.Account;
                 return Result.Ok();
             }, PropagationMode.Confirmed);
 
@@ -321,10 +321,10 @@ public class PersistentDurabilityTests {
             var db = Activator.CreateInstance(dbType, cold)!;
 
             var first = (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
                 PropagationMode.Confirmed);
             var second = (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 2, 1, 100m)); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 2, 1, 100m)); return Result.Ok(); },
                 PropagationMode.Confirmed);
             var results = await Task.WhenAll(first, second);
 
@@ -339,8 +339,8 @@ public class PersistentDurabilityTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             reopenedDb, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                firstLoaded = dtx.Accounts.Storage.Load(1).IsOk();
-                secondLoaded = dtx.Accounts.Storage.Load(2).IsOk();
+                firstLoaded = dtx.Account.Storage.Load(1).IsOk();
+                secondLoaded = dtx.Account.Storage.Load(2).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -354,11 +354,11 @@ public class PersistentDurabilityTests {
         var (db, txType, asm) = NewDb(cold);
 
         var confirmed = (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
             PropagationMode.Confirmed);
         var optimisticTasks = Enumerable.Range(2, 20)
             .Select(id => (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, id, 1, 100m)); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, id, 1, 100m)); return Result.Ok(); },
                 PropagationMode.Optimistic))
             .ToArray();
 

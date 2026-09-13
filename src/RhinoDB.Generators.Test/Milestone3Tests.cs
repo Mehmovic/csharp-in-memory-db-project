@@ -75,8 +75,8 @@ public class Milestone3Tests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m));
-                found = dtx.Accounts.Get(1).IsOk();
+                dtx.Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m));
+                found = dtx.Account.Get(1).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -89,11 +89,11 @@ public class Milestone3Tests {
         var (db, txType, asm) = NewDb(cold);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 2, 50m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 2, 50m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsError(), Is.True);
@@ -106,15 +106,15 @@ public class Milestone3Tests {
         var (db, txType, asm) = NewDb(cold);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
             PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Update(1, (dynamic)NewAccount(asm, 1, 1, 250m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 250m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         decimal balance = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { balance = (decimal)((dynamic)tx).Accounts.Get(1).Unwrap().Balance; return Result.Ok(); },
+            db, txType, (ctx, tx) => { balance = (decimal)((dynamic)tx).Account.Get(1).Unwrap().Balance; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(balance, Is.EqualTo(250m));
@@ -126,15 +126,15 @@ public class Milestone3Tests {
         var (db, txType, asm) = NewDb(cold);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
             PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Delete(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Delete(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Accounts.Get(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.False);
@@ -153,7 +153,7 @@ public class Milestone3Tests {
             var db = Activator.CreateInstance(dbType, cold)!;
 
             var insert = await (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
                 PropagationMode.Confirmed);
             Assert.That(insert.IsOk(), Is.True);
         }
@@ -166,8 +166,8 @@ public class Milestone3Tests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             reopenedDb, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                loaded = dtx.Accounts.Storage.Load(1).IsOk();
-                balance = (decimal)dtx.Accounts.Get(1).Unwrap().Balance;
+                loaded = dtx.Account.Storage.Load(1).IsOk();
+                balance = (decimal)dtx.Account.Get(1).Unwrap().Balance;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -181,24 +181,24 @@ public class Milestone3Tests {
         var (db, txType, asm) = NewDb(cold);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
             PropagationMode.Confirmed);
 
         var evicted = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { evicted = ((dynamic)tx).Accounts.Storage.Evict(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { evicted = ((dynamic)tx).Account.Storage.Evict(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
         Assert.That(evicted, Is.True);
 
         var foundAfterEvict = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { foundAfterEvict = ((dynamic)tx).Accounts.Get(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { foundAfterEvict = ((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
         Assert.That(foundAfterEvict, Is.False, "Get must never implicitly reload from cold storage.");
 
         var loaded = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { loaded = ((dynamic)tx).Accounts.Storage.Load(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { loaded = ((dynamic)tx).Account.Storage.Load(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
         Assert.That(loaded, Is.True);
     }
@@ -209,10 +209,10 @@ public class Milestone3Tests {
         var (db, txType, asm) = NewDb(cold);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
             PropagationMode.Confirmed);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Storage.Evict(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Evict(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         decimal peekedBalance = -1;
@@ -220,8 +220,8 @@ public class Milestone3Tests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                peekedBalance = (decimal)dtx.Accounts.Storage.Peek(1).Unwrap().Balance;
-                stillNotInMemory = !dtx.Accounts.Get(1).IsOk();
+                peekedBalance = (decimal)dtx.Account.Storage.Peek(1).Unwrap().Balance;
+                stillNotInMemory = !dtx.Account.Get(1).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -238,7 +238,7 @@ public class Milestone3Tests {
 
         // Pre-seed account 1 so a colliding Id fails Accounts' Validate().
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Accounts.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         // One operation: Players' insert would succeed on its own; Accounts'
@@ -248,8 +248,8 @@ public class Milestone3Tests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 1, "Alice"));
-                dtx.Accounts.Insert((dynamic)NewAccount(asm, 1, 2, 200m));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice"));
+                dtx.Account.Insert((dynamic)NewAccount(asm, 1, 2, 200m));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -257,7 +257,7 @@ public class Milestone3Tests {
 
         var playerFound = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { playerFound = ((dynamic)tx).Players.Get(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { playerFound = ((dynamic)tx).Player.Get(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(playerFound, Is.False,

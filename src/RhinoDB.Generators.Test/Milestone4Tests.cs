@@ -62,8 +62,8 @@ public class Milestone4Tests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Clubs.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS"));
-                found = dtx.Clubs.ShortCode("ARS").IsOk();
+                dtx.Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS"));
+                found = dtx.Club.ShortCode("ARS").IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -76,19 +76,19 @@ public class Milestone4Tests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         bool oldFound = true, newFound = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Clubs.Update(1, (dynamic)NewClub(asm, 1, "Arsenal", "GUN"));
+                dtx.Club.Update(1, (dynamic)NewClub(asm, 1, "Arsenal", "GUN"));
                 // The real index still says "ARS" -> offset 0, but this
                 // operation's own staged Update means that's now stale -
                 // must not be trusted just because Apply() hasn't run yet.
-                oldFound = dtx.Clubs.ShortCode("ARS").IsOk();
-                newFound = dtx.Clubs.ShortCode("GUN").IsOk();
+                oldFound = dtx.Club.ShortCode("ARS").IsOk();
+                newFound = dtx.Club.ShortCode("GUN").IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -101,15 +101,15 @@ public class Milestone4Tests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Clubs.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Clubs.Delete(1);
-                found = dtx.Clubs.ShortCode("ARS").IsOk();
+                dtx.Club.Delete(1);
+                found = dtx.Club.ShortCode("ARS").IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -126,9 +126,9 @@ public class Milestone4Tests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
-                count = dtx.Players.ClubId(10).Count;
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
+                count = dtx.Player.ClubId(10).Count;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -143,8 +143,8 @@ public class Milestone4Tests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
-                dtx.Players.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
+                dtx.Player.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -152,9 +152,9 @@ public class Milestone4Tests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Players.Update(1, (dynamic)NewPlayer(asm, 1, "Alice", 99));
-                oldGroupCount = dtx.Players.ClubId(10).Count;
-                newGroupCount = dtx.Players.ClubId(99).Count;
+                dtx.Player.Update(1, (dynamic)NewPlayer(asm, 1, "Alice", 99));
+                oldGroupCount = dtx.Player.ClubId(10).Count;
+                newGroupCount = dtx.Player.ClubId(99).Count;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
