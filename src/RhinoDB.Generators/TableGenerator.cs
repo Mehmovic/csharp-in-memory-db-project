@@ -478,7 +478,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"        changes.Add(new(ChangeKind.Insert, row.{table.PrimaryKeyName}, row));");
         sb.AppendLine("        Dirty = true;");
         sb.AppendLine("    }");
-        sb.AppendLine($"    public void Update({key} id, {row} newRow) {{ changes.Add(new(ChangeKind.Update, id, newRow)); Dirty = true; }}");
+        sb.AppendLine($"    public void Update({key} id, {row} newRow) {{");
+        sb.AppendLine("        changes.Add(new(ChangeKind.Update, id, newRow));");
+        sb.AppendLine("        Dirty = true; ");
+        sb.AppendLine("    }");
         sb.AppendLine($"    public void Delete({key} id) {{");
         sb.AppendLine($"        var current = {table.PrimaryKeyAccessor}(id);");
         sb.AppendLine("        if (!current.IsOk()) return;");

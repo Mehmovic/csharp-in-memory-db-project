@@ -10,15 +10,14 @@ without pre-consuming that much real disk space. See
 
 ## `Setup` — `estimatedBytes`/`sizeNowBytes`
 
-Pre-sizes `sizeNow` past the seeded data, found necessary by a real
-measurement artifact: with `sizeNow` left at its default, the seeded database
-sits right at wherever incremental growth last left it, so the *next* write -
-the one a `[Benchmark]` method is timing - could itself trigger a growth/remap
-event, a real cost that isn't the cost being measured. This is why the
-small-tier `Insert`/`Update` numbers originally came back *slower* than the
-large-tier ones (backwards from what flat, size-independent operations should
-show) - the small tiers' files were still near a growth boundary when the
-timed write ran.
+Pre-sizes `sizeNow` past the seeded data, on the theory that a database
+sitting right at wherever incremental growth last left it could make the
+*next* write - the one a `[Benchmark]` method is timing - trigger a
+growth/remap event of its own. A real, correct thing to want independent of
+anything else, but **this was not what caused the small-tier
+`Insert`/`Update` numbers to come back slower than the large-tier ones** -
+see the warm-up churn note below for the actual cause, found by re-measuring
+after this change and finding the pattern unchanged.
 
 64 bytes/record is a deliberately generous per-record overhead estimate for
 `PersistentWidget`'s 12-byte payload (libmdbx B+-tree page/slot overhead
@@ -31,3 +30,26 @@ another `RecordCount`'s worth - it doesn't need to scale with `RecordCount`
 at all. Capped at `MapSizeUpperBytes` via `Math.Min` since `sizeNow` can
 never exceed `sizeUpper`; only matters at the largest opt-in tiers where the
 generous per-record estimate would otherwise overshoot the 128 GB ceiling.
+
+## `Setup` — fixed warm-up churn (2026-09-13)
+
+Inserts 20,000 throwaway rows (a key range disjoint from the real seeded
+data, e.g. negative IDs) under `Confirmed`, independent of `RecordCount`,
+right after seeding. Found necessary by measurement, not assumed: a freshly-
+created file's never-before-written regions cost roughly 10x more to write
+to on this dev machine than already-settled ones (Windows Defender real-time
+scanning is the leading suspect, confirmed active via `Get-MpComputerStatus`
+- see `Docs/03-roadmap.md`'s 2026-09-13 entry for the full two-experiment
+diagnosis), which is what actually produced the earlier backwards-looking
+small-tier-slower-than-large-tier pattern - nothing to do with `RecordCount`
+or libmdbx geometry at all. This warm-up fixes `Update` (which always
+rewrites the same fixed `lookupKey`, so once warm-up settles that page every
+subsequent `Update` is cheap) but **does not** fix `Insert` - `Insert`
+always writes a brand-new, monotonically increasing key, so it inherently
+touches a never-before-written page on every single call regardless of how
+much unrelated warm-up already ran. That's not a benchmark bug to route
+around: a real ever-growing, append-only table has the same property, so
+`Insert`'s measured cost genuinely reflects sustained-append behavior on a
+machine like this one, not an artifact to be warmed away. Kept as legitimate
+methodology (a real long-running database's file is never actually cold
+either) rather than removed once its actual purpose was understood.

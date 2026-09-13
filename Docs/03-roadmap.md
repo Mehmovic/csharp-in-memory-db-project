@@ -265,30 +265,68 @@ not left partially migrated.
 2026-09-13: **First real benchmark run surfaced two genuine findings**, one
 about the benchmark itself and one about the engine:
 
-- **Benchmark change (partial fix, root cause still open)**: `ColdStore.Open`
-  gained a `sizeNowBytes` parameter (default `-1`, same backward-compatible
-  pattern as `sizeUpperBytes`) so `RhinoDB.Run.Server.Benchmark` can pre-size
-  libmdbx's geometry past the seeded data, on the theory that a freshly-seeded
-  database sitting at wherever incremental growth last left it could make the
-  write a `[Benchmark]` method is timing trigger a growth/remap event of its
-  own. **Re-measured after the fix and the anomaly it was meant to explain
-  is still there** — `Persistent` `Insert`/`Update` are still ~900 μs at the
-  100/10k tiers and drop to ~115-121 μs at 1,000,000 (backwards from what a
-  size-independent operation should show), with `Error` frequently exceeding
-  half the `Mean` (e.g. `Update` at 10k: Mean 924 μs, Error 897 μs - not a
-  usable number either way). The `sizeNowBytes` parameter is still real,
-  correct, and worth keeping (pre-sizing known-future geometry is a
-  legitimate thing to want independent of this), but the growth-event theory
-  it was built to test is not confirmed - the actual cause of the
-  small-tier-slower-than-large-tier pattern is still unexplained. Left as a
-  genuinely open question rather than a solved one: worth a dedicated,
-  properly-instrumented investigation later (e.g. an ETW/perfview trace
-  around a single `Insert`, or libmdbx's own `MDBX_ENABLE_PROFGC` build
-  option) rather than more statistical brute force - a `--job medium` rerun
-  of just the (unaffected-by-this-question) `Instant` suite already cost
-  over two hours for what should have been a quick check, so throwing more
-  iterations at the `Persistent` suite specifically is not assumed to be the
-  fix either.
+- **Benchmark change**: `ColdStore.Open` gained a `sizeNowBytes` parameter
+  (default `-1`, same backward-compatible pattern as `sizeUpperBytes`) so
+  `RhinoDB.Run.Server.Benchmark` can pre-size libmdbx's geometry past the
+  seeded data. Kept as a real, correct improvement (pre-sizing known-future
+  geometry is a legitimate thing to want on its own merits), but it turned
+  out **not** to be what explained the anomaly below - recorded here for
+  provenance, not as the fix.
+
+- **Root cause found, 2026-09-13**: the `Persistent` `Insert`/`Update`
+  anomaly (~900 μs at the 100/10k tiers, dropping to ~115-121 μs at
+  1,000,000 - backwards from what a size-independent operation should show,
+  with `Error` frequently exceeding half the `Mean`) had nothing to do with
+  `RecordCount`, libmdbx geometry, or RhinoDB's engine at all - it's about
+  whether the specific file region a write touches has ever been written
+  (and settled) before. Diagnosed via two targeted experiments in a scratch
+  build of `PersistentTableBenchmarks`, each isolating one operation:
+  - Adding a fixed, `RecordCount`-independent warm-up churn before seeding
+    (insert 20,000 throwaway rows under `Confirmed`, using a key range
+    disjoint from the real data) dropped `Update`'s latency from ~900 μs
+    down to a flat ~50-130 μs at *every* tier, and this held up on a clean
+    re-run. `Update` always rewrites the same fixed key
+    (`lookupKey = RecordCount / 2`) every call, so once that page has been
+    touched and settled, every subsequent `Update` is cheap regardless of
+    table size.
+  - `InsertOptimistic`/`InsertConfirmed` were **not** fixed by that same
+    general warm-up (still ~1000-1200 μs at the 100/10k tiers on the clean
+    re-run) - because `Insert` always writes a brand-new, monotonically
+    increasing key, so it inherently touches a never-before-written page on
+    every single call, no matter how much unrelated warm-up already ran.
+    Proven directly: additionally pre-touching (insert-then-delete,
+    `Confirmed`) the *exact* key range `InsertOptimistic` was about to write
+    into next dropped its latency to a flat ~120-170 μs at every tier - the
+    only difference between the two experiments is whether the warmed-up
+    region and the timed operation's region are the same one.
+
+  Conclusion: `Get`/`Update`/`Insert` all cost the same flat, size-independent
+  ~50-170 μs once a region has settled - the architecturally-promised
+  behavior - and the size-dependent-looking pattern was measurement noise
+  from an environmental effect, not a property of RhinoDB itself. But this
+  cuts both ways for `Insert` specifically: an ever-growing, append-only
+  workload (new key every call, which is the common case for auto-increment
+  primary keys) will keep hitting fresh, unsettled pages forever, so its
+  real steady-state cost on a machine like this one is genuinely closer to
+  the ~1 ms figure, not the ~150 μs figure - that's not a benchmark artifact
+  to explain away, it's what continuous-insert actually costs here. Leading
+  suspect for *why* an unsettled region costs ~10x more: Windows Defender's
+  real-time protection, confirmed active on the dev machine
+  (`Get-MpComputerStatus`), a well-known source of first-write-to-a-region
+  overhead on Windows; generic OS cold-page-cache effects can't be fully
+  ruled out as a contributor either, but neither implicates the database,
+  and both are very likely specific to this Windows dev machine, not the
+  actual deployment target (Linux server, per this doc's own build-order
+  notes), where this mechanism doesn't exist.
+
+  `PersistentTableBenchmarks.Setup` keeps a permanent version of the general
+  warm-up (20,000 rows, disjoint key range, `Confirmed`) since a real
+  long-running database's file is never actually cold either - this is
+  legitimate steady-state methodology for `Get`/`Update`. The exact-future-
+  key-range pre-touch was diagnostic-only and removed - baking it in would
+  make `Insert`'s number look better than real sustained-append workloads
+  will actually experience on this class of machine, which is the opposite
+  of what the benchmark should report.
 - **Engine fix, prompted by the allocation numbers the benchmark's
   `MemoryDiagnoser` surfaced**: 400-1200 bytes allocated per operation, on
   tables with far smaller payloads than that. Traced to `CreateTransaction()`

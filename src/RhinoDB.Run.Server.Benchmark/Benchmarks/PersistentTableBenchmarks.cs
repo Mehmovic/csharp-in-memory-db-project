@@ -33,6 +33,22 @@ public class PersistentTableBenchmarks {
         lookupKey = RecordCount / 2;
         nextInsertId = RecordCount;
 
+        // Fixed warm-up churn, independent of RecordCount: a freshly-created file's
+        // first-ever-written pages measure far slower than already-touched ones on this
+        // machine (Windows Defender real-time scanning is the leading suspect - see
+        // Docs/03-roadmap.md's 2026-09-13 entry). A real long-running database's file is
+        // never actually cold either, so this makes the benchmark measure steady-state
+        // write cost instead of a one-time-per-run environmental artifact.
+        const int WarmupRows = 20_000;
+        for (var i = 0; i < WarmupRows; i += SeedBatchSize) {
+            var start = -1 - i;
+            var end = -1 - Math.Min(i + SeedBatchSize, WarmupRows);
+            db.Run((ctx, tx) => {
+                for (var k = start; k > end; k--) tx.PersistentWidget.Insert(new PersistentWidget(k, k));
+                return Result.Ok();
+            }, PropagationMode.Confirmed).GetAwaiter().GetResult();
+        }
+
         var seeded = 0;
         while (seeded < RecordCount) {
             var start = seeded;
