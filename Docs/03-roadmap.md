@@ -328,12 +328,39 @@ about the benchmark itself and one about the engine:
   still open. Leading remaining candidate: a more fundamental OS/filesystem
   cost tied to first-touch of a newly-dirtied memory-mapped page (page fault
   handling, or NTFS extending a sparse file's actual on-disk allocation) -
-  not Windows-Defender-specific, and not yet confirmed either, without
-  deeper profiling (ETW/Process Monitor) than this project has invested so
-  far. Still very likely specific to this Windows dev machine and not the
-  actual deployment target (Linux server, per this doc's own build-order
-  notes) either way - that part of the original conclusion stands regardless
-  of which specific Windows mechanism turns out to be responsible.
+  not Windows-Defender-specific. Still very likely specific to this Windows
+  dev machine and not the actual deployment target (Linux server, per this
+  doc's own build-order notes) either way - that part of the original
+  conclusion stands regardless of which specific Windows mechanism turns out
+  to be responsible.
+
+  **2026-09-14, confirmed by direct test: the "fresh region costs ~10x more"
+  penalty is specific to libmdbx's mmap path, not a general disk/OS cost.**
+  New `RawFileIoBenchmarks.cs` writes+fsyncs (`FileStream.Flush(flushToDisk:
+  true)`, no memory mapping at all, same pre-sized-file methodology as the
+  libmdbx benchmarks) to (a) a never-before-touched 4KB page, advancing
+  forward each call, and (b) the same already-settled page repeatedly.
+  **Result: 380.9 μs vs. 376.4 μs - statistically indistinguishable, no
+  fresh-page penalty whatsoever.** This is the decisive piece of evidence the
+  "root cause still open" note above was waiting on: whatever causes
+  libmdbx's ~900 μs-1 ms fresh-page cost is specific to its memory-mapped
+  copy-on-write I/O path (most likely page-fault handling when the OS first
+  backs a newly-dirtied mapped page with a real physical page/disk block),
+  not a property of writing to disk on this machine in general. Raw
+  sequential write+fsync sits at a flat, predictable ~380 μs regardless of
+  which region is touched - between libmdbx's warmed-up cost (~50-130 μs)
+  and its fresh-page cost (~900 μs-1 ms), but critically without the
+  first-touch penalty.
+
+  **Conclusion, prompted by this and a direct architecture discussion**:
+  libmdbx's mmap-based COW design is the wrong fit specifically for
+  *write-heavy, ever-growing* durability - the very case Confirmed-mode
+  transactions need to be fast and predictable for. libmdbx stays exactly
+  where it already earns its keep - `Load`/`Evict`/`Peek` (point lookups,
+  lock-free MVCC reads, zero-copy) - but a WAL-based path (plain sequential
+  file writes, proven here to avoid the fresh-page penalty entirely) is the
+  right fit for durability of state changes going forward. Scoped as
+  follow-up design work, not built yet - see the Backlog.
 
   `PersistentTableBenchmarks.Setup` keeps a permanent version of the general
   warm-up (20,000 rows, disjoint key range, `Confirmed`) since a real
@@ -794,6 +821,57 @@ don't get built before they're needed:
   7/8's WebSocket-based client access is proven against a real game and an
   actual latency/bandwidth problem shows up that WebSocket can't serve well
   enough — not built speculatively ahead of that evidence.
+- **WAL-based durability, replacing libmdbx as the write-durability path**
+  (libmdbx stays for `Load`/`Evict`/`Peek`) — decided in principle
+  2026-09-14, not built. Prompted by the fresh-page-write investigation
+  above: libmdbx's memory-mapped copy-on-write B+tree pays a real,
+  measured ~900 μs-1 ms cost the *first* time any given page is touched
+  (page-fault handling when the OS backs a newly-dirtied mapped page with a
+  real physical page/disk block) - confirmed via `RawFileIoBenchmarks.cs`
+  that plain sequential `FileStream` writes with an explicit `fsync` per
+  write show **no such penalty at all** (380.9 μs fresh vs. 376.4 μs
+  settled - statistically identical), so this is specific to libmdbx's mmap
+  path, not an inherent disk/OS cost RhinoDB would pay regardless of
+  storage engine. For a genuinely write-heavy, ever-growing table (new
+  primary key every insert - the common case for auto-increment IDs), the
+  fresh-page cost never goes away under libmdbx, since every insert is by
+  definition touching a page for the first time. A WAL (plain, append-only,
+  sequential writes - proven above to avoid the penalty) is architecturally
+  the right fit for exactly this workload shape.
+
+  **Split of responsibility once built**: libmdbx keeps doing the job it's
+  already good at and already earns its keep for - `Load`/`Evict`/`Peek`
+  (lock-free MVCC point lookups, zero-copy reads straight off the mmap'd
+  snapshot) - untouched by this change. The WAL becomes the durability
+  point for `Insert`/`Update`/`Delete`: a commit's `Confirmed` guarantee
+  is satisfied once its `Change<TKey,TRow>` record(s) are durably appended
+  to the WAL, not once libmdbx's own commit+sync completes. libmdbx's
+  on-disk state becomes a background-updated read cache/materialized view
+  (replayed from the WAL, likely lagging slightly), refreshed by a
+  checkpoint process rather than synchronously on every write.
+
+  **Real, not-yet-designed work this implies, named so it isn't
+  underestimated later**: WAL record format (framing, checksums) and an
+  append-only writer; startup replay logic (rebuilding in-memory state - and
+  bringing libmdbx back up to date - from the last consistent point after a
+  crash); a background WAL→libmdbx checkpoint/compaction process; WAL
+  rotation/truncation policy so it doesn't grow forever; and correctness
+  handling for a crash mid-checkpoint (some WAL entries reflected in
+  libmdbx, some not yet - must not lose or double-apply anything on
+  recovery). This is a genuinely large undertaking, comparable in scope to
+  Stage 5's original libmdbx integration, not a small swap - sequenced
+  after Stage 7+8 (networking) and the tiny proof-of-concept game, per this
+  doc's own build-order priority, not before.
+
+  **Secondary, already-planned benefit this converges with**: Stage 6 (IDC)
+  and Stage 8 (client subscribe-and-diff) both already need a durable,
+  ordered, replayable record of `Change<TKey,TRow>`s so a reconnecting peer
+  database or client can catch up on what it missed - a "commit log" in the
+  Kafka/CDC sense. A WAL built for write durability is the same shape of
+  primitive; worth designing the two together rather than building a
+  second, separate change-retention mechanism later. Not yet decided
+  whether they end up as literally the same log or two logs sharing a
+  format - a question for whenever this is actually scoped for real.
 - **`[Database]` gains an `Accessor`-style name** — for a future networked/RPC
   access layer (`ctx.Db.Table.Insert(...)`, `ctx` being an RPC-scoped context,
   not `DbContext` itself) a remote client can't address a database by its C#
