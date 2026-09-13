@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>RhinoDB.Run.Server.Benchmark.Benchmarks.WalPrototypeBenchmarks-20260914-024114</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.9445)
+Unknown processor
+.NET SDK 11.0.100-rc.1.26425.128
+  [Host]   : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  ShortRun : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+</code></pre>
+<pre><code>Job=ShortRun  IterationCount=3  LaunchCount=1  
+WarmupCount=3  
+</code></pre>
+
+<table>
+<thead><tr><th>Method                        </th><th>Mean </th><th>Error</th><th>StdDev</th><th>Gen0</th><th>Allocated</th>
+</tr>
+</thead><tbody><tr><td>SingleConfirmedSettledKeyUpdate</td><td>420.1 &mu;s</td><td>243.1 &mu;s</td><td>13.33 &mu;s</td><td>-</td><td>488 B</td>
+</tr><tr><td>BatchFreshKeyConfirmedInserts</td><td>71,535.5 &mu;s</td><td>20,060.2 &mu;s</td><td>1,099.57 &mu;s</td><td>375.0000</td><td>2432246 B</td>
+</tr><tr><td>ConcurrentConfirmedFreshKeyInserts</td><td>446.7 &mu;s</td><td>157.3 &mu;s</td><td>8.62 &mu;s</td><td>0.4883</td><td>5120 B</td>
+</tr><tr><td>ConcurrentConfirmedSettledKeyUpdates</td><td>447.7 &mu;s</td><td>211.0 &mu;s</td><td>11.57 &mu;s</td><td>0.4883</td><td>4967 B</td>
+</tr></tbody></table>
+</body>
+</html>
