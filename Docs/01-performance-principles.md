@@ -76,6 +76,60 @@ Two places this bit us, both caught in design review rather than after being bui
   never a closure to eliminate from the call itself once the shape stopped
   routing through a delegate at all.
 
+**A third case, resolved 2026-09-14 by measuring rather than guessing further:
+`DbContext.Run`'s own entry point allocates a small, bounded, and now-accepted
+amount per call — this is the contract, not an unclosed gap.** After Milestone
+5's long-lived-`Ops` fix (above), `RhinoDB.Run.Server.Benchmark`'s
+`InstantTableBenchmarks` still showed ~353 B (`Get`) to ~362 B (`Insert`) per
+call. Decomposed with two isolation benchmarks rather than assumed:
+`SubmissionOverheadBenchmarks.BareTaskCompletionSource` (a bare `new
+TaskCompletionSource<Result>(...)` plus its `Task<Result>`, nothing else) came
+back at **88 B**; `BareClosureOverEnumAndInt` (a minimal capturing closure over
+two primitives) came back at **80 B**. Between them, those two — both
+structural to the current single-writer channel design, not incidental bugs —
+account for most of the floor:
+
+- **`TaskCompletionSource<Result>` + its `Task<Result>` (~88 B)**: required by
+  `Run`'s public `Task<Result>`-returning contract. Removing this needs a
+  `ValueTask` + pooled `IValueTaskSource<Result>` redesign — a real, known
+  high-performance .NET pattern (the same one Kestrel/`System.IO.Pipelines`
+  use), but a genuinely bigger, separately-scoped change, not a small fix.
+- **`DbExecutionLoop.Enqueue`'s own internal closure (~100-150 B for its 4-5
+  captures — `context`/`operation`/`args`/`mode`/`tcs`)**: the `Action` handed
+  to `channel.Writer.TryWrite` must capture all of these per call regardless of
+  what the *caller's* lambda looks like — this is inherent to "queue a closure
+  onto a channel," not something a caller-side fix can touch. Removing it needs
+  `Channel<Action>` restructured into `Channel<TWorkItem>` where `TWorkItem` is
+  a struct holding the same fields by value — a real design (a `Channel<T>`
+  with a struct `T` doesn't allocate per enqueued item, the same "amortized,
+  chunked" reasoning already used for `DenseArray<T>`), but again bigger than
+  a one-line fix, and untried.
+
+**What *is* a free, already-available fix, and was confirmed by measurement**:
+a *caller's own* capturing closure is avoidable today, with zero engine
+changes, via the `Run<TArgs>`/`Run<T,TArgs>` overloads that already exist
+specifically for this (`ctx.Run(static (db, tx, args) => ..., args)`).
+Benchmarked side by side (`GetArgs`/`InsertArgs`/`UpdateArgs` next to
+`Get`/`Insert`/`Update`): switching to a `static` lambda + explicit `args`
+dropped `Get` 353 B → 297 B, `Insert` 361 B → 281 B, `Update` 321 B → 273 B —
+a genuine, measured 50-80 B (15-22%) reduction, matching this principle's own
+guidance that a `static` non-capturing lambda costs nothing to construct.
+**Recommendation for any RhinoDB-consuming code with per-call captured state
+(an id, a value, a key)**: prefer `Run<TArgs>` with a `static` lambda over the
+plain `Run` overload with an implicit capture — cheap to apply, no downside.
+
+**Decision: the remaining ~270-300 B floor is accepted as the contract, not
+pursued further right now.** In absolute terms this is small — Gen0 collection
+of a few hundred bytes per multi-microsecond operation is not a measurable
+tick-latency concern, and both remaining structural costs would need their own
+dedicated, riskier redesigns to remove. Matches this project's standing
+"don't optimize blind" posture (the same gate already applied to the
+`ArrayPool`-for-`changes` idea and the CSB+-tree backlog entry): revisit if
+Stage 9+'s actual game workload profiling ever shows this floor mattering in
+practice, not before. `SubmissionOverheadBenchmarks.cs` and the `*Args`
+comparison benchmarks stay in the benchmark project as living measurements,
+not deleted once the question was answered.
+
 ## 4. No LINQ on the hot path
 
 Iterator-based LINQ (`.Where()`, `.Select()`, `GroupBy`, etc.) allocates enumerator

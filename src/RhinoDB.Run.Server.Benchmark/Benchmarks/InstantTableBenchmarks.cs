@@ -49,4 +49,20 @@ public class InstantTableBenchmarks {
     [Benchmark]
     public Task<Result> Update() =>
         db.Run((ctx, tx) => { tx.InstantWidget.Update(lookupKey, new InstantWidget(lookupKey, ++nextInsertId)); return Result.Ok(); }, PropagationMode.Optimistic);
+
+    [Benchmark]
+    public Task<Result<InstantWidget>> GetArgs() =>
+        db.Run<InstantWidget, int>(static (ctx, tx, key) => tx.InstantWidget.Get(key), lookupKey, PropagationMode.Optimistic);
+
+    [Benchmark]
+    public Task<Result> InsertArgs() {
+        var id = ++nextInsertId;
+        return db.Run(static (ctx, tx, i) => { tx.InstantWidget.Insert(new InstantWidget(i, i)); return Result.Ok(); }, id, PropagationMode.Optimistic);
+    }
+
+    [Benchmark]
+    public Task<Result> UpdateArgs() {
+        var value = ++nextInsertId;
+        return db.Run(static (ctx, tx, args) => { tx.InstantWidget.Update(args.Item1, new InstantWidget(args.Item1, args.Item2)); return Result.Ok(); }, (lookupKey, value), PropagationMode.Optimistic);
+    }
 }

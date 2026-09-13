@@ -453,6 +453,35 @@ behaving unexpectedly. 4 new tests (`RhinoDB.Native.Test`'s
 312/312, zero regressions. Full writeup: `Docs/02-architecture.md`'s "Cold
 storage" section and `Docs/Dev/RhinoDB.Lib/Cold/ColdStore.md`.
 
+2026-09-14: **Closed the gap between the "no closures on the hot path"
+principle and measured reality, flagged in review** — `DbContext.Run`'s
+per-call allocation (~353-362 B on `InstantTableBenchmarks`, even after
+Milestone 5's long-lived-`Ops` fix) was neither documented nor decided.
+Decomposed by measurement (two new isolation benchmarks,
+`SubmissionOverheadBenchmarks.cs`): a bare `TaskCompletionSource<Result>` +
+its `Task<Result>` costs 88 B; a bare closure over the same number/shape of
+captures `DbExecutionLoop.Enqueue`'s own internal closure needs
+(`context`/`operation`/`args`/`mode`/`tcs`) costs roughly 80-150 B — both
+structural to the current `Task<Result>` + `Channel<Action>` design.
+Confirmed one *avoidable* piece by measurement too: switching
+`InstantTableBenchmarks`' `Get`/`Insert`/`Update` to the already-existing
+`Run<TArgs>` overload with a `static` lambda (new `GetArgs`/`InsertArgs`/
+`UpdateArgs` benchmarks, kept permanently for comparison) dropped allocation
+353→297 B, 361→281 B, 321→273 B — a real, zero-engine-change 15-22%
+reduction, now the recommended calling convention for any call site with
+per-call captured state. **Decision: the remaining ~270-300 B floor is
+accepted as the contract** — removing it needs two separate, bigger
+redesigns (pooled `ValueTask`/`IValueTaskSource` completion, and a
+struct-based `Channel<TWorkItem>` replacing `Channel<Action>`), and the
+absolute cost (a few hundred bytes per multi-microsecond operation) isn't a
+measurable tick-latency concern without a real workload profile showing
+otherwise — same "don't optimize blind" gate already applied to the
+`ArrayPool`-for-`changes` idea and the CSB+-tree backlog entry. Full writeup:
+`Docs/01-performance-principles.md` § "No closures on the hot path",
+`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/SubmissionOverheadBenchmarks.md`,
+`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/InstantTableBenchmarks.md`.
+No test changes (benchmark-only investigation) — full solution still 312/312.
+
 ## Stage 6 — Inter-Database Communication (IDC) ⏳ designed, not built, built after Stage 7+8
 
 Renamed 2026-09-13 from "Change propagation" — that name was ambiguous between
