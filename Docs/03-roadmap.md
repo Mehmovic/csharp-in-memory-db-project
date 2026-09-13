@@ -367,6 +367,92 @@ long-lived `Ops` instances across many sequential test-method calls - direct
 proof `Discard()` does what it needs to. Not yet built: schema migration
 tooling.
 
+2026-09-13: **Confirmed commit-coalescing window built and benchmarked
+(#22)** - `ColdStore.Open` gained `commitCoalescingWindow` (default
+`TimeSpan.Zero`, preserving the exact prior always-fire-immediately
+behavior). A positive value makes `EndScope` wait up to that long after a
+`Confirmed` commit before actually calling `mdbx_env_sync_ex`, letting other
+`Confirmed` calls that land in the window share the same physical sync call
+- the mechanism this doc's "Confirmed commit batching" section had already
+designed but left unbuilt, pending a real benchmark to pick a default rather
+than guessing one blind. Correctness proven directly
+(`ColdStoreTests.cs`'s two new `EndScope_WithCoalescingWindow_*` tests: two
+commits within the window return the literal same `Task<int>`; one after it
+closes gets its own).
+
+**Benchmarked, and it doesn't help on this machine - a Windows platform
+floor, not a design flaw.** A coalescing window can only ever help the one
+pattern it's built for - several `Confirmed` calls in flight without each
+being individually awaited first (a purely serial caller never has a second
+commit to piggyback with). `RhinoDB.Run.Server.Benchmark`'s new
+`ConfirmedCoalescingBenchmarks` fires 16 such concurrent writes two ways:
+against fresh keys (`ConcurrentConfirmedInserts`), dominated by the
+2026-09-13 fresh-page-write cost above (which happens inside `Commit()`,
+before any sync scheduling runs at all - no window can touch it, and
+indeed window=0/1/2/5ms all measured ~15ms with no meaningful difference);
+and against one already-settled key (`ConcurrentConfirmedUpdates`,
+isolating fsync cost specifically, since each `Commit()` there is only
+~50-130μs). The second case reveals the real limiter: window=1/2/5ms all
+landed at the identical ~15.5ms regardless of value - confirmed by directly
+probing `Task.Delay(1..5)` on this machine (measured 9-15ms actual, not
+1-5ms) to be Windows' well-known ~15.6ms default system timer tick, not a
+bug in the mechanism. Proved the mechanism itself is correct anyway by
+testing at window=20ms (above the tick): landed at ~31ms (≈2 ticks), not
+the ~1.6ms 16 independently-firing commits would cost - the batch really
+did share one fsync call.
+
+**Decision: leave the default at `TimeSpan.Zero`.** A ~15.6ms granularity
+floor is 15-300x larger than the microsecond-scale cost the window exists
+to amortize, so turning it on here is a pure net loss until a
+higher-resolution wait is built (`timeBeginPeriod(1)` or a spin-wait for
+sub-tick windows - neither attempted, out of scope for what this round was
+answering: does the mechanism work, and does it help *as-is* on this
+machine). Untested on Linux, whose kernel timers are typically much
+finer-grained - worth a dedicated look there specifically if sustained
+concurrent-`Confirmed` throughput ever becomes a real production
+bottleneck, not before. Full writeup:
+`Docs/02-architecture.md`'s "Confirmed commit batching",
+`Docs/Dev/RhinoDB.Lib/Cold/ColdStore.md`, and
+`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/ConfirmedCoalescingBenchmarks.md`.
+Full solution reverified 308/308 (2 new `ColdStoreTests.cs` cases), zero
+regressions.
+
+2026-09-13: **Fixed a real, if narrow, durability gap: fsyncing a newly-created
+cold-storage file doesn't make its directory entry durable.** Prompted by a
+LinkedIn post about the same class of bug in SpacetimeDB (create a WAL segment
+file, fsync it, but not the parent directory - a crash can leave the file's
+bytes on disk but practically unreachable). Checked RhinoDB's own exposure
+directly rather than assuming either way: grepped the entire vendored libmdbx
+source for any directory-fd fsync - found none, and libmdbx's own docs don't
+mention it either. **RhinoDB's exposure is architecturally much narrower than
+SpacetimeDB's**, though: libmdbx creates its files exactly once, on a fresh
+directory's first-ever `ColdStore.Open` - not repeatedly like a segment-
+rotating WAL - so even an unaddressed gap could only bite at that one
+first-launch moment, not on every write.
+
+Fixed anyway (small, one-time cost, real risk on the Linux servers this
+project targets in production): `ColdStore.Open` now checks whether its
+target directory had any files before opening, and if not, fsyncs the
+directory itself immediately after `mdbx_env_open` succeeds
+(`RhinoDB.Native.DirectorySync.TrySync`, new raw POSIX `open`/`fsync`/`close`
+P/Invoke bindings - libmdbx has nothing built in for this). Failure is a real
+`Result.Error` (new `DbError.ColdStorageDirectorySyncFailed()`), not a
+silent best-effort attempt - matches the "every anticipated failure surfaces
+as a Result" discipline already used for `ColdTable.Put`/`Delete`. No-op,
+always-success on Windows - this specific idiom is a POSIX/ext4-era concern
+without a clean Windows equivalent (NTFS journals directory metadata
+differently), and this dev machine's tests only ever exercise the Windows
+no-op path; the actual Linux `open`/`fsync`/`close` path is standard,
+well-understood, and not runtime-verified here - same caveat already carried
+for the rest of the native binding since Part A. One real, unrelated finding
+along the way: `env.Open()` against a target directory that doesn't exist yet
+succeeds (libmdbx creates it) - previously assumed it required the directory
+to pre-exist; caught by a test's wrong assumption, not by production code
+behaving unexpectedly. 4 new tests (`RhinoDB.Native.Test`'s
+`DirectorySyncTests.cs`, 2 new `ColdStoreTests.cs` cases). Full solution
+312/312, zero regressions. Full writeup: `Docs/02-architecture.md`'s "Cold
+storage" section and `Docs/Dev/RhinoDB.Lib/Cold/ColdStore.md`.
+
 ## Stage 6 — Inter-Database Communication (IDC) ⏳ designed, not built, built after Stage 7+8
 
 Renamed 2026-09-13 from "Change propagation" — that name was ambiguous between

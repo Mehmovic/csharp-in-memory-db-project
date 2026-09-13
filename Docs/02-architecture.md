@@ -526,6 +526,45 @@ referenced by anything. RhinoDB doesn't additionally hand-roll a second log of
 its own — libmdbx's own mechanism is the only one, so there's nothing to
 disagree with itself after a crash.
 
+**A file's own fsync doesn't cover the directory entry that makes it findable
+— `ColdStore.Open` closes that gap for its own files, once, on first creation.**
+On POSIX filesystems, fsyncing a file only guarantees *that file's contents*
+are durable, not the parent directory's record that the file exists — a crash
+right after creating a brand-new file can leave its data physically on disk but
+practically unreachable (no directory entry pointing to it), even though the
+file itself was fsynced. This is a well-documented, historically recurring
+class of database bug (SQLite, PostgreSQL, and — per a 2026-09
+investigation prompted by a LinkedIn post about it — SpacetimeDB have all hit
+it). Checked directly against RhinoDB's own vendored libmdbx source (the whole
+~1.7MB tree, not just its docs) for this specific mechanism: no `O_DIRECTORY`,
+no directory-fd `fsync`, no evidence libmdbx does this itself. **The exposure
+is architecturally much narrower here than in a segment-rotating WAL design
+like SpacetimeDB's**, though: libmdbx creates its `mdbx.dat`/`mdbx.lck` files
+exactly once, the first time `ColdStore.Open` runs against a directory that
+doesn't have them yet — every `Insert`/`Update`/`Delete`/`Confirmed` commit
+after that writes into the *same*, already-existing file via copy-on-write,
+never creating a new file. So the gap can only bite at one specific moment (a
+crash between a fresh database's very first launch and whenever the
+filesystem's own journaling happens to persist that directory entry on its
+own), not on every write.
+
+Fixed anyway, since the one-time cost of closing it is small: `ColdStore.Open`
+checks whether its target directory had any files in it *before* opening
+(`isFreshDirectory`), and if so, calls `RhinoDB.Native.DirectorySync.TrySync`
+(a raw POSIX `open`/`fsync`/`close` on the directory itself, added specifically
+for this — libmdbx exposes nothing for it) immediately after `mdbx_env_open`
+succeeds. Failure surfaces as a real `Result.Error` (`DbError
+.ColdStorageDirectorySyncFailed()`), not a silently-ignored best-effort attempt
+— if we can't confirm the newly-created files are durably findable, that's
+worth knowing at startup, not discovering after a crash months later. A no-op,
+always-success on Windows: NTFS's crash-consistency model is journaled
+differently, and this specific idiom doesn't have a Windows equivalent the way
+it does on ext4/XFS — matches this doc's stated production target (Linux
+servers). Untested on Linux from this Windows dev environment (same caveat
+already carried for the rest of the native binding — see the plan's Part A
+verification table); the mechanism (plain `open`+`fsync`+`close`) is standard
+and well-understood, but not exercised at runtime here.
+
 `Load`/`Evict`/`Peek` are distinct from `Insert`/`Delete` — they move data between
 memory and libmdbx without changing the durable data itself, so they produce no
 change-propagation entry. `Insert`/`Delete` write through to libmdbx because the
@@ -564,31 +603,61 @@ low/serial load (each `Confirmed` call arriving with idle time before the
 next), this property does nothing — every call still pays its own dedicated
 fsync, since there's never anything in flight to chain onto.
 
-Closing that gap needs a genuinely new decision, not implied by anything
+Closing that gap needed a genuinely new decision, not implied by anything
 already built: a **bounded commit-coalescing window** — after a commit
-succeeds, wait a small, configurable delay (on the order of 0-2ms) before
-actually firing `mdbx_env_sync_ex`, giving other `Confirmed` calls that arrive
-in that window a chance to pile onto the same `pendingSync` and share its
-cost — the same idea as Postgres's `commit_delay`/`commit_siblings`. This is
-deliberately two separate, orthogonal knobs, not one: **txn granularity** (one
-write txn per `Run` call, decided, staying that way — bundling unrelated
-operations into one txn would couple their atomicity, so a later operation's
-failure could roll back an earlier, already-succeeded one nobody asked to
-link) versus **sync granularity** (currently opportunistic-only; the
-coalescing window is the deliberate lever on top of it). The window's
-*existence* as a mechanism is worth deciding now, since it's genuinely hard to
-retrofit once application code has been written assuming today's latency
-profile; its *default value* stays deferred to
-[Roadmap Part H](03-roadmap.md)'s benchmark — same "don't tune blind" posture
-used elsewhere in this design — because guessing a number now without a
-measured fsync-latency/throughput curve for the actual target hardware would
-be worse than not having the knob at all. Why this is safe to defer without
-boxing anything in: the entire mechanism is already isolated to one place,
-`ColdStore.EndScope`'s sync-firing branch — adding the delay touches nothing
-in `DbExecutionLoop` or any already-shipped generated
-`Insert`/`Update`/`Delete`/`Load`/`Evict`/`Peek` code, the same containment
-that already let the original async-sync addendum land without perturbing
-anything built before it.
+succeeds, wait a small, configurable delay before actually firing
+`mdbx_env_sync_ex`, giving other `Confirmed` calls that arrive in that window
+a chance to pile onto the same pending sync and share its cost — the same
+idea as Postgres's `commit_delay`/`commit_siblings`. This is deliberately two
+separate, orthogonal knobs, not one: **txn granularity** (one write txn per
+`Run` call, decided, staying that way — bundling unrelated operations into
+one txn would couple their atomicity, so a later operation's failure could
+roll back an earlier, already-succeeded one nobody asked to link) versus
+**sync granularity** (opportunistic-only by default; the coalescing window is
+the deliberate lever on top of it). The mechanism is isolated to one place,
+`ColdStore.EndScope`'s sync-firing branch — the delay touches nothing in
+`DbExecutionLoop` or any generated `Insert`/`Update`/`Delete`/`Load`/`Evict`/
+`Peek` code, the same containment that already let the original async-sync
+addendum land without perturbing anything built before it.
+
+**Built and benchmarked 2026-09-13** — `ColdStore.Open`'s new
+`commitCoalescingWindow` parameter (default `TimeSpan.Zero`, preserving the
+exact prior always-fire-immediately behavior for every existing caller).
+Correctness proven directly (`ColdStoreTests.cs`'s
+`EndScope_WithCoalescingWindow_*` tests: two `Confirmed` commits arriving
+within the window return the literal same `Task<int>`, one arriving after it
+closes gets its own). **Whether it *helps* turned out to depend entirely on
+which cost dominates, and on this platform, at the originally-suggested
+0-2ms scale, it doesn't help at all — not because the mechanism is wrong, but
+because of a Windows platform floor**: `RhinoDB.Run.Server.Benchmark`'s new
+`ConfirmedCoalescingBenchmarks` fired 16 concurrent `Confirmed` writes (the
+only pattern coalescing can affect — a purely serial caller never has a
+second commit to piggyback with) two ways. Against fresh, never-before-
+written keys, the batch was dominated by the ~900μs-1ms fresh-page-write
+cost from the entry above `Commit()` pays regardless of Confirmed/Optimistic
+or any sync scheduling — no coalescing window can touch a cost that happens
+before it even runs, and none of window=0/1/2/5ms showed a meaningful
+difference (~15ms total either way). Against the *same*, already-settled key
+(isolating fsync cost from that confound: each `Commit()` here costs only
+~50-130μs), window=1/2/5ms all landed at the exact same ~15.5ms regardless
+of value — a dead giveaway, confirmed by directly probing `Task.Delay(1..5)`
+on this machine (measured 9-15ms actual for all of them), that plain
+`Task.Delay` cannot reliably wait for less than Windows' default ~15.6ms
+system timer tick. The mechanism itself was confirmed correct despite this —
+testing at window=20ms (above the tick) landed at ~31ms (≈2 ticks), not the
+~1.6ms 16 independently-firing commits would cost, proving the batch really
+did share one physical `mdbx_env_sync_ex` call. **Conclusion: leave the
+default at `TimeSpan.Zero` on Windows** — a ~15.6ms granularity floor is 15-
+300x larger than the microsecond-scale cost it exists to amortize, so
+enabling it here is a pure net loss until a higher-resolution wait is built
+(e.g. `timeBeginPeriod(1)` or a spin-wait for sub-tick windows, neither
+attempted — out of scope for what this round of benchmarking was answering).
+Untested on Linux, whose kernel timers are generally much finer-grained —
+worth a dedicated look there specifically if sustained concurrent-`Confirmed`
+throughput ever becomes a real bottleneck in production, not before. Full
+writeup: `Docs/03-roadmap.md`'s 2026-09-13 entry,
+`Docs/Dev/RhinoDB.Lib/Cold/ColdStore.md`, and
+`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/ConfirmedCoalescingBenchmarks.md`.
 
 **Secondary-index uniqueness is enforced only against whatever's currently
 loaded — the library does not, and today cannot, extend it into libmdbx.** A

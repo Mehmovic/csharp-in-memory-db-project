@@ -34,6 +34,32 @@ public class ColdStoreTests {
     }
 
     [Test]
+    public void Open_AgainstADirectoryThatDoesNotExistYet_CreatesItAndSucceeds() {
+        // libmdbx creates a missing target directory itself (confirmed here, not assumed) -
+        // the isFreshDirectory check (Directory.Exists(path) before Open()) still correctly
+        // identifies this as fresh and doesn't throw despite the path not existing yet.
+        var missing = Path.Combine(dir, "does-not-exist-yet");
+
+        var result = ColdStore.Open(missing);
+
+        Assert.That(result.IsOk(), Is.True);
+        result.Unwrap().Dispose();
+    }
+
+    [Test]
+    public void Open_AgainstADirectoryThatAlreadyContainsAnUnrelatedFile_StillSucceeds() {
+        // The isFreshDirectory heuristic (Docs/Dev/RhinoDB.Lib/Cold/ColdStore.md) treats
+        // "any pre-existing file" as "not fresh" and skips the one-time directory-fsync -
+        // this must not be confused for a real failure.
+        File.WriteAllText(Path.Combine(dir, "leftover.txt"), "");
+
+        var result = ColdStore.Open(dir);
+
+        Assert.That(result.IsOk(), Is.True);
+        result.Unwrap().Dispose();
+    }
+
+    [Test]
     public void OpenTable_TwoDifferentNames_WritesUnderOneNameDoNotAppearUnderTheOther() {
         using var store = ColdStore.Open(dir).Unwrap();
         var accounts = store.OpenTable<int, Account>("accounts");
@@ -260,6 +286,50 @@ public class ColdStoreTests {
         var scanned = store.ScanAll(accounts).ToList();
 
         Assert.That(scanned, Is.Empty);
+    }
+
+    // ---- Confirmed commit-coalescing window (Docs/02-architecture.md "Confirmed
+    // commit batching") - opt-in via Open's commitCoalescingWindow, default Zero
+    // preserves the exact prior one-sync-call-per-Confirmed-commit behavior
+    // (already covered by every test above that never passes this parameter). ----
+
+    [Test]
+    public void EndScope_WithCoalescingWindow_TwoConfirmedCommitsWithinTheWindow_ShareOneSyncCall() {
+        using var store = ColdStore.Open(dir, commitCoalescingWindow: TimeSpan.FromMilliseconds(200)).Unwrap();
+        var accounts = store.OpenTable<int, Account>("accounts");
+
+        store.BeginScope();
+        var txn1 = store.EnsureWriteTxn();
+        accounts.Put(txn1, 1, new Account(1, "alice@example.com", 100m));
+        var syncTask1 = store.EndScope(commit: true, forceSync: true);
+
+        store.BeginScope();
+        var txn2 = store.EnsureWriteTxn();
+        accounts.Put(txn2, 2, new Account(2, "bob@example.com", 200m));
+        var syncTask2 = store.EndScope(commit: true, forceSync: true);
+
+        Assert.That(syncTask2, Is.SameAs(syncTask1), "Two Confirmed commits arriving within the coalescing window should share exactly one physical sync call.");
+        Assert.That(syncTask1.Result, Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task EndScope_WithCoalescingWindow_ACommitAfterTheWindowElapses_GetsItsOwnSyncCall() {
+        using var store = ColdStore.Open(dir, commitCoalescingWindow: TimeSpan.FromMilliseconds(20)).Unwrap();
+        var accounts = store.OpenTable<int, Account>("accounts");
+
+        store.BeginScope();
+        var txn1 = store.EnsureWriteTxn();
+        accounts.Put(txn1, 1, new Account(1, "alice@example.com", 100m));
+        var syncTask1 = store.EndScope(commit: true, forceSync: true);
+        await syncTask1;
+
+        store.BeginScope();
+        var txn2 = store.EnsureWriteTxn();
+        accounts.Put(txn2, 2, new Account(2, "bob@example.com", 200m));
+        var syncTask2 = store.EndScope(commit: true, forceSync: true);
+
+        Assert.That(syncTask2, Is.Not.SameAs(syncTask1), "A commit arriving after the window has already closed must get its own sync call, not join a stale one.");
+        Assert.That((await syncTask2), Is.EqualTo(0));
     }
 
     [Test]
