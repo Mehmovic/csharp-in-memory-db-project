@@ -1,6 +1,6 @@
 namespace RhinoDB.Core;
 
-public readonly struct Result {
+public readonly struct Result : IResult<Result> {
     private readonly DbError? error;
 
     private Result(DbError? error) {
@@ -12,6 +12,9 @@ public readonly struct Result {
 
     static public Result Error(DbError error) => new Result(error);
     static public Result Error(Exception ex) => new Result(DbError.SystemFailure(ex));
+
+    static Result IResult<Result>.FromError(DbError error) => Error(error);
+    static Result IResult<Result>.FromException(Exception ex) => Error(ex);
 
     public DbError GetError() {
         return error ?? throw new InvalidOperationException("Result was successful, there is no exception.");

@@ -2,7 +2,7 @@
 <html lang='en'>
 <head>
 <meta charset='utf-8' />
-<title>RhinoDB.Run.Server.Benchmark.Benchmarks.PersistentTableBenchmarks-20260913-170033</title>
+<title>RhinoDB.Run.Server.Benchmark.Benchmarks.PersistentTableBenchmarks-20260913-214028</title>
 
 <style type="text/css">
 	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
@@ -16,28 +16,28 @@
 BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.9445)
 Unknown processor
 .NET SDK 11.0.100-rc.1.26425.128
-  [Host]   : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
-  ShortRun : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  [Host] : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  Dry    : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
 </code></pre>
-<pre><code>Job=ShortRun  IterationCount=3  LaunchCount=1  
-WarmupCount=3  
+<pre><code>Job=Dry  IterationCount=1  LaunchCount=1  
+RunStrategy=ColdStart  UnrollFactor=1  WarmupCount=1  
 </code></pre>
 
 <table>
-<thead><tr><th>Method    </th><th>RecordCount</th><th>Mean  </th><th>Error</th><th>StdDev</th><th>Gen0</th><th>Allocated</th>
+<thead><tr><th>Method    </th><th>RecordCount</th><th>Mean </th><th>Error</th><th>Allocated</th>
 </tr>
-</thead><tbody><tr><td>Get</td><td>100</td><td>2.920 &mu;s</td><td>0.2735 &mu;s</td><td>0.0150 &mu;s</td><td>0.0534</td><td>354 B</td>
-</tr><tr><td>InsertOptimistic</td><td>100</td><td>1,217.253 &mu;s</td><td>75.3890 &mu;s</td><td>4.1323 &mu;s</td><td>-</td><td>608 B</td>
-</tr><tr><td>InsertConfirmed</td><td>100</td><td>1,200.776 &mu;s</td><td>151.8593 &mu;s</td><td>8.3239 &mu;s</td><td>-</td><td>1049 B</td>
-</tr><tr><td>Update</td><td>100</td><td>132.052 &mu;s</td><td>13.0477 &mu;s</td><td>0.7152 &mu;s</td><td>-</td><td>551 B</td>
-</tr><tr><td>Get</td><td>10000</td><td>2.876 &mu;s</td><td>0.0672 &mu;s</td><td>0.0037 &mu;s</td><td>0.0534</td><td>354 B</td>
-</tr><tr><td>InsertOptimistic</td><td>10000</td><td>1,038.745 &mu;s</td><td>125.6884 &mu;s</td><td>6.8894 &mu;s</td><td>-</td><td>592 B</td>
-</tr><tr><td>InsertConfirmed</td><td>10000</td><td>1,042.676 &mu;s</td><td>211.7592 &mu;s</td><td>11.6072 &mu;s</td><td>-</td><td>921 B</td>
-</tr><tr><td>Update</td><td>10000</td><td>52.777 &mu;s</td><td>14.9492 &mu;s</td><td>0.8194 &mu;s</td><td>-</td><td>552 B</td>
-</tr><tr><td>Get</td><td>1000000</td><td>2.769 &mu;s</td><td>0.3386 &mu;s</td><td>0.0186 &mu;s</td><td>0.0553</td><td>353 B</td>
-</tr><tr><td>InsertOptimistic</td><td>1000000</td><td>139.912 &mu;s</td><td>95.2971 &mu;s</td><td>5.2236 &mu;s</td><td>-</td><td>592 B</td>
-</tr><tr><td>InsertConfirmed</td><td>1000000</td><td>2,429.098 &mu;s</td><td>101.3272 &mu;s</td><td>5.5541 &mu;s</td><td>-</td><td>923 B</td>
-</tr><tr><td>Update</td><td>1000000</td><td>83.210 &mu;s</td><td>332.8139 &mu;s</td><td>18.2427 &mu;s</td><td>-</td><td>552 B</td>
+</thead><tbody><tr><td>Get</td><td>100</td><td>3,562.3 &mu;s</td><td>NA</td><td>-</td>
+</tr><tr><td>InsertOptimistic</td><td>100</td><td>2,639.7 &mu;s</td><td>NA</td><td>-</td>
+</tr><tr><td>InsertConfirmed</td><td>100</td><td>4,600.0 &mu;s</td><td>NA</td><td>-</td>
+</tr><tr><td>Update</td><td>100</td><td>2,824.8 &mu;s</td><td>NA</td><td>-</td>
+</tr><tr><td>Get</td><td>10000</td><td>3,536.7 &mu;s</td><td>NA</td><td>-</td>
+</tr><tr><td>InsertOptimistic</td><td>10000</td><td>3,578.4 &mu;s</td><td>NA</td><td>-</td>
+</tr><tr><td>InsertConfirmed</td><td>10000</td><td>4,973.9 &mu;s</td><td>NA</td><td>-</td>
+</tr><tr><td>Update</td><td>10000</td><td>4,077.6 &mu;s</td><td>NA</td><td>-</td>
+</tr><tr><td>Get</td><td>1000000</td><td>2,952.7 &mu;s</td><td>NA</td><td>-</td>
+</tr><tr><td>InsertOptimistic</td><td>1000000</td><td>995.7 &mu;s</td><td>NA</td><td>-</td>
+</tr><tr><td>InsertConfirmed</td><td>1000000</td><td>31,947.8 &mu;s</td><td>NA</td><td>-</td>
+</tr><tr><td>Update</td><td>1000000</td><td>1,609.1 &mu;s</td><td>NA</td><td>-</td>
 </tr></tbody></table>
 </body>
 </html>

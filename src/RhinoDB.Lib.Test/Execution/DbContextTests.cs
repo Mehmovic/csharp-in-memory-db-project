@@ -102,7 +102,7 @@ public class DbContextTests {
         var tasks = new Task[n];
         for (var i = 0; i < n; i++) {
             var captured = i;
-            tasks[i] = ctx.Run(c => { log.Add(captured); return Result.Ok(); });
+            tasks[i] = ctx.Run(c => { log.Add(captured); return Result.Ok(); }).AsTask();
         }
 
         await Task.WhenAll(tasks);
@@ -125,7 +125,7 @@ public class DbContextTests {
         var producerTasks = Enumerable.Range(0, producers).Select(_ => Task.Run(async () => {
             var tasks = new Task[perProducer];
             for (var i = 0; i < perProducer; i++) {
-                tasks[i] = ctx.Run(c => { log.Add(1); return Result.Ok(); });
+                tasks[i] = ctx.Run(c => { log.Add(1); return Result.Ok(); }).AsTask();
             }
             await Task.WhenAll(tasks);
         })).ToArray();
@@ -238,8 +238,8 @@ public class DbContextTests {
         // Enqueue (synchronously, inside Run) an unrelated call before the "caller's"
         // second call gets enqueued - proving nothing pins these two calls adjacent
         // to each other just because they came from the same logical caller.
-        var interloper = ctx.Run(c => { log.Add("interloper"); return Result.Ok(); });
-        var second = ctx.Run(c => { log.Add("second"); return Result.Ok(); });
+        var interloper = ctx.Run(c => { log.Add("interloper"); return Result.Ok(); }).AsTask();
+        var second = ctx.Run(c => { log.Add("second"); return Result.Ok(); }).AsTask();
 
         await Task.WhenAll(interloper, second);
 

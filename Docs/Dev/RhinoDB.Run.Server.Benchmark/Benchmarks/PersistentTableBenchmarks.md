@@ -53,3 +53,10 @@ around: a real ever-growing, append-only table has the same property, so
 machine like this one, not an artifact to be warmed away. Kept as legitimate
 methodology (a real long-running database's file is never actually cold
 either) rather than removed once its actual purpose was understood.
+
+## `Setup` — `.AsTask()` before `.GetAwaiter().GetResult()` (2026-09-14)
+
+Required once `Run` switched to returning `ValueTask<Result>` - `ValueTask<T>`
+does not support a blocking synchronous wait the way `Task<T>.GetAwaiter()
+.GetResult()` does, and calling it directly right after enqueueing throws
+`InvalidOperationException`. See `Docs/Dev/RhinoDB.Lib/Execution/PooledOperation.md`.

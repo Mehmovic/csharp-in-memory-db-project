@@ -2,7 +2,7 @@
 <html lang='en'>
 <head>
 <meta charset='utf-8' />
-<title>RhinoDB.Run.Server.Benchmark.Benchmarks.ConfirmedCoalescingBenchmarks-20260913-172945</title>
+<title>RhinoDB.Run.Server.Benchmark.Benchmarks.ConfirmedCoalescingBenchmarks-20260913-214026</title>
 
 <style type="text/css">
 	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
@@ -16,18 +16,20 @@
 BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.9445)
 Unknown processor
 .NET SDK 11.0.100-rc.1.26425.128
-  [Host]   : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
-  ShortRun : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  [Host] : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  Dry    : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
 </code></pre>
-<pre><code>Job=ShortRun  IterationCount=3  LaunchCount=1  
-WarmupCount=3  
+<pre><code>Job=Dry  IterationCount=1  LaunchCount=1  
+RunStrategy=ColdStart  UnrollFactor=1  WarmupCount=1  
 </code></pre>
 
 <table>
-<thead><tr><th>Method              </th><th>CommitCoalescingWindowMs</th><th>Mean</th><th>Error</th><th>StdDev</th><th>Allocated</th>
+<thead><tr><th>Method              </th><th>CommitCoalescingWindowMs</th><th>Mean</th><th>Error</th><th>Allocated</th>
 </tr>
-</thead><tbody><tr><td>ConcurrentConfirmedUpdates</td><td>0</td><td>1.775 ms</td><td>7.546 ms</td><td>0.4136 ms</td><td>14.49 KB</td>
-</tr><tr><td>ConcurrentConfirmedUpdates</td><td>20</td><td>31.087 ms</td><td>3.100 ms</td><td>0.1699 ms</td><td>11.19 KB</td>
+</thead><tbody><tr><td>ConcurrentConfirmedInserts</td><td>0</td><td>9.739 ms</td><td>NA</td><td>14.39 KB</td>
+</tr><tr><td>ConcurrentConfirmedUpdates</td><td>0</td><td>13.015 ms</td><td>NA</td><td>13.46 KB</td>
+</tr><tr><td>ConcurrentConfirmedInserts</td><td>20</td><td>34.286 ms</td><td>NA</td><td>10.09 KB</td>
+</tr><tr><td>ConcurrentConfirmedUpdates</td><td>20</td><td>35.244 ms</td><td>NA</td><td>10.21 KB</td>
 </tr></tbody></table>
 </body>
 </html>

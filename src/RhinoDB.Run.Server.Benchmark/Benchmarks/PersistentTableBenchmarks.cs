@@ -46,7 +46,7 @@ public class PersistentTableBenchmarks {
             db.Run((ctx, tx) => {
                 for (var k = start; k > end; k--) tx.PersistentWidget.Insert(new PersistentWidget(k, k));
                 return Result.Ok();
-            }, PropagationMode.Confirmed).GetAwaiter().GetResult();
+            }, PropagationMode.Confirmed).AsTask().GetAwaiter().GetResult();
         }
 
         var seeded = 0;
@@ -56,7 +56,7 @@ public class PersistentTableBenchmarks {
             db.Run((ctx, tx) => {
                 for (var i = start; i < end; i++) tx.PersistentWidget.Insert(new PersistentWidget(i, i));
                 return Result.Ok();
-            }, PropagationMode.Optimistic).GetAwaiter().GetResult();
+            }, PropagationMode.Optimistic).AsTask().GetAwaiter().GetResult();
             seeded = end;
         }
     }
@@ -68,22 +68,22 @@ public class PersistentTableBenchmarks {
     }
 
     [Benchmark]
-    public Task<Result<PersistentWidget>> Get() =>
+    public ValueTask<Result<PersistentWidget>> Get() =>
         db.Run<PersistentWidget>((ctx, tx) => tx.PersistentWidget.Get(lookupKey), PropagationMode.Optimistic);
 
     [Benchmark]
-    public Task<Result> InsertOptimistic() {
+    public ValueTask<Result> InsertOptimistic() {
         var id = ++nextInsertId;
         return db.Run((ctx, tx) => { tx.PersistentWidget.Insert(new PersistentWidget(id, id)); return Result.Ok(); }, PropagationMode.Optimistic);
     }
 
     [Benchmark]
-    public Task<Result> InsertConfirmed() {
+    public ValueTask<Result> InsertConfirmed() {
         var id = ++nextInsertId;
         return db.Run((ctx, tx) => { tx.PersistentWidget.Insert(new PersistentWidget(id, id)); return Result.Ok(); }, PropagationMode.Confirmed);
     }
 
     [Benchmark]
-    public Task<Result> Update() =>
+    public ValueTask<Result> Update() =>
         db.Run((ctx, tx) => { tx.PersistentWidget.Update(lookupKey, new PersistentWidget(lookupKey, ++nextInsertId)); return Result.Ok(); }, PropagationMode.Optimistic);
 }

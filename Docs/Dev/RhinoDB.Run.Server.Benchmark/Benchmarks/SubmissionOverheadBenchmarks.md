@@ -23,10 +23,29 @@ closure (which captures `context`/`operation`/`args`/`mode`/`tcs` - more
 fields than this proxy, so its real cost is somewhat higher) costs regardless
 of what the caller's own lambda looks like. Measured: 80 B.
 
-Together these two account for most of the ~270-300 B floor
-`InstantTableBenchmarks`' `*Args` variants still show even with a fully
-`static`, non-capturing caller lambda - both are structural to the current
-`Task<Result>` + `Channel<Action>` design, not incidental waste. See
-`Docs/01-performance-principles.md`'s 2026-09-14 entry for the full decision
-(accepted as the contract for now, not pursued further without a real
-workload profile showing it matters).
+Together these two accounted for most of the ~270-300 B floor
+`InstantTableBenchmarks`' `*Args` variants still showed even with a fully
+`static`, non-capturing caller lambda - both were structural to the *old*
+`Task<Result>` + `Channel<Action>` design, not incidental waste. **Superseded
+the same day** by the pooled `ValueTask`/`IValueTaskSource` redesign
+(`Docs/Dev/RhinoDB.Lib/Execution/PooledOperation.md`) - both numbers stay
+here as the historical baseline the redesign was measured against, not
+deleted once the question was answered.
+
+## `PooledRunNoOp`
+
+Added 2026-09-14, the equivalent isolation benchmark for the *new*
+mechanism - a real `db.Run(static (ctx, tx) => Result.Ok(), ...)` against a
+freshly-constructed `InstantBenchDb`, exercising the genuine end-to-end path
+(cross-thread channel write, pooled rent, actual await, no table work)
+rather than a synthetic construct - deliberately not built via direct access
+to the `internal` `PooledOperation`/`Channel<IExecutionWorkItem<TTx>>` types
+(which would need a new `InternalsVisibleTo` grant this project doesn't
+otherwise need), since the real public `Run` path already exercises the
+exact same machinery a genuine caller would. Measured: **80 B** - lower than
+`BareTaskCompletionSource`'s 88 B alone, i.e. the *entire* new mechanism
+costs less than just one component of the old one did. The residual is very
+likely `ExecutionContext` flow across the cross-thread continuation (a cost
+intrinsic to any cross-thread `await`, not specific to this design) - not
+decomposed further without real profiling tools (ETW/`dotnet-trace`), same
+"don't optimize blind" gate this project applies consistently elsewhere.

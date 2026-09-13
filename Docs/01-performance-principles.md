@@ -76,59 +76,101 @@ Two places this bit us, both caught in design review rather than after being bui
   never a closure to eliminate from the call itself once the shape stopped
   routing through a delegate at all.
 
-**A third case, resolved 2026-09-14 by measuring rather than guessing further:
-`DbContext.Run`'s own entry point allocates a small, bounded, and now-accepted
-amount per call — this is the contract, not an unclosed gap.** After Milestone
-5's long-lived-`Ops` fix (above), `RhinoDB.Run.Server.Benchmark`'s
+**A third case, first measured 2026-09-14, then fully resolved the same day
+once the user decided to build the fix rather than accept the floor.** After
+Milestone 5's long-lived-`Ops` fix (above), `RhinoDB.Run.Server.Benchmark`'s
 `InstantTableBenchmarks` still showed ~353 B (`Get`) to ~362 B (`Insert`) per
 call. Decomposed with two isolation benchmarks rather than assumed:
 `SubmissionOverheadBenchmarks.BareTaskCompletionSource` (a bare `new
 TaskCompletionSource<Result>(...)` plus its `Task<Result>`, nothing else) came
 back at **88 B**; `BareClosureOverEnumAndInt` (a minimal capturing closure over
-two primitives) came back at **80 B**. Between them, those two — both
-structural to the current single-writer channel design, not incidental bugs —
-account for most of the floor:
+two primitives) came back at **80 B**. Between them, those two accounted for
+most of the floor — `TaskCompletionSource<Result>`+`Task<Result>`, required by
+`Run`'s old `Task<Result>`-returning contract, and `DbExecutionLoop.Enqueue`'s
+own internal closure (capturing `context`/`operation`/`args`/`mode`/`tcs` to
+hand to `channel.Writer.TryWrite`), inherent to "queue a closure onto a
+channel" regardless of what the caller's own lambda looked like. A same-day
+initial pass confirmed one *free* partial fix: switching call sites to the
+already-existing `Run<TArgs>` overload with a `static` lambda (avoiding the
+*caller's* own closure) dropped `Get` 353 B → 297 B, `Insert` 361 B → 281 B,
+`Update` 321 B → 273 B — real, but still leaving both structural costs above
+untouched.
 
-- **`TaskCompletionSource<Result>` + its `Task<Result>` (~88 B)**: required by
-  `Run`'s public `Task<Result>`-returning contract. Removing this needs a
-  `ValueTask` + pooled `IValueTaskSource<Result>` redesign — a real, known
-  high-performance .NET pattern (the same one Kestrel/`System.IO.Pipelines`
-  use), but a genuinely bigger, separately-scoped change, not a small fix.
-- **`DbExecutionLoop.Enqueue`'s own internal closure (~100-150 B for its 4-5
-  captures — `context`/`operation`/`args`/`mode`/`tcs`)**: the `Action` handed
-  to `channel.Writer.TryWrite` must capture all of these per call regardless of
-  what the *caller's* lambda looks like — this is inherent to "queue a closure
-  onto a channel," not something a caller-side fix can touch. Removing it needs
-  `Channel<Action>` restructured into `Channel<TWorkItem>` where `TWorkItem` is
-  a struct holding the same fields by value — a real design (a `Channel<T>`
-  with a struct `T` doesn't allocate per enqueued item, the same "amortized,
-  chunked" reasoning already used for `DenseArray<T>`), but again bigger than
-  a one-line fix, and untried.
+**Built and shipped the same day: a pooled `IValueTaskSource<TValue>`
+completion mechanism plus a pooled-work-item channel, replacing
+`TaskCompletionSource`/`Channel<Action>` entirely.** One generic
+`PooledOperation<TTx,TValue,TArgs> : IValueTaskSource<TValue>,
+IExecutionWorkItem<TTx>` (`RhinoDB.Lib/Execution/PooledOperation.cs`) covers
+all four `Run`/`Enqueue` overload shapes via a new `IResult<TSelf>` interface
+in `RhinoDB.Core` (`IsOk()` + static-abstract `FromError`/`FromException`,
+implemented by both `Result` and `Result<T>`) — confirmed boxing-free
+(`constrained.callvirt` for the instance member, direct static dispatch for
+the static-abstract ones, the same mechanism .NET's own `INumber<T>` uses) and
+AOT-safe (value-type generics are already fully specialized under JIT; static
+abstract members were explicitly designed for AOT/trimming). Each closed
+generic instantiation owns its own `static ConcurrentQueue<PooledOperation<...>>`
+free-list — rent on `Enqueue`, configure fields, capture the
+`ManualResetValueTaskSourceCore<TValue>`'s version token *before* writing to
+the channel (writing first would let the reader recycle the item to an
+unrelated caller before the token is read), null the `context`/`operation`
+references and return to the pool inside `GetResult` (only after the awaiter
+has actually consumed the value — a fire-and-forget `Run` call that's never
+awaited simply becomes ordinary garbage, same as it always was). The channel
+itself became `Channel<IExecutionWorkItem<TTx>>` — a cheap interface reference
+to an already-rented, reused object, not a fresh closure; precisely *not* a
+literal value-type channel element, since a struct-by-value element couldn't
+support `IValueTaskSource`'s in-place completion mutation. `Run`/`RunConfirmed`
+(`DbContext<TTx>` and non-generic `DbContext`, 16 methods total) now return
+`ValueTask<Result>`/`ValueTask<Result<T>>` — a deliberate, real breaking API
+change from `Task`, needed because keeping `Task` as the public type while
+pooling internally would force a real `Task` allocation via `.AsTask()` on
+every call, defeating the entire point.
 
-**What *is* a free, already-available fix, and was confirmed by measurement**:
-a *caller's own* capturing closure is avoidable today, with zero engine
-changes, via the `Run<TArgs>`/`Run<T,TArgs>` overloads that already exist
-specifically for this (`ctx.Run(static (db, tx, args) => ..., args)`).
-Benchmarked side by side (`GetArgs`/`InsertArgs`/`UpdateArgs` next to
-`Get`/`Insert`/`Update`): switching to a `static` lambda + explicit `args`
-dropped `Get` 353 B → 297 B, `Insert` 361 B → 281 B, `Update` 321 B → 273 B —
-a genuine, measured 50-80 B (15-22%) reduction, matching this principle's own
-guidance that a `static` non-capturing lambda costs nothing to construct.
-**Recommendation for any RhinoDB-consuming code with per-call captured state
-(an id, a value, a key)**: prefer `Run<TArgs>` with a `static` lambda over the
-plain `Run` overload with an implicit capture — cheap to apply, no downside.
+**Two real, non-obvious correctness gotchas hit and fixed during
+implementation, both concrete illustrations of `ValueTask`'s contract being
+genuinely different from `Task`'s, not just a rename:**
+- `ValueTask<T>` is **single-consumption** — awaiting or calling
+  `.GetAwaiter().GetResult()` a second time on the same `ValueTask<T>` throws
+  `InvalidOperationException`, unlike `Task<T>`, which happily returns the
+  same cached value to as many callers as ask. Proven directly by
+  `PooledOperationTests.AfterConsumption_ASecondConsumptionOfTheSameValueTaskThrows`.
+  **Any code storing a `ValueTask`, awaiting it more than once, or checking
+  `.IsCompleted` before consuming it, must stop — await it (or call
+  `.AsTask()` first) exactly once.**
+- **`ValueTask<T>` does not support a blocking synchronous wait the way
+  `Task<T>` does.** `Task<T>.GetAwaiter().GetResult()` blocks the calling
+  thread until the task completes if it isn't done yet; a bare
+  `ManualResetValueTaskSourceCore<T>`-backed `ValueTask<T>`'s `GetResult`
+  does **not** block — it assumes the proper `await`/`OnCompleted`
+  coordination already happened, and throws `InvalidOperationException:
+  Operation is not valid due to the current state of the object` if called
+  too early. This broke three benchmark `[GlobalSetup]` methods
+  (`InstantTableBenchmarks`, `PersistentTableBenchmarks`,
+  `ConfirmedCoalescingBenchmarks`) that did
+  `db.Run(...).GetAwaiter().GetResult();` synchronously right after
+  enqueueing — invisible to the whole test suite beforehand, since every test
+  either used proper `await` or drove the operation to completion before
+  consuming it. Fixed by inserting `.AsTask()` before the blocking wait at
+  each site (`.AsTask()` produces a real `Task<T>`, which does support
+  blocking wait) — **the same fix any RhinoDB-consuming code needing a
+  genuine synchronous block on `Run`'s result must apply.**
 
-**Decision: the remaining ~270-300 B floor is accepted as the contract, not
-pursued further right now.** In absolute terms this is small — Gen0 collection
-of a few hundred bytes per multi-microsecond operation is not a measurable
-tick-latency concern, and both remaining structural costs would need their own
-dedicated, riskier redesigns to remove. Matches this project's standing
-"don't optimize blind" posture (the same gate already applied to the
-`ArrayPool`-for-`changes` idea and the CSB+-tree backlog entry): revisit if
-Stage 9+'s actual game workload profiling ever shows this floor mattering in
-practice, not before. `SubmissionOverheadBenchmarks.cs` and the `*Args`
-comparison benchmarks stay in the benchmark project as living measurements,
-not deleted once the question was answered.
+**Measured result** (`SubmissionOverheadBenchmarks`, `InstantTableBenchmarks`,
+same methodology as the original decomposition): `PooledRunNoOp` (the new
+mechanism's full real end-to-end submission cost — cross-thread channel write,
+pooled rent, actual await, no table work) landed at **80 B**, lower than the
+*old* mechanism's bare `TaskCompletionSource` component alone (88 B).
+`Get` 353 B → **152 B**, `Insert` 361 B → **176 B**, `Update` 321 B → **136 B**,
+`GetArgs` 297 B → **96 B**, `InsertArgs` 281 B → **96 B**, `UpdateArgs`
+273 B → **80 B** — a 50-71% reduction across the board, flat across all three
+`RecordCount` tiers, wall-clock time unchanged (~3-3.5 μs). The residual
+~80-96 B floor is very likely `ExecutionContext` flow across the cross-thread
+continuation (a cost intrinsic to *any* cross-thread `await`, `Task`-based or
+not — not attributable to this design specifically) — not decomposed further
+without real profiling tools, matching this project's own "don't optimize
+blind" posture applied consistently throughout. `TableGenerator.cs` required
+zero changes — `CreateTransaction()`'s cached-singleton behavior was already
+untouched by this redesign, confirmed by a zero-diff check at the end.
 
 ## 4. No LINQ on the hot path
 

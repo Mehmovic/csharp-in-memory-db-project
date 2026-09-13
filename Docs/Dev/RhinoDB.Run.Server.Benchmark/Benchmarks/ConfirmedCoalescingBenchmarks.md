@@ -5,6 +5,16 @@ Added 2026-09-13 to measure `ColdStore`'s commit-coalescing window
 and `Docs/03-roadmap.md`'s 2026-09-13 entry for the full result - summary
 below.
 
+**2026-09-14**: `Setup`'s two seeding loops needed `.AsTask()` before
+`.GetAwaiter().GetResult()`, and both `[Benchmark]` methods needed `.AsTask()`
+inside their `Task[]` fan-out loops, once `Run` switched to returning
+`ValueTask<Result>` - see `Docs/Dev/RhinoDB.Lib/Execution/PooledOperation.md`
+for why (`ValueTask` doesn't support blocking synchronous wait, and
+`Task.WhenAll` needs real `Task`s). This project is itself the concrete proof
+that the new `ValueTask`-returning API still supports genuine concurrent
+fan-out at a one-line-per-site cost, exactly the scenario it was designed to
+keep supporting.
+
 ## `ConcurrentConfirmedInserts`
 
 Fires several `Confirmed` writes back-to-back without awaiting each one

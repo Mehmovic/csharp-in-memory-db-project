@@ -1,21 +1,36 @@
 # `src/RhinoDB.Lib/Execution/DbExecutionLoop.cs` — dev notes
 
-## Each `Enqueue` overload — `txCreated` flag before calling `tx.Discard()`
+## Rewritten 2026-09-14 — pooled `ValueTask`/`IValueTaskSource` execution engine
 
-`Discard()` (2026-09-13, added alongside making generated `Ops`/`Transaction`
-instances long-lived per database instead of freshly constructed every
-`Run` call) resets a table's staged-but-unapplied `changes`/`Dirty` state.
-It must run whenever an operation ends in error, since `Apply()`'s own
-`changes.Clear()` only happens on the success path, and the transaction
-object is no longer discarded after each call the way it used to be - a
-long-lived `Ops` instance that never gets its stale staged changes cleared
-would leak them into the *next* operation that reuses it.
+Previously this file held four near-identical ~34-line `Enqueue` overloads,
+each building its own `TaskCompletionSource<Result>`/`Result<T>` and writing
+a hand-rolled closure `Action` to `Channel<Action>` (the `txCreated`-flag/
+`Discard()`-on-error exception-safety logic, and the `Complete`/`Finalize`
+durability-sync-result-folding logic, were duplicated four times over). All
+of that moved into the single generic `PooledOperation<TTx,TValue,TArgs>`
+(`Docs/Dev/RhinoDB.Lib/Execution/PooledOperation.md`) - see that file for the
+`txCreated`/`Discard()` and `Complete`/`Finalize` rationale, both reproduced
+there verbatim, not simplified away during the collapse from four copies to
+one.
 
-`CreateTransaction()` is still called inside the `try` (not hoisted above
-it) even though the generated override is now just `=> cachedTransaction;`
-(a field read that can't realistically throw) - the `txCreated` flag
-preserves the exact original exception-safety contract regardless: if
-`CreateTransaction()` itself somehow threw, `Discard()` is correctly skipped
-(there's nothing to discard) and the exception is still caught and reported
-as a normal `Result.Error`, exactly as before this change, rather than
-tearing down `RunLoop`'s task.
+What's left here is now genuinely small: the channel changed from
+`Channel<Action>` to `Channel<IExecutionWorkItem<TTx>>` (same
+`UnboundedChannelOptions { SingleReader = true, SingleWriter = false }`,
+unchanged - this is a property of `Channel<T>` itself, not of what `T` is),
+and each `Enqueue` overload is now a one-line forward to
+`PooledOperation<TTx,TValue,TArgs>.Enqueue(...)`. The two no-`TArgs`
+overloads (`Enqueue`/`Enqueue<T>`) forward through the *with-args* pooled
+shape using the caller's own delegate type as `TArgs`, via a cached `static`
+trampoline (`static (ctx, tx, op) => op(ctx, tx)`) rather than a second
+pooled type or a `Unit` sentinel - non-capturing, so per
+`Docs/01-performance-principles.md` §3 it's allocated once per closed
+`(TTx, TValue)` shape and reused forever, not once per call.
+
+Full measured result, design rationale (why the channel element is a pooled
+*reference*, not a literal value-type struct - `IValueTaskSource` completion
+must mutate the same instance the caller is awaiting, which a struct-by-value
+element can't support), and the two real `ValueTask`-vs-`Task` contract
+gotchas hit while wiring this up (single-consumption; no blocking synchronous
+wait) are in `Docs/01-performance-principles.md` § "No closures on the hot
+path" and `Docs/03-roadmap.md`'s 2026-09-14 entry - this file's own notes stay
+narrowly about what physically changed in `DbExecutionLoop.cs` itself.

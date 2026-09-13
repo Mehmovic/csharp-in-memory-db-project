@@ -10,7 +10,8 @@ Job=ShortRun  IterationCount=3  LaunchCount=1
 WarmupCount=3  
 
 ```
-| Method                    | Mean      | Error     | StdDev    | Gen0   | Allocated |
-|-------------------------- |----------:|----------:|----------:|-------:|----------:|
-| BareTaskCompletionSource  | 20.766 ns |  3.656 ns | 0.2004 ns | 0.0140 |      88 B |
-| BareClosureOverEnumAndInt |  6.396 ns | 17.703 ns | 0.9704 ns | 0.0127 |      80 B |
+| Method                    | Mean         | Error         | StdDev     | Gen0   | Allocated |
+|-------------------------- |-------------:|--------------:|-----------:|-------:|----------:|
+| BareTaskCompletionSource  |    21.270 ns |     1.3544 ns |  0.0742 ns | 0.0140 |      88 B |
+| BareClosureOverEnumAndInt |     5.990 ns |     0.5155 ns |  0.0283 ns | 0.0127 |      80 B |
+| PooledRunNoOp             | 2,946.242 ns | 1,380.4400 ns | 75.6666 ns | 0.0076 |      80 B |

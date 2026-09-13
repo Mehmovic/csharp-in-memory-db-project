@@ -31,37 +31,37 @@ public class InstantTableBenchmarks {
             db.Run((ctx, tx) => {
                 for (var i = start; i < end; i++) tx.InstantWidget.Insert(new InstantWidget(i, i));
                 return Result.Ok();
-            }, PropagationMode.Optimistic).GetAwaiter().GetResult();
+            }, PropagationMode.Optimistic).AsTask().GetAwaiter().GetResult();
             seeded = end;
         }
     }
 
     [Benchmark]
-    public Task<Result<InstantWidget>> Get() =>
+    public ValueTask<Result<InstantWidget>> Get() =>
         db.Run<InstantWidget>((ctx, tx) => tx.InstantWidget.Get(lookupKey), PropagationMode.Optimistic);
 
     [Benchmark]
-    public Task<Result> Insert() {
+    public ValueTask<Result> Insert() {
         var id = ++nextInsertId;
         return db.Run((ctx, tx) => { tx.InstantWidget.Insert(new InstantWidget(id, id)); return Result.Ok(); }, PropagationMode.Optimistic);
     }
 
     [Benchmark]
-    public Task<Result> Update() =>
+    public ValueTask<Result> Update() =>
         db.Run((ctx, tx) => { tx.InstantWidget.Update(lookupKey, new InstantWidget(lookupKey, ++nextInsertId)); return Result.Ok(); }, PropagationMode.Optimistic);
 
     [Benchmark]
-    public Task<Result<InstantWidget>> GetArgs() =>
+    public ValueTask<Result<InstantWidget>> GetArgs() =>
         db.Run<InstantWidget, int>(static (ctx, tx, key) => tx.InstantWidget.Get(key), lookupKey, PropagationMode.Optimistic);
 
     [Benchmark]
-    public Task<Result> InsertArgs() {
+    public ValueTask<Result> InsertArgs() {
         var id = ++nextInsertId;
         return db.Run(static (ctx, tx, i) => { tx.InstantWidget.Insert(new InstantWidget(i, i)); return Result.Ok(); }, id, PropagationMode.Optimistic);
     }
 
     [Benchmark]
-    public Task<Result> UpdateArgs() {
+    public ValueTask<Result> UpdateArgs() {
         var value = ++nextInsertId;
         return db.Run(static (ctx, tx, args) => { tx.InstantWidget.Update(args.Item1, new InstantWidget(args.Item1, args.Item2)); return Result.Ok(); }, (lookupKey, value), PropagationMode.Optimistic);
     }

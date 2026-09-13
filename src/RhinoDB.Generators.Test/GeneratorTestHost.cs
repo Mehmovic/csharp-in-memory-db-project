@@ -83,7 +83,12 @@ static internal class GeneratorTestHost {
         var delegateType = typeof(Func<,,>).MakeGenericType(dbContextType, txType, typeof(Result));
         var operation = Expression.Lambda(delegateType, Expression.Convert(invokeBody, typeof(Result)), ctxParam, txParam).Compile();
 
-        return runMethod.Invoke(db, [operation, mode])!;
+        // Run now returns ValueTask<Result>, not Task<Result> - every call site here casts the
+        // result to (Task<Result>), so convert via AsTask() once, in this one reflection-based
+        // helper, rather than touching every one of RunTransactional's ~14 consuming test files.
+        var raw = runMethod.Invoke(db, [operation, mode])!;
+        var asTask = raw.GetType().GetMethod(nameof(ValueTask<Result>.AsTask))!;
+        return asTask.Invoke(raw, null)!;
     }
 
     static private ImmutableArray<MetadataReference> BuildReferences() {

@@ -468,19 +468,77 @@ Confirmed one *avoidable* piece by measurement too: switching
 `Run<TArgs>` overload with a `static` lambda (new `GetArgs`/`InsertArgs`/
 `UpdateArgs` benchmarks, kept permanently for comparison) dropped allocation
 353→297 B, 361→281 B, 321→273 B — a real, zero-engine-change 15-22%
-reduction, now the recommended calling convention for any call site with
-per-call captured state. **Decision: the remaining ~270-300 B floor is
-accepted as the contract** — removing it needs two separate, bigger
-redesigns (pooled `ValueTask`/`IValueTaskSource` completion, and a
-struct-based `Channel<TWorkItem>` replacing `Channel<Action>`), and the
-absolute cost (a few hundred bytes per multi-microsecond operation) isn't a
-measurable tick-latency concern without a real workload profile showing
-otherwise — same "don't optimize blind" gate already applied to the
-`ArrayPool`-for-`changes` idea and the CSB+-tree backlog entry. Full writeup:
-`Docs/01-performance-principles.md` § "No closures on the hot path",
-`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/SubmissionOverheadBenchmarks.md`,
-`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/InstantTableBenchmarks.md`.
-No test changes (benchmark-only investigation) — full solution still 312/312.
+reduction. Initially decided to accept the remaining ~270-300 B floor as the
+contract rather than pursue the two bigger redesigns needed to remove it —
+**superseded the same day** once the user chose to build the redesign before
+starting Stage 7+8, on the reasoning that networking/IDC are separate
+concerns from the DB engine and shouldn't sit on top of an engine with a
+known, documented, unresolved allocation floor.
+
+2026-09-14: **Built the pooled `ValueTask`/`IValueTaskSource` execution engine
++ pooled-work-item channel, closing the floor above for real.** Planned in
+five stages (`dotnet test` green gate between each, matching this project's
+standing discipline), all landed the same day:
+
+1. `IResult<TSelf>` added to `RhinoDB.Core` (`IsOk()` + static-abstract
+   `FromError`/`FromException`), implemented by `Result`/`Result<T>` — the one
+   piece touching `RhinoDB.Core`, deliberately scoped to a minimal, purely
+   additive interface after confirming (and the user independently verifying)
+   it's boxing-free and AOT-safe, the same mechanism .NET's own `INumber<T>`
+   uses.
+2. New `PooledOperation<TTx,TValue,TArgs> : IValueTaskSource<TValue>,
+   IExecutionWorkItem<TTx>` (`RhinoDB.Lib/Execution/PooledOperation.cs`) built
+   and proven in isolation first (`PooledOperationTests.cs`: rent/reuse
+   round-trip, leak hygiene, double-consumption throws, exception-shape
+   parity, concurrent rent/return safety) before touching
+   `DbExecutionLoop`/`DbContext` at all.
+3. `DbExecutionLoop<TTx>`'s `Channel<Action>` replaced with
+   `Channel<IExecutionWorkItem<TTx>>` routed through `PooledOperation`, kept
+   behind a temporary `Task<Result>` shim so the pooling/channel swap could be
+   proven behavior-preserving with **zero test file changes** before also
+   taking on the public API change - collapsed `Enqueue`'s four near-identical
+   34-line closures down to one shared, generic `PooledOperation.Run()`.
+4. Public surface flipped for real: `Run`/`RunConfirmed` (16 methods across
+   `DbContext<TTx>`/`DbContext`) now return `ValueTask<Result>`/
+   `ValueTask<Result<T>>` - a genuine breaking API change, deliberate (keeping
+   `Task` while pooling internally would force a real allocation via
+   `.AsTask()` on every call, defeating the point). `GeneratorTestHost
+   .RunTransactional` absorbed the one reflection-based `.AsTask()` conversion
+   needed to keep all ~14 consuming `RhinoDB.Generators.Test` files unmodified
+   - the single highest-leverage edit in the whole migration. Also fixed,
+   same stage: non-generic `DbContext`'s `Run` overloads used to wrap every
+   call in a second adapter closure before forwarding to the generic base -
+   collapsed to zero via the same static-trampoline-plus-`TArgs` trick used
+   throughout.
+5. Re-benchmarked and documented (below).
+
+**Two real correctness gotchas surfaced during implementation** (both
+documented in full in `Docs/01-performance-principles.md`'s updated §3, since
+they're genuine contract differences from `Task` any future caller needs to
+know, not implementation footnotes): `ValueTask<T>` is single-consumption
+(awaiting twice throws - proven by a dedicated test); and, caught only once
+real benchmarks were re-run, `ValueTask<T>` does **not** support a blocking
+synchronous wait the way `Task<T>.GetAwaiter().GetResult()` does - three
+benchmark `[GlobalSetup]` methods that did `db.Run(...).GetAwaiter()
+.GetResult()` synchronously right after enqueueing threw
+`InvalidOperationException` (invisible to the whole NUnit suite beforehand,
+since every test either used proper `await` or drove completion before
+consuming). Fixed by inserting `.AsTask()` before the blocking wait at each
+site - the same fix any real synchronous-blocking caller needs to apply.
+
+**Measured result**: the new mechanism's full real end-to-end submission cost
+(`SubmissionOverheadBenchmarks.PooledRunNoOp` - cross-thread channel write,
+pooled rent, actual await, no table work) is **80 B**, lower than the *old*
+mechanism's bare `TaskCompletionSource` component alone (88 B).
+`InstantTableBenchmarks`: `Get` 353→**152 B**, `Insert` 361→**176 B**,
+`Update` 321→**136 B**, `GetArgs` 297→**96 B**, `InsertArgs` 281→**96 B**,
+`UpdateArgs` 273→**80 B** - a 50-71% reduction, flat across all three
+`RecordCount` tiers, wall-clock time unchanged. `TableGenerator.cs` required
+zero changes, confirmed via a zero-diff check - `CreateTransaction()`'s
+cached-singleton behavior was already outside this redesign's scope and
+stayed untouched. Full solution 319/319 (7 new `PooledOperationTests.cs`
+cases), zero regressions. Full writeup: `Docs/01-performance-principles.md`
+§ "No closures on the hot path".
 
 ## Stage 6 — Inter-Database Communication (IDC) ⏳ designed, not built, built after Stage 7+8
 

@@ -42,7 +42,7 @@ public class ConfirmedCoalescingBenchmarks {
             db.Run((ctx, tx) => {
                 for (var k = start; k > end; k--) tx.PersistentWidget.Insert(new PersistentWidget(k, k));
                 return Result.Ok();
-            }, PropagationMode.Confirmed).GetAwaiter().GetResult();
+            }, PropagationMode.Confirmed).AsTask().GetAwaiter().GetResult();
         }
 
         var seeded = 0;
@@ -52,7 +52,7 @@ public class ConfirmedCoalescingBenchmarks {
             db.Run((ctx, tx) => {
                 for (var i = start; i < end; i++) tx.PersistentWidget.Insert(new PersistentWidget(i, i));
                 return Result.Ok();
-            }, PropagationMode.Optimistic).GetAwaiter().GetResult();
+            }, PropagationMode.Optimistic).AsTask().GetAwaiter().GetResult();
             seeded = end;
         }
     }
@@ -68,7 +68,7 @@ public class ConfirmedCoalescingBenchmarks {
         var tasks = new Task[ConcurrentWriters];
         for (var i = 0; i < ConcurrentWriters; i++) {
             var id = Interlocked.Increment(ref nextInsertId);
-            tasks[i] = db.Run((ctx, tx) => { tx.PersistentWidget.Insert(new PersistentWidget(id, id)); return Result.Ok(); }, PropagationMode.Confirmed);
+            tasks[i] = db.Run((ctx, tx) => { tx.PersistentWidget.Insert(new PersistentWidget(id, id)); return Result.Ok(); }, PropagationMode.Confirmed).AsTask();
         }
         return Task.WhenAll(tasks);
     }
@@ -78,7 +78,7 @@ public class ConfirmedCoalescingBenchmarks {
         var tasks = new Task[ConcurrentWriters];
         for (var i = 0; i < ConcurrentWriters; i++) {
             var value = Interlocked.Increment(ref nextValue);
-            tasks[i] = db.Run((ctx, tx) => { tx.PersistentWidget.Update(lookupKey, new PersistentWidget(lookupKey, value)); return Result.Ok(); }, PropagationMode.Confirmed);
+            tasks[i] = db.Run((ctx, tx) => { tx.PersistentWidget.Update(lookupKey, new PersistentWidget(lookupKey, value)); return Result.Ok(); }, PropagationMode.Confirmed).AsTask();
         }
         return Task.WhenAll(tasks);
     }
