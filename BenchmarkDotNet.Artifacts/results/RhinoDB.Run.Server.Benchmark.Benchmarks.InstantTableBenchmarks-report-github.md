@@ -3,15 +3,21 @@
 BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.9445)
 Unknown processor
 .NET SDK 11.0.100-rc.1.26425.128
-  [Host] : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
-  Dry    : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  [Host]   : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  ShortRun : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
 
-Job=Dry  IterationCount=1  LaunchCount=1  
-RunStrategy=ColdStart  UnrollFactor=1  WarmupCount=1  
+Job=ShortRun  IterationCount=3  LaunchCount=1  
+WarmupCount=3  
 
 ```
-| Method | RecordCount | Mean     | Error | Allocated |
-|------- |------------ |---------:|------:|----------:|
-| **Get**    | **100**         | **3.536 ms** |    **NA** |         **-** |
-| **Get**    | **10000**       | **3.585 ms** |    **NA** |         **-** |
-| **Get**    | **1000000**     | **2.130 ms** |    **NA** |         **-** |
+| Method | RecordCount | Mean     | Error     | StdDev    | Gen0   | Gen1   | Allocated |
+|------- |------------ |---------:|----------:|----------:|-------:|-------:|----------:|
+| **Get**    | **100**         | **2.762 μs** | **0.6160 μs** | **0.0338 μs** | **0.0725** |      **-** |     **474 B** |
+| Insert | 100         | 2.951 μs | 0.7783 μs | 0.0427 μs | 0.0954 | 0.0076 |     601 B |
+| Update | 100         | 2.892 μs | 0.1863 μs | 0.0102 μs | 0.0877 |      - |     561 B |
+| **Get**    | **10000**       | **2.853 μs** | **0.4389 μs** | **0.0241 μs** | **0.0744** |      **-** |     **474 B** |
+| Insert | 10000       | 2.968 μs | 0.4596 μs | 0.0252 μs | 0.0954 | 0.0076 |     602 B |
+| Update | 10000       | 2.941 μs | 1.4125 μs | 0.0774 μs | 0.0877 |      - |     562 B |
+| **Get**    | **1000000**     | **2.698 μs** | **0.4392 μs** | **0.0241 μs** | **0.0744** |      **-** |     **473 B** |
+| Insert | 1000000     | 3.020 μs | 1.1099 μs | 0.0608 μs | 0.0954 | 0.0076 |     603 B |
+| Update | 1000000     | 3.106 μs | 0.9044 μs | 0.0496 μs | 0.0877 |      - |     562 B |
