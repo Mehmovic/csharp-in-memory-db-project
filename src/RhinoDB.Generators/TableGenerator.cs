@@ -544,6 +544,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine();
     }
 
+    static private void EmitDiscardMethod(StringBuilder sb) {
+        sb.AppendLine("    internal void Discard() {");
+        sb.AppendLine("        changes.Clear();");
+        sb.AppendLine("        Dirty = false;");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+    }
+
     static private void EmitCustomValidateChecks(StringBuilder sb, TableModel table) {
         foreach (var methodName in table.ValidateMethodNames) {
             sb.AppendLine("                {");
@@ -580,6 +588,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitSecondaryIndexAccessors(sb, table);
         EmitStagingMethods(sb, table);
         EmitValidateMethod(sb, table);
+        EmitDiscardMethod(sb);
         EmitInstantApply(sb, table);
 
         sb.AppendLine("}");
@@ -675,6 +684,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitSecondaryIndexAccessors(sb, table);
         EmitStagingMethods(sb, table);
         EmitValidateMethod(sb, table);
+        EmitDiscardMethod(sb);
         EmitPersistentApply(sb, table);
         EmitBulkLoadMethods(sb, table);
         if (table.Evictable) EmitStorageAccessor(sb, table, opsName);
@@ -859,6 +869,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"        if ({table.Accessor}.Dirty) {table.Accessor}.Apply();");
         sb.AppendLine("        return Result.Ok();");
         sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    public void Discard() {");
+        foreach (var table in tables)
+            sb.AppendLine($"        if ({table.Accessor}.Dirty) {table.Accessor}.Discard();");
+        sb.AppendLine("    }");
         sb.AppendLine("}");
         sb.AppendLine();
 
@@ -888,32 +903,40 @@ public sealed class TableGenerator : IIncrementalGenerator {
             }
         }
         if (persistentTables.Length > 0) sb.AppendLine("    private readonly ColdStore cold;");
+        foreach (var table in tables)
+            sb.AppendLine($"    private readonly {database.SimpleName}{table.Accessor}Ops {Camel(table.Accessor)}Ops;");
+        sb.AppendLine($"    private readonly {txName} cachedTransaction;");
         sb.AppendLine();
 
+        var ctorSignature = persistentTables.Length > 0
+            ? $"    public {database.SimpleName}(ColdStore cold) : base(cold) {{"
+            : $"    public {database.SimpleName}() {{";
+        sb.AppendLine(ctorSignature);
         if (persistentTables.Length > 0) {
-            sb.AppendLine($"    public {database.SimpleName}(ColdStore cold) : base(cold) {{");
             sb.AppendLine("        this.cold = cold;");
             foreach (var table in persistentTables)
                 sb.AppendLine($"        {Camel(table.Accessor)}ColdTable = cold.OpenTable<{table.PrimaryKeyTypeFullName}, {table.RowTypeFullName}>(\"{table.Accessor}\");");
-            sb.AppendLine("    }");
-            sb.AppendLine();
         }
-
-        sb.Append($"    protected override {txName} CreateTransaction() => new {txName}(");
-        sb.Append(string.Join(", ", tables.Select(t => {
+        foreach (var table in tables) {
             var args = new List<string> {
-                $"{Camel(t.Accessor)}Storage",
-                $"{Camel(t.Accessor)}PrimaryIndex",
+                $"{Camel(table.Accessor)}Storage",
+                $"{Camel(table.Accessor)}PrimaryIndex",
             };
-            if (t.Kind == TableKind.Persistent) {
-                args.Add($"{Camel(t.Accessor)}ColdTable");
+            if (table.Kind == TableKind.Persistent) {
+                args.Add($"{Camel(table.Accessor)}ColdTable");
                 args.Add("cold");
             }
-            foreach (var aif in t.AutoIncrementFields) args.Add($"{Camel(t.Accessor)}{aif.FieldName}Counter");
-            foreach (var idx in t.Indexes) args.Add($"{Camel(t.Accessor)}{idx.AccessorName}Index");
-            return $"new {database.SimpleName}{t.Accessor}Ops({string.Join(", ", args)})";
-        })));
+            foreach (var aif in table.AutoIncrementFields) args.Add($"{Camel(table.Accessor)}{aif.FieldName}Counter");
+            foreach (var idx in table.Indexes) args.Add($"{Camel(table.Accessor)}{idx.AccessorName}Index");
+            sb.AppendLine($"        {Camel(table.Accessor)}Ops = new {database.SimpleName}{table.Accessor}Ops({string.Join(", ", args)});");
+        }
+        sb.Append($"        cachedTransaction = new {txName}(");
+        sb.Append(string.Join(", ", tables.Select(t => $"{Camel(t.Accessor)}Ops")));
         sb.AppendLine(");");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        sb.AppendLine($"    protected override {txName} CreateTransaction() => cachedTransaction;");
 
         if (persistentTables.Length > 0) sb.AppendLine($"    internal {txName} CreateLoaderTransaction() => CreateTransaction();");
         sb.AppendLine("}");

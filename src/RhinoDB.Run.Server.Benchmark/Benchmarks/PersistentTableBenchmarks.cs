@@ -26,7 +26,9 @@ public class PersistentTableBenchmarks {
     public void Setup() {
         dataDir = Path.Combine(Path.GetTempPath(), $"rhinodb-bench-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dataDir);
-        cold = ColdStore.Open(dataDir, MapSizeUpperBytes).Unwrap();
+        var estimatedBytes = Math.Max(16L * 1024 * 1024, RecordCount * 64L) + 64L * 1024 * 1024;
+        var sizeNowBytes = unchecked((nint)Math.Min(estimatedBytes, (long)MapSizeUpperBytes));
+        cold = ColdStore.Open(dataDir, MapSizeUpperBytes, sizeNowBytes).Unwrap();
         db = new PersistentBenchDb(cold);
         lookupKey = RecordCount / 2;
         nextInsertId = RecordCount;

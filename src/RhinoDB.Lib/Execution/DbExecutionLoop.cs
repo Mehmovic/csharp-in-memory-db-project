@@ -23,8 +23,11 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
         var pushed = channel.Writer.TryWrite(() => {
                 context.Cold?.BeginScope();
                 Result result;
+                TTx tx = default!;
+                var txCreated = false;
                 try {
-                    var tx = context.CreateTransaction();
+                    tx = context.CreateTransaction();
+                    txCreated = true;
                     result = operation.Invoke(context, tx);
                     if (result.IsOk()) {
                         Result applyResult = tx.Apply();
@@ -32,6 +35,7 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
                     }
                 }
                 catch (Exception ex) { result = Result.Error(ex); }
+                if (txCreated && result.IsError()) tx.Discard();
 
                 Complete(tcs, result, context.Cold?.EndScope(commit: result.IsOk(), forceSync: mode == PropagationMode.Confirmed));
             }
@@ -46,8 +50,11 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
         var pushed = channel.Writer.TryWrite(() => {
                 context.Cold?.BeginScope();
                 Result<T> result;
+                TTx tx = default!;
+                var txCreated = false;
                 try {
-                    var tx = context.CreateTransaction();
+                    tx = context.CreateTransaction();
+                    txCreated = true;
                     result = operation.Invoke(context, tx);
                     if (result.IsOk()) {
                         Result applyResult = tx.Apply();
@@ -55,6 +62,7 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
                     }
                 }
                 catch (Exception ex) { result = Result<T>.Error(ex); }
+                if (txCreated && result.IsError()) tx.Discard();
 
                 Complete(tcs, result, context.Cold?.EndScope(commit: result.IsOk(), forceSync: mode == PropagationMode.Confirmed));
             }
@@ -69,8 +77,11 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
         var pushed = channel.Writer.TryWrite(() => {
                 context.Cold?.BeginScope();
                 Result result;
+                TTx tx = default!;
+                var txCreated = false;
                 try {
-                    var tx = context.CreateTransaction();
+                    tx = context.CreateTransaction();
+                    txCreated = true;
                     result = operation.Invoke(context, tx, args);
                     if (result.IsOk()) {
                         Result applyResult = tx.Apply();
@@ -78,6 +89,7 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
                     }
                 }
                 catch (Exception ex) { result = Result.Error(ex); }
+                if (txCreated && result.IsError()) tx.Discard();
 
                 Complete(tcs, result, context.Cold?.EndScope(commit: result.IsOk(), forceSync: mode == PropagationMode.Confirmed));
             }
@@ -92,8 +104,11 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
         var pushed = channel.Writer.TryWrite(() => {
                 context.Cold?.BeginScope();
                 Result<T> result;
+                TTx tx = default!;
+                var txCreated = false;
                 try {
-                    var tx = context.CreateTransaction();
+                    tx = context.CreateTransaction();
+                    txCreated = true;
                     result = operation.Invoke(context, tx, args);
                     if (result.IsOk()) {
                         Result applyResult = tx.Apply();
@@ -101,6 +116,7 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
                     }
                 }
                 catch (Exception ex) { result = Result<T>.Error(ex); }
+                if (txCreated && result.IsError()) tx.Discard();
 
                 Complete(tcs, result, context.Cold?.EndScope(commit: result.IsOk(), forceSync: mode == PropagationMode.Confirmed));
             }

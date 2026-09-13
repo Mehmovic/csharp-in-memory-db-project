@@ -20,12 +20,12 @@ public sealed class ColdStore : IDisposable {
 
     private ColdStore(MdbxEnvironment env) => this.env = env;
 
-    static public Result<ColdStore> Open(string path, nint sizeUpperBytes = -1) {
+    static public Result<ColdStore> Open(string path, nint sizeUpperBytes = -1, nint sizeNowBytes = -1) {
         var rcCreate = MdbxEnvironment.Create(out MdbxEnvironment? env);
         if (rcCreate != 0 || env is null) return Result<ColdStore>.Error(MdbxErrorMapper.Map(rcCreate));
 
         env.SetMaxDbs(1024);
-        env.SetGeometry(-1, -1, sizeUpperBytes, -1, -1, -1);
+        env.SetGeometry(-1, sizeNowBytes, sizeUpperBytes, -1, -1, -1);
 
         var rcOpen = env.Open(path, flags: SafeNoSync, mode: DefaultUnixMode);
         if (rcOpen == 0) return Result<ColdStore>.Ok(new ColdStore(env));

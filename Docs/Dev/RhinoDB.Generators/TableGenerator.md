@@ -390,6 +390,57 @@ case does, just without any cold-storage interaction (Evict never touches
 cold storage - the durable copy stays, see Cold storage decision 2).
 Idempotent: a row not currently in memory is treated as already evicted.
 
+## `EmitDatabase` — long-lived `Ops`/`Transaction` instances (2026-09-13)
+
+`{Accessor}Ops` instances and the `{Db}Transaction` wrapper used to be built
+fresh inside `CreateTransaction()`, meaning every single `Run` call
+allocated one `Ops` object *and* its `List<Change<TKey,TRow>>` per table
+declared on the database - regardless of whether that operation touched the
+table at all. Found via `RhinoDB.Run.Server.Benchmark`'s `MemoryDiagnoser`
+output (400-1200 bytes allocated per operation on tables with zero payload
+of their own), not assumed.
+
+Fixed by making both long-lived: `{Accessor}Ops` instances and the
+`{Db}Transaction` are now fields on `{Db}`, built once in the constructor,
+and `CreateTransaction()` is just `=> cachedTransaction;` - a field read, no
+allocation at all on the hot path. This is safe *because* RhinoDB is
+single-writer: `DbExecutionLoop`'s channel guarantees at most one operation
+is ever in flight against a given `DbContext`, so reusing the same `Ops`/
+`Transaction` objects across calls is never a concurrent-access hazard - the
+same guarantee that already let `storage`/`primaryIndex`/index fields be
+long-lived `{Db}` fields from the start.
+
+The one real correctness gap this reuse opens up: `{Db}Transaction.Apply()`
+returns early the moment any table's `Validate()` fails, *before* calling
+`Apply()` on any table - including ones that validated fine and are still
+sitting there `Dirty` with staged changes. With a fresh-per-call `Ops`
+instance this didn't matter (the whole object, staged changes included, was
+just discarded). With a long-lived one, those stale staged changes would
+otherwise persist into the *next* operation that reuses the same `Ops`
+instance - silently replaying, on some future successful `Apply()`, changes
+from an operation the caller was told had failed. Fixed with a new
+`Discard()` method (`ITransaction.Discard()`, generated on both the `Ops`
+class - `changes.Clear(); Dirty = false;`, identical to what `Apply()` does
+on success - and on `{Db}Transaction`, calling it on every table) that
+`DbExecutionLoop` invokes whenever an operation's `Result` is an error, for
+any reason (a failed `Validate()`, an exception, or the operation delegate
+itself returning `Result.Error(...)` without ever calling `Apply()`).
+Verified by the existing cross-table-atomicity tests (`Milestone2Tests`'
+`CrossTableAtomicity_...`, `TwoInsertsOfTheSameKey_...`), which already
+exercised "one table validates fine, another fails, in the same operation" -
+they stayed green against the *same* long-lived `Ops` instances across
+subsequent test-method calls, which is exactly the scenario `Discard()`
+needed to get right.
+
+Also required always emitting an explicit `{Db}` constructor now (previously
+only emitted when the database had a `Persistent`-kind table needing a
+`ColdStore cold` parameter) - an Instant-only database's `Ops`/`Transaction`
+fields can't be field initializers either, for the same reason `ColdTable`
+fields never could be (a field initializer can't reference a sibling
+instance field, `CS0236` - see the Persistent-kind field loop note below),
+so they're built in a constructor body regardless of whether that
+constructor takes a `ColdStore` parameter or not.
+
 ## `EmitDatabase` — Instant-kind field loop
 
 Instant-kind fields are self-contained `new ConcreteType()` initializers

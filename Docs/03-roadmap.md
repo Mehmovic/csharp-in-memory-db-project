@@ -260,7 +260,74 @@ etc.) and needed updating to the new singular form (`tx.Widget`, `tx.Club`,
 `tx.Player`) - a real, wide sweep (78 of 99 `RhinoDB.Generators.Test` tests
 broke immediately, confirming just how many call sites depend on this
 default), done mechanically per file and reverified fully green afterward,
-not left partially migrated. Not yet built: schema migration tooling.
+not left partially migrated.
+
+2026-09-13: **First real benchmark run surfaced two genuine findings**, one
+about the benchmark itself and one about the engine:
+
+- **Benchmark change (partial fix, root cause still open)**: `ColdStore.Open`
+  gained a `sizeNowBytes` parameter (default `-1`, same backward-compatible
+  pattern as `sizeUpperBytes`) so `RhinoDB.Run.Server.Benchmark` can pre-size
+  libmdbx's geometry past the seeded data, on the theory that a freshly-seeded
+  database sitting at wherever incremental growth last left it could make the
+  write a `[Benchmark]` method is timing trigger a growth/remap event of its
+  own. **Re-measured after the fix and the anomaly it was meant to explain
+  is still there** — `Persistent` `Insert`/`Update` are still ~900 μs at the
+  100/10k tiers and drop to ~115-121 μs at 1,000,000 (backwards from what a
+  size-independent operation should show), with `Error` frequently exceeding
+  half the `Mean` (e.g. `Update` at 10k: Mean 924 μs, Error 897 μs - not a
+  usable number either way). The `sizeNowBytes` parameter is still real,
+  correct, and worth keeping (pre-sizing known-future geometry is a
+  legitimate thing to want independent of this), but the growth-event theory
+  it was built to test is not confirmed - the actual cause of the
+  small-tier-slower-than-large-tier pattern is still unexplained. Left as a
+  genuinely open question rather than a solved one: worth a dedicated,
+  properly-instrumented investigation later (e.g. an ETW/perfview trace
+  around a single `Insert`, or libmdbx's own `MDBX_ENABLE_PROFGC` build
+  option) rather than more statistical brute force - a `--job medium` rerun
+  of just the (unaffected-by-this-question) `Instant` suite already cost
+  over two hours for what should have been a quick check, so throwing more
+  iterations at the `Persistent` suite specifically is not assumed to be the
+  fix either.
+- **Engine fix, prompted by the allocation numbers the benchmark's
+  `MemoryDiagnoser` surfaced**: 400-1200 bytes allocated per operation, on
+  tables with far smaller payloads than that. Traced to `CreateTransaction()`
+  building a brand-new `{Accessor}Ops` instance - each with its own
+  `List<Change<TKey,TRow>>` - for *every* table on the database, on *every*
+  `Run` call, regardless of whether that call touched the table at all.
+  Fixed by making `Ops` instances and the `{Db}Transaction` wrapper
+  long-lived `{Db}` fields, built once in the constructor, with
+  `CreateTransaction()` reduced to a field read - safe specifically because
+  RhinoDB is single-writer (at most one operation in flight against a given
+  `DbContext` at a time), the same guarantee that already let `storage`/
+  `primaryIndex`/index fields be long-lived. Needed a new `ITransaction
+  .Discard()` (called by `DbExecutionLoop` whenever an operation ends in
+  error) to reset a table's staged-but-unapplied changes on the failure
+  path, since a long-lived `Ops` instance that never got cleared after a
+  *failed* operation would otherwise leak that operation's staged changes
+  into whichever future operation reuses it next - `Apply()`'s own cleanup
+  only ever ran on the success path. See
+  [Architecture — Transactions](02-architecture.md#transactions) and
+  `Docs/Dev/RhinoDB.Generators/TableGenerator.md` for the full design.
+  Result, measured (`InstantTableBenchmarks`, `--job medium`, allocation per
+  operation): `Get` 474 B → 354 B, `Insert` 601 B → 361 B, `Update` 561 B →
+  322 B - roughly 25-40% less per operation, same wall-clock time (~2.6-3.7
+  us across all three, flat across 100/10k/1,000,000 records either way).
+  This also fully absorbed the ArrayPool-for-`changes` idea floated earlier
+  in the same discussion - with `Ops` instances reused instead of recreated,
+  `List<T>`'s backing array is naturally reused after the first couple of
+  operations warm it up, getting the same "no more allocating a fresh array
+  every call" win without pooling machinery or its return-path correctness
+  question.
+
+Verified against the full existing test suite (306/306, no regressions) -
+notably including the cross-table-atomicity tests that already exercised
+"one table validates fine, another fails, in the same operation"
+(`Milestone2Tests`' `CrossTableAtomicity_...`,
+`TwoInsertsOfTheSameKey_...`), which stayed green running against the *same*
+long-lived `Ops` instances across many sequential test-method calls - direct
+proof `Discard()` does what it needs to. Not yet built: schema migration
+tooling.
 
 ## Stage 6 — Inter-Database Communication (IDC) ⏳ designed, not built, built after Stage 7+8
 
