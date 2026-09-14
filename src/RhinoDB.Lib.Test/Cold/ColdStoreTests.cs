@@ -307,4 +307,38 @@ public class ColdStoreTests {
         Assert.That(secondTask.Result, Has.Count.EqualTo(1));
         Assert.That(secondTask.Result[0].Row, Is.EqualTo(new Account(2, "bob@example.com", 200m)));
     }
+
+    [Test]
+    public async Task CompleteRecovery_AChangeForATableThatIsNotOpen_RefusesRatherThanDroppingItAndTruncating() {
+        // A tail entry naming a table this ColdStore never opened means these bytes were written
+        // under a different schema contract (drift, a foreign WAL file, or a tableId collision).
+        // Skipping it would be silent data loss, because recovery also truncates the WAL.
+        using (var store = ColdStore.Open(dir).Unwrap()) {
+            store.OpenTable<int, Account>("accounts");
+            await RunConfirmed(store, () => {
+                Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m));
+                Stage(store, "sigma", ChangeKind.Insert, 2, new Account(2, "bob@example.com", 200m));
+            });
+        }
+
+        using (var reopened = ColdStore.Open(dir).Unwrap()) {
+            var accounts = reopened.OpenTable<int, Account>("accounts");
+
+            var refused = await reopened.CompleteRecoveryAsync();
+
+            Assert.That(refused.IsError(), Is.True);
+            Assert.That(refused.GetError().Kind, Is.EqualTo(ErrorKind.SystemFailure));
+            Assert.That(reopened.Peek(accounts, 1).IsError(), Is.True, "All-or-nothing: nothing was checkpointed while an unknown table was in the way.");
+        }
+
+        using var recovered = ColdStore.Open(dir).Unwrap();
+        var recoveredAccounts = recovered.OpenTable<int, Account>("accounts");
+        var sigma = recovered.OpenTable<int, Account>("sigma");
+
+        var result = await recovered.CompleteRecoveryAsync();
+
+        Assert.That(result.IsOk(), Is.True, "The refused tail must still be on disk: opening the missing table makes the same recovery succeed.");
+        Assert.That(recovered.Peek(recoveredAccounts, 1).Unwrap(), Is.EqualTo(new Account(1, "alice@example.com", 100m)));
+        Assert.That(recovered.Peek(sigma, 2).Unwrap(), Is.EqualTo(new Account(2, "bob@example.com", 200m)));
+    }
 }

@@ -1,5 +1,8 @@
+using System.Runtime.InteropServices;
+
 namespace RhinoDB.Core;
 
+[StructLayout(LayoutKind.Auto)]
 public readonly partial struct DbError {
     public ErrorKind Kind { get; }
     private readonly Exception? systemException;

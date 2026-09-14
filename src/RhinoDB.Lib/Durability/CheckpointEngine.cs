@@ -1,4 +1,3 @@
-using RhinoDB.Core;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Native;
 
@@ -29,19 +28,24 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal) {
         long boundaryLsn,
         IReadOnlyDictionary<uint, uint> tableDbis,
         IEnumerable<CheckpointRow> residentRows,
-        IEnumerable<(uint TableId, byte[] Key)> deletedSinceLastCheckpoint) {
+        IEnumerable<(uint TableId, byte[] Key)> deletedSinceLastCheckpoint
+    ) {
         var rcTxn = env.BeginTxn(0, out Transaction? txn);
         if (rcTxn != 0 || txn is null) return Result.Error(MdbxErrorMapper.Map(rcTxn));
         using Transaction _ = txn;
 
         foreach (CheckpointRow row in residentRows) {
-            if (!tableDbis.TryGetValue(row.TableId, out var dbi)) continue;
+            if (!tableDbis.TryGetValue(row.TableId, out var dbi))
+                return UnknownTableIdResult(row.TableId);
+
             var putRc = txn.Put(dbi, row.Key, row.Row, 0);
             if (putRc != 0) return Result.Error(MdbxErrorMapper.Map(putRc));
         }
 
         foreach (var (tableId, key) in deletedSinceLastCheckpoint) {
-            if (!tableDbis.TryGetValue(tableId, out var dbi)) continue;
+            if (!tableDbis.TryGetValue(tableId, out var dbi))
+                return UnknownTableIdResult(tableId);
+
             var delRc = txn.Delete(dbi, key);
             if (delRc != 0 && MdbxErrorMapper.Map(delRc).Kind != ErrorKind.IndexKeyNotFound) return Result.Error(MdbxErrorMapper.Map(delRc));
         }
@@ -60,6 +64,9 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal) {
 
         var truncateError = await wal.Truncate();
         return truncateError is { } err ? Result.Error(err) : Result.Ok();
+
+        static Result UnknownTableIdResult(uint tableId)
+            => Result.Error(DbError.SystemFailure(new Exception($"Unknown tableId {tableId} in the RunCheckpoint()")));
     }
 
     private Result EnsureMetadataDbi(Transaction txn) {

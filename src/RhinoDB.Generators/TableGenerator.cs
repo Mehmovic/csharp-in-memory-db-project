@@ -90,6 +90,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
+    static private readonly DiagnosticDescriptor TableIdCollisionDiagnostic = new(
+        "RHINO011",
+        "Table id hash collision within one database",
+        "{0} has two tables whose Accessors hash to the same tableId: {1} and {2} - rename one Accessor, since the tableId (FNV-1a of the Accessor) identifies tables in the WAL and in cold storage",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
     static private readonly DiagnosticDescriptor DuplicateAccessorDiagnostic = new(
         "RHINO010",
         "Duplicate table Accessor within one database",
@@ -341,6 +349,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
             return;
         }
 
+        var collidingTableIds = tables.GroupBy(t => ComputeTableId(t.Accessor)).Where(g => g.Count() > 1).ToImmutableArray();
+        if (collidingTableIds.Length > 0) {
+            foreach (var group in collidingTableIds) {
+                var colliding = group.Select(t => t.Accessor).ToImmutableArray();
+                context.ReportDiagnostic(Diagnostic.Create(TableIdCollisionDiagnostic, Location.None, database.SimpleName, colliding[0], colliding[1]));
+            }
+            return;
+        }
+        
         foreach (var table in tables)
             context.AddSource($"{database.SimpleName}{table.Accessor}Ops.g.cs", EmitOpsClass(table, database.SimpleName));
 

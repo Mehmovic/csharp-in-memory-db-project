@@ -152,4 +152,33 @@ public class DiagnosticsTests {
         var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
         Assert.That(ex!.Message, Does.Contain("RHINO005"));
     }
+
+    [Test]
+    public void TableIdCollision_ReportsRHINO011() {
+        // FNV-1a is 32 bits wide, so two Accessors can collide - found by brute force and pinned
+        // here as a precondition, so the pair can never silently stop colliding. A collision would
+        // make ColdStore.OpenTable overwrite a tableDbisById entry silently and would misroute WAL
+        // recovery data, so it has to fail the build rather than surface at runtime.
+        Assert.That(RhinoDB.Lib.Durability.TableIdHash.Compute("Tblj3vu"), Is.EqualTo(1420640043u), "Precondition: this pair must collide under the runtime hash.");
+        Assert.That(RhinoDB.Lib.Durability.TableIdHash.Compute("Tbl4tea"), Is.EqualTo(1420640043u), "Precondition: this pair must collide under the runtime hash.");
+
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class CollideDb : DbContext<CollideDbTransaction> { }
+
+            [Table(TableKind.Persistent, typeof(CollideDb), Accessor = "Tblj3vu")]
+            public readonly partial record struct Widget([PrimaryKey] int Id, string Name);
+
+            [Table(TableKind.Persistent, typeof(CollideDb), Accessor = "Tbl4tea")]
+            public readonly partial record struct Gadget([PrimaryKey] int Id, string Name);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO011"));
+    }
 }

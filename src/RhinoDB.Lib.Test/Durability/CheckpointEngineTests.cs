@@ -137,4 +137,26 @@ public class CheckpointEngineTests {
         Assert.That(ReadRaw(widgetsDbi, [1]), Is.EqualTo(new byte[] { 42 }));
         Assert.That(engine.ReadCheckpointedLsn().Unwrap(), Is.EqualTo(10L));
     }
+
+    [Test]
+    public async Task RunCheckpoint_WithAChangeForAnUnknownTable_RefusesInsteadOfDroppingItAndTruncating() {
+        // Schema drift, a foreign WAL file, or a tableId hash collision all look the same here: a
+        // tail entry naming a table this database never opened. Skipping it and truncating the
+        // WAL would destroy it permanently, so the checkpoint must refuse as a whole.
+        var path = Path.Combine(dir, "wal.dat");
+        var wal = WriteAheadLog.Create(path, Guid.NewGuid(), sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
+        await wal.AppendConfirmed(1, WalEntryKind.Operation, [new WalChange(TableId, ChangeKind.Insert, [1], [42])]);
+        var engine = new CheckpointEngine(env, wal);
+        var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };
+        const uint unknownTableId = 999;
+
+        var result = await engine.RunCheckpoint(1, tableDbis, [new CheckpointRow(TableId, [1], [42]), new CheckpointRow(unknownTableId, [2], [43])], []);
+
+        Assert.That(result.IsError(), Is.True);
+        Assert.That(result.GetError().Kind, Is.EqualTo(RhinoDB.Core.ErrorKind.SystemFailure));
+        Assert.That(engine.ReadCheckpointedLsn().Unwrap(), Is.EqualTo(-1L), "A refused checkpoint must not advance the watermark.");
+        Assert.That(ReadRaw(widgetsDbi, [1]), Is.Null, "All-or-nothing: the known table row must not land either.");
+        wal.Dispose();
+        Assert.That(new FileInfo(path).Length, Is.GreaterThan(WalFileHeaderCodec.Size), "The WAL must not be truncated while it still holds changes we refused to checkpoint.");
+    }
 }

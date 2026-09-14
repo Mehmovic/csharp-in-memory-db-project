@@ -621,3 +621,11 @@ round-trip — which matters especially for Instant-table catch-up, where no
 cold store exists to fetch from). Nothing in Phase 1–4 is invalidated by
 Stage 8's needs; the boundary is clean.
 
+
+
+## Schema migration (design agreed 2026-09-14)
+
+Schema migration and contract generations are designed in
+[06-schema-migration.md](06-schema-migration.md) - the drain barrier and the
+generation marker described there are prerequisites of this design's Phase 3
+checkpoint, and `RunCheckpoint` is the seam they build on.
