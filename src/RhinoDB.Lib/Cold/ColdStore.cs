@@ -18,20 +18,26 @@ public sealed class ColdStore : IDisposable {
     private readonly Dictionary<string, object> tables = [];
     private readonly Dictionary<uint, uint> tableDbisById = [];
     private readonly List<WalChange> currentOperationChanges = [];
+    private readonly EvictionBatch evictionBatch;
+    private readonly Dictionary<uint, EvictionDropRegistration> evictionDrops = [];
+    private readonly List<EvictionCandidate> drainedEvictions = [];
+    private readonly List<EvictionCandidate> appliedEvictions = [];
     private DecodedWalEntry[] pendingRecoveryEntries;
     private long nextLsn;
 
     public bool IsScopeActive { get; private set; }
 
-    private ColdStore(MdbxEnvironment env, WriteAheadLog wal, DecodedWalEntry[] pendingRecoveryEntries, long nextLsn) {
+    private ColdStore(MdbxEnvironment env, WriteAheadLog wal, DecodedWalEntry[] pendingRecoveryEntries, long nextLsn, long evictionBatchThresholdBytes) {
         this.env = env;
         this.wal = wal;
         this.pendingRecoveryEntries = pendingRecoveryEntries;
         this.nextLsn = nextLsn;
         checkpoint = new CheckpointEngine(env, wal);
+        evictionBatch = new EvictionBatch(evictionBatchThresholdBytes);
     }
 
-    static public Result<ColdStore> Open(string path, nint sizeUpperBytes = -1, nint sizeNowBytes = -1) {
+    static public Result<ColdStore> Open(
+        string path, nint sizeUpperBytes = -1, nint sizeNowBytes = -1, long evictionBatchThresholdBytes = EvictionBatch.DefaultSizeThresholdBytes) {
         var isFreshDirectory = !Directory.Exists(path) || !Directory.EnumerateFileSystemEntries(path).Any();
 
         var rcCreate = MdbxEnvironment.Create(out MdbxEnvironment? env);
@@ -78,28 +84,61 @@ public sealed class ColdStore : IDisposable {
         var maxTailLsn = operationEntries.Length > 0 ? operationEntries.Max(e => e.Lsn) : checkpointedLsn;
         var pendingRecovery = operationEntries.Where(e => e.Lsn > checkpointedLsn).ToArray();
 
-        return Result<ColdStore>.Ok(new ColdStore(env, wal, pendingRecovery, Math.Max(checkpointedLsn, maxTailLsn)));
+        return Result<ColdStore>.Ok(new ColdStore(env, wal, pendingRecovery, Math.Max(checkpointedLsn, maxTailLsn), evictionBatchThresholdBytes));
     }
 
-    public Result CompleteRecovery() {
+    public Result CompleteRecovery() =>
+        CompleteRecoveryAsync().GetAwaiter().GetResult();
+    
+    public Task<Result> CompleteRecoveryAsync() {
         var entries = pendingRecoveryEntries;
         pendingRecoveryEntries = [];
-        if (entries.Length == 0) return Result.Ok();
+        if (entries.Length == 0) return Task.FromResult(Result.Ok());
 
         var latest = new Dictionary<(uint TableId, string KeyBase64), WalChange>();
-        foreach (var entry in entries)
-            foreach (var change in entry.Changes)
-                latest[(change.TableId, Convert.ToBase64String(change.Key))] = change;
+        foreach (DecodedWalEntry entry in entries)
+        foreach (WalChange change in entry.Changes)
+            latest[(change.TableId, Convert.ToBase64String(change.Key))] = change;
 
         var residentRows = latest.Values.Where(c => c.Kind != ChangeKind.Delete)
             .Select(c => new CheckpointRow(c.TableId, c.Key, c.Row!)).ToArray();
         var deletedKeys = latest.Values.Where(c => c.Kind == ChangeKind.Delete)
             .Select(c => (c.TableId, c.Key)).ToArray();
 
-        return checkpoint.RunCheckpoint(nextLsn, tableDbisById, residentRows, deletedKeys).GetAwaiter().GetResult();
+        return checkpoint.RunCheckpoint(nextLsn, tableDbisById, residentRows, deletedKeys);
     }
 
-    internal void BeginScope() { IsScopeActive = true; currentOperationChanges.Clear(); }
+    internal void BeginScope() {
+        ApplyPendingEvictions();
+        IsScopeActive = true;
+        currentOperationChanges.Clear();
+    }
+
+    private void ApplyPendingEvictions() {
+        evictionBatch.DrainStaged(into: drainedEvictions);
+        if (drainedEvictions.Count == 0) return;
+
+        var appliedResult = EvictionBatchApplier.Apply(env, tableDbisById, drainedEvictions,
+            (tableId, key) => evictionDrops.TryGetValue(tableId, out EvictionDropRegistration registration)
+                ? registration.TryGetCurrentRow(key)
+                : null,
+            appliedInto: appliedEvictions);
+        if (appliedResult.IsError()) return;
+
+        var applied = appliedResult.Unwrap();
+        for (var i = 0; i < applied.Count; i++) {
+            EvictionCandidate candidate = applied[i];
+            if (evictionDrops.TryGetValue(candidate.TableId, out EvictionDropRegistration registration))
+                registration.Drop(candidate.Key);
+        }
+    }
+
+    public void StageEviction(uint tableId, byte[] key) {
+        if (evictionBatch.Stage(tableId, key)) ApplyPendingEvictions();
+    }
+
+    public void RegisterEvictionDrop(uint tableId, Func<byte[], byte[]?> tryGetCurrentRow, Action<byte[]> drop) =>
+        evictionDrops[tableId] = new EvictionDropRegistration(tryGetCurrentRow, drop);
 
     public void Stage(uint tableId, ChangeKind kind, byte[] key, byte[]? row) =>
         currentOperationChanges.Add(new WalChange(tableId, kind, key, row));

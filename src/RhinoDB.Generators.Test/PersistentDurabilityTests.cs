@@ -371,4 +371,184 @@ public class PersistentDurabilityTests {
         Assert.That(confirmed.Result.IsOk(), Is.True);
         Assert.That(optimisticTasks, Has.All.Matches<Task<Result>>(t => t.Result.IsOk()));
     }
+
+    // ---- Eviction write-through (Docs/05-wal-design.md Phase 3) ----
+    // Evict stages a candidate; the batched mdbx write-through + memory drop happen at the
+    // NEXT operation boundary (ColdStore.BeginScope -> ApplyPendingEvictions). These tests
+    // pin the invariant that makes Load/Peek safe: an evicted row's mdbx copy is exactly
+    // current before the memory copy goes - including when the row changes between staging
+    // and apply.
+
+    [Test]
+    public async Task Evict_ThenNextOperation_RowIsInColdStorageAndDroppedFromMemory() {
+        using var cold = ColdStore.Open(dir).Unwrap();
+        var (db, txType, asm) = NewDb(cold);
+
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            PropagationMode.Confirmed);
+
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Evict(1); return Result.Ok(); },
+            PropagationMode.Optimistic);
+
+        bool inMemory = true, peeked = false, reloaded = false;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                inMemory = dtx.Account.Get(1).IsOk();
+                var peek = dtx.Account.Storage.Peek(1);
+                peeked = peek.IsOk() && peek.Unwrap().Balance == 100m;
+                reloaded = dtx.Account.Storage.Load(1).IsOk();
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(inMemory, Is.False, "The eviction batch applied at this operation's boundary - the row must be gone from memory.");
+        Assert.That(peeked, Is.True, "The evicted row's mdbx copy must be exactly current - Peek reads it back with the original value.");
+        Assert.That(reloaded, Is.True, "Load must bring the evicted row back into memory from cold storage.");
+    }
+
+    [Test]
+    public async Task Evict_ThenUpdateBeforeTheBoundary_TheUpdatedValueIsWhatGetsPersisted() {
+        using var cold = ColdStore.Open(dir).Unwrap();
+        var (db, txType, asm) = NewDb(cold);
+
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            PropagationMode.Confirmed);
+
+        // Evict stages the candidate, then the row is updated BEFORE the batch applies -
+        // the batch must re-read and persist the CURRENT value (500), not the stale one (100).
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                dtx.Account.Storage.Evict(1);
+                dtx.Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 500m));
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        decimal persisted = 0m, reloaded = 0m;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                var peek = dtx.Account.Storage.Peek(1);
+                persisted = peek.IsOk() ? peek.Unwrap().Balance : -1m;
+                if (dtx.Account.Storage.Load(1).IsOk()) {
+                    var get = dtx.Account.Get(1);
+                    reloaded = get.IsOk() ? get.Unwrap().Balance : -1m;
+                }
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(persisted, Is.EqualTo(500m),
+            "The batch applied at this boundary must have written the row's current (updated) value, not the value staged at Evict time.");
+        Assert.That(reloaded, Is.EqualTo(500m),
+            "The update must not be lost: Load brings the evicted-but-current row back, with the post-update value.");
+    }
+
+    [Test]
+    public async Task Evict_ThenDeleteBeforeTheBoundary_AfterRestart_TheRowStaysDeleted() {
+        System.Reflection.Assembly asm;
+        Type dbType, txType;
+        using (var cold = ColdStore.Open(dir).Unwrap()) {
+            (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
+            dbType = asm.GetType("TestNs.VaultDb")!;
+            txType = asm.GetType("TestNs.VaultDbTransaction")!;
+            var db = Activator.CreateInstance(dbType, cold)!;
+
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+                PropagationMode.Confirmed);
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                db, txType, (ctx, tx) => {
+                    dynamic dtx = tx;
+                    dtx.Account.Storage.Evict(1);
+                    dtx.Account.Delete(1);
+                    return Result.Ok();
+                }, PropagationMode.Confirmed);
+            // Boundary op: applies the eviction batch - the candidate must be skipped
+            // (row already deleted), never re-Put into cold storage.
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                db, txType, (ctx, tx) => Result.Ok(), PropagationMode.Optimistic);
+        }
+
+        using var reopenedCold = ColdStore.Open(dir).Unwrap();
+        var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
+        reopenedCold.CompleteRecovery();
+
+        bool found = true;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
+            PropagationMode.Optimistic);
+
+        Assert.That(found, Is.False,
+            "A delete after an eviction staging must win: the batch apply must skip the gone row, and recovery must not resurrect it.");
+    }
+
+    [Test]
+    public async Task Evict_ThenCloseAndReopen_TheRowSurvivesRestart() {
+        System.Reflection.Assembly asm;
+        Type dbType, txType;
+        using (var cold = ColdStore.Open(dir).Unwrap()) {
+            (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
+            dbType = asm.GetType("TestNs.VaultDb")!;
+            txType = asm.GetType("TestNs.VaultDbTransaction")!;
+            var db = Activator.CreateInstance(dbType, cold)!;
+
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+                PropagationMode.Confirmed);
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Evict(1); return Result.Ok(); },
+                PropagationMode.Optimistic);
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                db, txType, (ctx, tx) => Result.Ok(), PropagationMode.Optimistic);
+        }
+
+        using var reopenedCold = ColdStore.Open(dir).Unwrap();
+        var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
+        reopenedCold.CompleteRecovery();
+
+        bool loaded = false, found = false;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            reopenedDb, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                loaded = dtx.Account.Storage.Load(1).IsOk();
+                found = dtx.Account.Get(1).IsOk();
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(loaded, Is.True, "An evicted row must survive a restart - its write-through copy is in cold storage.");
+        Assert.That(found, Is.True);
+    }
+
+    [Test]
+    public async Task Evict_CrossingTheSizeThreshold_FlushesImmediatelyWithinTheSameOperation() {
+        using var cold = ColdStore.Open(dir, evictionBatchThresholdBytes: 1).Unwrap();
+        var (db, txType, asm) = NewDb(cold);
+
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            PropagationMode.Confirmed);
+
+        var droppedWithinSameOperation = false;
+        var persisted = -1m;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                dtx.Account.Storage.Evict(1);
+                // With a 1-byte threshold, staging this single eviction already crosses
+                // it - the batch must be applied (mdbx write-through + memory drop)
+                // before this same operation returns, not deferred to the next
+                // operation's BeginScope boundary.
+                droppedWithinSameOperation = !dtx.Account.Get(1).IsOk();
+                var peek = dtx.Account.Storage.Peek(1);
+                persisted = peek.IsOk() ? peek.Unwrap().Balance : -1m;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(droppedWithinSameOperation, Is.True,
+            "Crossing the eviction batch's size threshold must flush immediately, not wait for the next operation boundary.");
+        Assert.That(persisted, Is.EqualTo(100m));
+    }
 }

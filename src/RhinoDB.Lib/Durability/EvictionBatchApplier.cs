@@ -1,4 +1,3 @@
-using RhinoDB.Core;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Native;
 
@@ -11,12 +10,14 @@ static public class EvictionBatchApplier {
         MdbxEnvironment env,
         IReadOnlyDictionary<uint, uint> tableDbis,
         IReadOnlyList<EvictionCandidate> candidates,
-        Func<uint, byte[], byte[]?> readCurrentValue) {
+        Func<uint, byte[], byte[]?> readCurrentValue,
+        List<EvictionCandidate>? appliedInto = null) {
         var rcTxn = env.BeginTxn(0, out Transaction? txn);
         if (rcTxn != 0 || txn is null) return Result<IReadOnlyList<EvictionCandidate>>.Error(MdbxErrorMapper.Map(rcTxn));
         using Transaction _ = txn;
 
-        var applied = new List<EvictionCandidate>();
+        var applied = appliedInto ?? [];
+        applied.Clear();
         foreach (EvictionCandidate candidate in candidates) {
             var currentValue = readCurrentValue(candidate.TableId, candidate.Key);
             if (currentValue is null) continue;

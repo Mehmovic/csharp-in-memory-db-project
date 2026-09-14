@@ -372,6 +372,33 @@ mixed-API surface to reason about) rather than a further patch to the
   - Bounded like every staging buffer: size cap / flush trigger (same shape as
     the WAL staging buffer's hard cap, risk #4) so an eviction burst cannot
     grow memory without limit.
+  - **Implemented 2026-09-14**: generated `Evict()` stages only
+    (`cold.StageEviction(TableId, key)`); `ColdStore.BeginScope` applies the
+    batch at the next operation boundary via `EvictionBatchApplier` (one txn,
+    re-reading each row's current value at apply time, commit + sync), then
+    executes the generated `EvictDrop` callbacks — registered per Evictable
+    table via `RegisterEvictionDrop` in the Ops constructor. Consequence to
+    document: `Evict` is now *eventual* — the memory drop lands at the next
+    operation boundary, not synchronously. Pinned by four tests in
+    `PersistentDurabilityTests.cs` (round-trip, update-before-boundary,
+    delete-before-boundary + restart, restart survival).
+  - **Size-threshold flush wired 2026-09-14**: `EvictionBatch.Stage` already
+    returned whether the byte threshold was crossed, but `ColdStore` was
+    discarding that signal — the batch only ever drained at the next
+    operation boundary, so the "cannot grow memory without limit" claim above
+    wasn't actually enforced for a single operation staging a very large
+    eviction burst. `ColdStore.StageEviction` now applies the batch
+    immediately, mid-operation, the moment `Stage` reports the threshold
+    crossed — same apply path as the boundary trigger (`ApplyPendingEvictions`
+    is idempotent to call from either site, both run on the single writer
+    thread so they can't race each other). `ColdStore.Open` gained an
+    `evictionBatchThresholdBytes` parameter (default
+    `EvictionBatch.DefaultSizeThresholdBytes`, 4 MiB) so this is testable
+    without staging megabytes — pinned by
+    `Evict_CrossingTheSizeThreshold_FlushesImmediatelyWithinTheSameOperation`
+    (`PersistentDurabilityTests.cs`), which opens with a 1-byte threshold and
+    asserts the row is already write-through'd and dropped from memory before
+    the same operation that staged it returns.
 - **`Load`/`Peek` (final):** memory first (resident rows are always current);
   non-resident rows are one synchronous `cold.Get` — safe with zero
   synchronization because eviction guarantees "evicted ⇒ mdbx exactly

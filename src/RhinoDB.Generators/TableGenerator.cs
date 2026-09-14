@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
+
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -17,64 +18,102 @@ public sealed class TableGenerator : IIncrementalGenerator {
     private const string DbErrorFullName = "RhinoDB.Core.DbError";
 
     static private readonly DiagnosticDescriptor MissingPrimaryKeyDiagnostic = new(
-        "RHINO001", "Table row missing [PrimaryKey]",
+        "RHINO001",
+        "Table row missing [PrimaryKey]",
         "Row type '{0}' is [Table]-attributed but declares no [PrimaryKey] parameter",
-        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
 
     static private readonly DiagnosticDescriptor EmptyAccessorDiagnostic = new(
-        "RHINO002", "Empty Accessor name",
+        "RHINO002",
+        "Empty Accessor name",
         "{0} has an explicit Accessor that is an empty string - omit Accessor for the default name, or give it a real one",
-        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
 
     static private readonly DiagnosticDescriptor CompositeIndexKindMismatchDiagnostic = new(
-        "RHINO003", "Composite index fields disagree on Kind/Uniqueness",
+        "RHINO003",
+        "Composite index fields disagree on Kind/Uniqueness",
         "Fields sharing Accessor '{0}' on '{1}' must all declare the same IndexKind and Uniqueness",
-        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
 
     static private readonly DiagnosticDescriptor CompositeIndexTooManyFieldsDiagnostic = new(
-        "RHINO004", "Composite index has too many fields",
+        "RHINO004",
+        "Composite index has too many fields",
         "Composite index '{0}' on '{1}' has {2} fields sharing one Accessor - at most 3 are supported",
-        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
 
     static private readonly DiagnosticDescriptor DuplicateOrderDiagnostic = new(
-        "RHINO005", "Duplicate explicit Order in composite index",
+        "RHINO005",
+        "Duplicate explicit Order in composite index",
         "Composite index '{0}' on '{1}' has two or more fields with the same explicit Order value",
-        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
 
     static private readonly DiagnosticDescriptor InvalidAutoIncrementTypeDiagnostic = new(
-        "RHINO007", "AutoIncrement field must be an incrementable unmanaged integer type",
-        "'{0}.{1}' is [AutoIncrement] but its type isn't one of sbyte/byte/short/ushort/int/uint/long/ulong - " +
-        "AutoIncrement needs a type the system can generate a new value for",
-        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+        "RHINO007",
+        "AutoIncrement field must be an incrementable unmanaged integer type",
+        "'{0}.{1}' is [AutoIncrement] but its type isn't one of sbyte/byte/short/ushort/int/uint/long/ulong - " + "AutoIncrement needs a type the system can generate a new value for",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
 
     static private readonly DiagnosticDescriptor EvictableOnInstantKindDiagnostic = new(
-        "RHINO008", "Evictable has no effect on Instant-kind tables",
-        "'{0}' is TableKind.Instant and sets Evictable = true - Instant-kind tables have no cold storage " +
-        "to evict to/from at all. Remove Evictable or use TableKind.Persistent.",
-        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+        "RHINO008",
+        "Evictable has no effect on Instant-kind tables",
+        "'{0}' is TableKind.Instant and sets Evictable = true - Instant-kind tables have no cold storage " + "to evict to/from at all. Remove Evictable or use TableKind.Persistent.",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
 
     static private readonly DiagnosticDescriptor InvalidValidateMethodSignatureDiagnostic = new(
-        "RHINO009", "Invalid [Validate] method signature",
-        "'{0}.{1}' is [Validate] but must be an at-least-internal static method shaped 'static DbError? {1}({0} row)' - " +
-        "generated code calls it from a sibling class in the same assembly, so it can't be private",
-        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+        "RHINO009",
+        "Invalid [Validate] method signature",
+        "'{0}.{1}' is [Validate] but must be an at-least-internal static method shaped 'static DbError? {1}({0} row)' - "
+        + "generated code calls it from a sibling class in the same assembly, so it can't be private",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
 
     static private readonly DiagnosticDescriptor DuplicateAccessorDiagnostic = new(
-        "RHINO010", "Duplicate table Accessor within one database",
+        "RHINO010",
+        "Duplicate table Accessor within one database",
         "'{0}' has two or more tables using Accessor '{1}' - each table's Accessor must be unique within its owning database",
-        "RhinoDB.Generators", DiagnosticSeverity.Error, isEnabledByDefault: true);
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var tableResults = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 TableAttributeFullName,
                 predicate: static (node, _) => node is StructDeclarationSyntax or RecordDeclarationSyntax,
-                transform: static (ctx, _) => ToTableModels(ctx))
+                transform: static (ctx, _) => ToTableModels(ctx)
+            )
             .SelectMany(static (results, _) => results);
 
-        context.RegisterSourceOutput(tableResults, static (spc, result) => {
-            foreach (var diagnostic in result.Diagnostics) spc.ReportDiagnostic(diagnostic);
-        });
+        context.RegisterSourceOutput(
+            tableResults,
+            static (spc, result) => {
+                foreach (var diagnostic in result.Diagnostics) spc.ReportDiagnostic(diagnostic);
+            }
+        );
 
         var tables = tableResults.Collect();
 
@@ -82,7 +121,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
             .ForAttributeWithMetadataName(
                 DatabaseAttributeFullName,
                 predicate: static (node, _) => node is ClassDeclarationSyntax,
-                transform: static (ctx, _) => ToDatabaseModel(ctx));
+                transform: static (ctx, _) => ToDatabaseModel(ctx)
+            );
 
         var combined = databases.Combine(tables);
         context.RegisterSourceOutput(combined, static (spc, pair) => Emit(spc, pair.Left, pair.Right));
@@ -90,19 +130,22 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private (bool Provided, string? Value) StringNamedArg(AttributeData attr, string name) {
         foreach (var kv in attr.NamedArguments)
-            if (kv.Key == name) return (true, (string?)kv.Value.Value);
+            if (kv.Key == name)
+                return (true, (string?)kv.Value.Value);
         return (false, null);
     }
 
     static private (bool Provided, int Value) IntNamedArg(AttributeData attr, string name) {
         foreach (var kv in attr.NamedArguments)
-            if (kv.Key == name) return (true, (int)kv.Value.Value!);
+            if (kv.Key == name)
+                return (true, (int)kv.Value.Value!);
         return (false, 0);
     }
 
     static private bool BoolNamedArg(AttributeData attr, string name) {
         foreach (var kv in attr.NamedArguments)
-            if (kv.Key == name) return (bool)kv.Value.Value!;
+            if (kv.Key == name)
+                return (bool)kv.Value.Value!;
         return false;
     }
 
@@ -119,11 +162,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var rowType = (INamedTypeSymbol)ctx.TargetSymbol;
 
         var primaryCtor = rowType.InstanceConstructors.FirstOrDefault(c =>
-            c.Parameters.Length > 0 &&
-            !(c.Parameters.Length == 1 && SymbolEqualityComparer.Default.Equals(c.Parameters[0].Type, rowType)));
+            c.Parameters.Length > 0 && !(c.Parameters.Length == 1 && SymbolEqualityComparer.Default.Equals(c.Parameters[0].Type, rowType))
+        );
 
         var primaryKeyParam = primaryCtor?.Parameters.FirstOrDefault(p =>
-            p.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == PrimaryKeyAttributeFullName));
+            p.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == PrimaryKeyAttributeFullName)
+        );
         if (primaryCtor is null || primaryKeyParam is null) {
             rowDiagnostics.Add(Diagnostic.Create(MissingPrimaryKeyDiagnostic, ctx.TargetNode.GetLocation(), rowType.Name));
             return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
@@ -156,51 +200,53 @@ public sealed class TableGenerator : IIncrementalGenerator {
             .Select((p, declIndex) => (Param: p, DeclIndex: declIndex))
             .Where(x => x.Param.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == IndexAttributeFullName))
             .Select(x => {
-                var indexAttribute = x.Param.GetAttributes().First(a => a.AttributeClass?.ToDisplayString() == IndexAttributeFullName);
-                var indexKind = (IndexKind)(int)indexAttribute.ConstructorArguments[0].Value!;
-                var uniqueness = indexAttribute.ConstructorArguments.Length > 1
-                    ? (Uniqueness)(int)indexAttribute.ConstructorArguments[1].Value!
-                    : Uniqueness.NonUnique;
-                var (accessorProvided, accessorValue) = StringNamedArg(indexAttribute, "Accessor");
-                if (accessorProvided && accessorValue == "")
-                    rowDiagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(indexAttribute), $"[Index] on '{rowType.Name}.{x.Param.Name}'"));
-                var accessor = accessorProvided && accessorValue != "" ? accessorValue! : x.Param.Name;
-                var order = indexAttribute.NamedArguments
-                    .Where(kv => kv.Key == "Order")
-                    .Select(kv => (int)kv.Value.Value!)
-                    .DefaultIfEmpty(-1)
-                    .First();
-                return (x.Param, x.DeclIndex, Kind: indexKind, Uniqueness: uniqueness, Accessor: accessor, Order: order, Attr: indexAttribute);
-            })
+                    var indexAttribute = x.Param.GetAttributes().First(a => a.AttributeClass?.ToDisplayString() == IndexAttributeFullName);
+                    var indexKind = (IndexKind)(int)indexAttribute.ConstructorArguments[0].Value!;
+                    var uniqueness = indexAttribute.ConstructorArguments.Length > 1
+                        ? (Uniqueness)(int)indexAttribute.ConstructorArguments[1].Value!
+                        : Uniqueness.NonUnique;
+                    var (accessorProvided, accessorValue) = StringNamedArg(indexAttribute, "Accessor");
+                    if (accessorProvided && accessorValue == "")
+                        rowDiagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(indexAttribute), $"[Index] on '{rowType.Name}.{x.Param.Name}'"));
+                    var accessor = accessorProvided && accessorValue != "" ? accessorValue! : x.Param.Name;
+                    var order = indexAttribute.NamedArguments
+                        .Where(kv => kv.Key == "Order")
+                        .Select(kv => (int)kv.Value.Value!)
+                        .DefaultIfEmpty(-1)
+                        .First();
+                    return (x.Param, x.DeclIndex, Kind: indexKind, Uniqueness: uniqueness, Accessor: accessor, Order: order, Attr: indexAttribute);
+                }
+            )
             .ToImmutableArray();
 
         var indexes = indexedParams
             .GroupBy(x => x.Accessor)
             .Select(g => {
-                var group = g.ToImmutableArray();
+                    var group = g.ToImmutableArray();
 
-                if (group.Length > 3) {
-                    rowDiagnostics.Add(Diagnostic.Create(CompositeIndexTooManyFieldsDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name, group.Length));
-                    return null;
+                    if (group.Length > 3) {
+                        rowDiagnostics.Add(Diagnostic.Create(CompositeIndexTooManyFieldsDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name, group.Length));
+                        return null;
+                    }
+
+                    if (group.Any(x => x.Kind != group[0].Kind || x.Uniqueness != group[0].Uniqueness)) {
+                        rowDiagnostics.Add(Diagnostic.Create(CompositeIndexKindMismatchDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name));
+                        return null;
+                    }
+
+                    var explicitOrders = group.Where(x => x.Order != -1).Select(x => x.Order).ToImmutableArray();
+                    if (explicitOrders.Length != explicitOrders.Distinct().Count()) {
+                        rowDiagnostics.Add(Diagnostic.Create(DuplicateOrderDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name));
+                        return null;
+                    }
+
+                    var ordered = group.OrderBy(x => x.Order == -1 ? x.DeclIndex : x.Order).ToImmutableArray();
+                    var fields = ordered
+                        .Select(x => new IndexFieldModel(x.Param.Name, x.Param.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)))
+                        .ToImmutableArray();
+                    return new IndexModel(g.Key, ordered[0].Kind, ordered[0].Uniqueness, fields);
                 }
-
-                if (group.Any(x => x.Kind != group[0].Kind || x.Uniqueness != group[0].Uniqueness)) {
-                    rowDiagnostics.Add(Diagnostic.Create(CompositeIndexKindMismatchDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name));
-                    return null;
-                }
-
-                var explicitOrders = group.Where(x => x.Order != -1).Select(x => x.Order).ToImmutableArray();
-                if (explicitOrders.Length != explicitOrders.Distinct().Count()) {
-                    rowDiagnostics.Add(Diagnostic.Create(DuplicateOrderDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name));
-                    return null;
-                }
-
-                var ordered = group.OrderBy(x => x.Order == -1 ? x.DeclIndex : x.Order).ToImmutableArray();
-                var fields = ordered
-                    .Select(x => new IndexFieldModel(x.Param.Name, x.Param.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)))
-                    .ToImmutableArray();
-                return new IndexModel(g.Key, ordered[0].Kind, ordered[0].Uniqueness, fields);
-            })
+            )
             .Where(m => m is not null)
             .Select(m => m!)
             .ToImmutableArray();
@@ -210,11 +256,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
             if (!member.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == ValidateAttributeFullName)) continue;
 
             var validSignature = member.IsStatic
-                && member.DeclaredAccessibility != Accessibility.Private
-                && member.Parameters.Length == 1
-                && SymbolEqualityComparer.Default.Equals(member.Parameters[0].Type, rowType)
-                && member.ReturnType is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } returnType
-                && returnType.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == $"global::{DbErrorFullName}";
+                                 && member.DeclaredAccessibility != Accessibility.Private
+                                 && member.Parameters.Length == 1
+                                 && SymbolEqualityComparer.Default.Equals(member.Parameters[0].Type, rowType)
+                                 && member.ReturnType is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } returnType
+                                 && returnType.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == $"global::{DbErrorFullName}";
 
             if (!validSignature) {
                 rowDiagnostics.Add(Diagnostic.Create(InvalidValidateMethodSignatureDiagnostic, member.Locations.FirstOrDefault() ?? Location.None, rowType.Name, member.Name));
@@ -264,7 +310,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 evictable,
                 autoIncrementFields.ToImmutable(),
                 indexes,
-                validateMethodNames.ToImmutable());
+                validateMethodNames.ToImmutable()
+            );
             results.Add((model, ImmutableArray<Diagnostic>.Empty));
         }
         return results.ToImmutable();
@@ -275,7 +322,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         return new DatabaseModel(
             databaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             databaseType.Name,
-            databaseType.ContainingNamespace.IsGlobalNamespace ? null : databaseType.ContainingNamespace.ToDisplayString());
+            databaseType.ContainingNamespace.IsGlobalNamespace ? null : databaseType.ContainingNamespace.ToDisplayString()
+        );
     }
 
     static private void Emit(SourceProductionContext context, DatabaseModel database, ImmutableArray<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)> allResults) {
@@ -370,6 +418,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    public bool Dirty { get; private set; }");
         sb.AppendLine("    private DbError lastError;");
         sb.AppendLine("    internal DbError LastError => lastError;");
+        sb.AppendLine();
+    }
+
+    static private void EmitEvictableField(StringBuilder sb, TableModel table) {
+        sb.AppendLine($"    public const bool Evictable = {table.Evictable.ToString().ToLower()};");
         sb.AppendLine();
     }
 
@@ -679,6 +732,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    private readonly ColdTable<{key}, {row}> coldTable;");
         sb.AppendLine("    private readonly ColdStore cold;");
         EmitChangeTrackingFields(sb, key, row);
+        EmitEvictableField(sb, table);
 
         sb.Append($"    public {opsName}(DenseArray<{row}> storage, {primaryIndexType} primaryIndex, ColdTable<{key}, {row}> coldTable, ColdStore cold");
         AppendAutoIncrementAndIndexParams(sb, table);
@@ -688,6 +742,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        this.coldTable = coldTable;");
         sb.AppendLine("        this.cold = cold;");
         AppendAutoIncrementAndIndexAssignments(sb, table);
+        if (table.Evictable) sb.AppendLine("        cold.RegisterEvictionDrop(TableId, TryGetCurrentRowBytesForEviction, EvictDrop);");
         sb.AppendLine("    }");
         sb.AppendLine();
 
@@ -793,7 +848,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    public StorageAccessor Storage => new(this);");
         sb.AppendLine($"    public readonly struct StorageAccessor({opsName} ops) {{");
         sb.AppendLine($"        public Result Load({key} id) => ops.LoadInternal(id);");
-        sb.AppendLine($"        public Result Evict({key} id) => ops.EvictInternal(id);");
+        sb.AppendLine($"        public Result Evict({key} id) => ops.Evict(id);");
         sb.AppendLine($"        public Result<{row}> Peek({key} id) => ops.cold.Peek(ops.coldTable, id);");
         sb.AppendLine("    }");
         sb.AppendLine();
@@ -812,10 +867,25 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    private Result EvictInternal({key} id) {{");
+        sb.AppendLine($"    public Result Evict({key} id) {{");
+        sb.AppendLine("        cold.StageEviction(TableId, MemoryPackSerializer.Serialize(id));");
+        sb.AppendLine("        return Result.Ok();");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        sb.AppendLine("    internal byte[]? TryGetCurrentRowBytesForEviction(byte[] keyBytes) {");
+        sb.AppendLine($"        var id = MemoryPackSerializer.Deserialize<{key}>(keyBytes)!;");
         sb.AppendLine("        var offsetResult = primaryIndex.GetOffset(id);");
-        sb.AppendLine("        if (offsetResult.IsError())");
-        sb.AppendLine("            return offsetResult.GetError().Kind == ErrorKind.IndexKeyNotFound ? Result.Ok() : offsetResult.Void();");
+        sb.AppendLine("        if (offsetResult.IsError()) return null;");
+        sb.AppendLine("        var row = storage.Get(offsetResult.Unwrap());");
+        sb.AppendLine("        return MemoryPackSerializer.Serialize(row);");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        sb.AppendLine("    internal void EvictDrop(byte[] keyBytes) {");
+        sb.AppendLine($"        var id = MemoryPackSerializer.Deserialize<{key}>(keyBytes)!;");
+        sb.AppendLine("        var offsetResult = primaryIndex.GetOffset(id);");
+        sb.AppendLine("        if (offsetResult.IsError()) return;");
         sb.AppendLine("        var offset = offsetResult.Unwrap();");
         sb.AppendLine("        var row = storage.Get(offset);");
         sb.AppendLine("        var lastOffset = storage.LastOffset;");
@@ -835,7 +905,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"            {IndexFieldName(idx)}.Insert({KeyExpr("swappedRow", idx)}, offset);");
         }
         sb.AppendLine("        }");
-        sb.AppendLine("        return Result.Ok();");
         sb.AppendLine("    }");
     }
 
@@ -911,6 +980,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine($"    private readonly {ConcreteIndexType(idx)} {fieldName} = new();");
             }
         }
+
         if (persistentTables.Length > 0) sb.AppendLine("    private readonly ColdStore cold;");
         foreach (var table in tables)
             sb.AppendLine($"    private readonly {database.SimpleName}{table.Accessor}Ops {Camel(table.Accessor)}Ops;");
@@ -973,14 +1043,23 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private string Camel(string name) => name.Length == 0 ? name : char.ToLowerInvariant(name[0]) + name.Substring(1);
 
-    private sealed class TableModel(
-        string rowTypeFullName, string? rowNamespace,
-        TableKind kind, string ownerDatabaseFullName,
-        string primaryKeyName, string primaryKeyTypeFullName, IndexKind primaryKeyKind,
-        string primaryKeyAccessor, string accessor, int chunkSize, bool evictable,
+    private sealed class TableModel
+    (
+        string rowTypeFullName,
+        string? rowNamespace,
+        TableKind kind,
+        string ownerDatabaseFullName,
+        string primaryKeyName,
+        string primaryKeyTypeFullName,
+        IndexKind primaryKeyKind,
+        string primaryKeyAccessor,
+        string accessor,
+        int chunkSize,
+        bool evictable,
         ImmutableArray<AutoIncrementFieldModel> autoIncrementFields,
         ImmutableArray<IndexModel> indexes,
-        ImmutableArray<string> validateMethodNames) {
+        ImmutableArray<string> validateMethodNames
+    ) {
         public string RowTypeFullName { get; } = rowTypeFullName;
         public string? RowNamespace { get; } = rowNamespace;
         public TableKind Kind { get; } = kind;

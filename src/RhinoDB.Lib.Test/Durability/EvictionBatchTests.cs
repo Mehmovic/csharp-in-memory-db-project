@@ -58,16 +58,31 @@ public class EvictionBatchTests {
     }
 
     [Test]
-    public void DrainStaged_ReturnsEverythingStagedAndResetsForTheNextBatch() {
+    public void DrainStaged_CopiesIntoTheCallerOwnedListAndResetsForTheNextBatch() {
         var batch = new EvictionBatch();
         batch.Stage(TableId, [1]);
         batch.Stage(TableId, [2]);
 
-        var drained = batch.DrainStaged();
-        var drainedAgain = batch.DrainStaged();
+        var into = new List<EvictionCandidate>();
+        batch.DrainStaged(into);
+        Assert.That(into, Has.Count.EqualTo(2));
 
-        Assert.That(drained, Has.Count.EqualTo(2));
-        Assert.That(drainedAgain, Is.Empty, "A second drain with nothing newly staged must come back empty, not repeat the prior batch.");
+        batch.DrainStaged(into);
+        Assert.That(into, Is.Empty, "A second drain with nothing newly staged must come back empty, not repeat the prior batch.");
+    }
+
+    [Test]
+    public void DrainStaged_IntoTheSameListTwice_SecondDrainReplacesNotAppends() {
+        var batch = new EvictionBatch();
+        var into = new List<EvictionCandidate>();
+        batch.Stage(TableId, [1]);
+        batch.DrainStaged(into);
+        batch.Stage(TableId, [2]);
+        batch.DrainStaged(into);
+
+        Assert.That(into, Has.Count.EqualTo(1),
+            "A reusable drain list must be reset per drain, never appended across drains - the caller owns one list for the process lifetime.");
+        Assert.That(into[0].Key, Is.EqualTo(new byte[] { 2 }));
     }
 
     [Test]
