@@ -64,6 +64,24 @@ public sealed class WriteAheadLog : IDisposable {
         return frame.Length;
     }
 
+    internal async Task<DbError?> Truncate() {
+        var flushError = await JoinGroupCommit();
+        if (flushError is { } err) return err;
+
+        try {
+            lock (appendLock) {
+                fileStream.SetLength(WalFileHeaderCodec.Size);
+                fileStream.Seek(WalFileHeaderCodec.Size, SeekOrigin.Begin);
+                fileStream.Flush(flushToDisk: true);
+            }
+        } catch (Exception ex) {
+            return DbError.SystemFailure(ex);
+        }
+
+        Interlocked.Exchange(ref bytesSinceLastFlush, 0);
+        return null;
+    }
+
     private void TriggerPeriodicFlushIfPending() {
         if (Volatile.Read(ref bytesSinceLastFlush) > 0) _ = JoinGroupCommit();
     }
@@ -81,15 +99,18 @@ public sealed class WriteAheadLog : IDisposable {
 
     private void RunFlush(TaskCompletionSource<DbError?> tcs) {
         DbError? error = null;
-        try {
-            TestOnlyBeforeFlush?.Invoke();
-            lock (appendLock) fileStream.Flush(flushToDisk: true);
-            Interlocked.Exchange(ref bytesSinceLastFlush, 0);
-        } catch (IOException ex) {
-            error = DbError.SystemFailure(ex);
+        TestOnlyBeforeFlush?.Invoke();
+        lock (appendLock) {
+            try {
+                fileStream.Flush(flushToDisk: true);
+                Interlocked.Exchange(ref bytesSinceLastFlush, 0);
+            } catch (Exception ex) {
+                error = DbError.SystemFailure(ex);
+            }
+
+            lock (groupLock) { if (ReferenceEquals(inFlightGroup, tcs)) inFlightGroup = null; }
         }
 
-        lock (groupLock) { if (ReferenceEquals(inFlightGroup, tcs)) inFlightGroup = null; }
         tcs.SetResult(error);
     }
 
@@ -97,6 +118,11 @@ public sealed class WriteAheadLog : IDisposable {
         if (disposed) return;
         disposed = true;
         periodicFlushTimer.Dispose();
+
+        Task<DbError?>? pending;
+        lock (groupLock) pending = inFlightGroup?.Task;
+        pending?.GetAwaiter().GetResult();
+
         lock (appendLock) fileStream.Flush(flushToDisk: true);
         fileStream.Dispose();
     }

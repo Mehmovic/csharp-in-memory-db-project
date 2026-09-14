@@ -1,3 +1,4 @@
+using RhinoDB.Core;
 using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Tables;
 
@@ -177,5 +178,53 @@ public class WriteAheadLogTests {
         var scan = WalRecordCodec.Scan(bytes.AsSpan(WalFileHeaderCodec.Size).ToArray());
         Assert.That(scan.Status, Is.EqualTo(WalScanStatus.Clean));
         Assert.That(scan.Entries, Has.Count.EqualTo(1));
+    }
+
+    [Test]
+    public async Task Truncate_ThenAppend_WritesRightAfterTheHeaderNotAtTheStalePosition() {
+        var path = Path.Combine(dir, "wal.dat");
+        var wal = WriteAheadLog.Create(path, Guid.NewGuid()).Unwrap();
+        var error = await wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange());
+        Assert.That(error, Is.Null);
+
+        var truncateError = await wal.Truncate();
+        Assert.That(truncateError, Is.Null);
+
+        var appendError = await wal.AppendConfirmed(2, WalEntryKind.Operation, OneChange(2));
+        Assert.That(appendError, Is.Null);
+        wal.Dispose();
+
+        var bytes = File.ReadAllBytes(path);
+        var expectedFrame = WalRecordCodec.Encode(2, WalEntryKind.Operation, OneChange(2));
+        Assert.That(bytes.Length, Is.EqualTo(WalFileHeaderCodec.Size + expectedFrame.Length),
+            "The post-truncate append must land immediately after the header, not at the stale pre-truncate file position.");
+        var scan = WalRecordCodec.Scan(bytes.AsSpan(WalFileHeaderCodec.Size).ToArray());
+        Assert.That(scan.Status, Is.EqualTo(WalScanStatus.Clean));
+        Assert.That(scan.Entries, Has.Count.EqualTo(1));
+        Assert.That(scan.Entries[0].Lsn, Is.EqualTo(2));
+    }
+
+    [Test]
+    public async Task AppendConfirmed_ManyConcurrentAppendsUnderLoad_EveryAcknowledgedEntryIsActuallyPersisted() {
+        const int OperationCount = 5_000;
+        var path = Path.Combine(dir, "wal.dat");
+        var wal = WriteAheadLog.Create(path, Guid.NewGuid()).Unwrap();
+
+        var pending = new Task<DbError?>[OperationCount];
+        for (var i = 0; i < OperationCount; i++) {
+            var lsn = i + 1;
+            pending[i] = wal.AppendConfirmed(lsn, WalEntryKind.Operation, OneChange(lsn));
+        }
+        var results = await Task.WhenAll(pending);
+        wal.Dispose();
+
+        Assert.That(results, Has.All.Null, "Every append this loop issued must come back acknowledged with no error.");
+
+        var bytes = File.ReadAllBytes(path);
+        var scan = WalRecordCodec.Scan(bytes.AsSpan(WalFileHeaderCodec.Size).ToArray());
+        Assert.That(scan.Status, Is.EqualTo(WalScanStatus.Clean));
+        Assert.That(scan.Entries, Has.Count.EqualTo(OperationCount),
+            "Every entry acknowledged as durable must actually be present on disk - a late joiner incorrectly sharing an already-flushed group's completion would silently lose entries here.");
+        Assert.That(scan.Entries.Select(e => e.Lsn), Is.EquivalentTo(Enumerable.Range(1, OperationCount).Select(i => (long)i)));
     }
 }

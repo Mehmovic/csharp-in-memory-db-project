@@ -1,0 +1,75 @@
+using RhinoDB.Core;
+using RhinoDB.Lib.Cold;
+using RhinoDB.Native;
+
+namespace RhinoDB.Lib.Durability;
+
+public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal) {
+    private const string MetadataDbiName = "__rhinodb_checkpoint__";
+    private const uint CreateDbi = 0x40000;
+    private const int MdbxResultTrue = -1;
+    static private readonly byte[] WatermarkKey = [0];
+
+    private uint metadataDbi;
+    private bool metadataDbiResolved;
+
+    public Result<long> ReadCheckpointedLsn() {
+        var rc = env.BeginTxn(0, out Transaction? txn);
+        if (rc != 0 || txn is null) return Result<long>.Error(MdbxErrorMapper.Map(rc));
+        using Transaction _ = txn;
+
+        Result resolved = EnsureMetadataDbi(txn);
+        if (resolved.IsError()) return Result<long>.Error(resolved.GetError());
+
+        var getRc = txn.Get(metadataDbi, WatermarkKey, out var bytes);
+        return getRc != 0 ? Result<long>.Ok(-1L) : Result<long>.Ok(BitConverter.ToInt64(bytes));
+    }
+
+    public async Task<Result> RunCheckpoint(
+        long boundaryLsn,
+        IReadOnlyDictionary<uint, uint> tableDbis,
+        IEnumerable<CheckpointRow> residentRows,
+        IEnumerable<(uint TableId, byte[] Key)> deletedSinceLastCheckpoint) {
+        var rcTxn = env.BeginTxn(0, out Transaction? txn);
+        if (rcTxn != 0 || txn is null) return Result.Error(MdbxErrorMapper.Map(rcTxn));
+        using Transaction _ = txn;
+
+        foreach (CheckpointRow row in residentRows) {
+            if (!tableDbis.TryGetValue(row.TableId, out var dbi)) continue;
+            var putRc = txn.Put(dbi, row.Key, row.Row, 0);
+            if (putRc != 0) return Result.Error(MdbxErrorMapper.Map(putRc));
+        }
+
+        foreach (var (tableId, key) in deletedSinceLastCheckpoint) {
+            if (!tableDbis.TryGetValue(tableId, out var dbi)) continue;
+            var delRc = txn.Delete(dbi, key);
+            if (delRc != 0 && MdbxErrorMapper.Map(delRc).Kind != ErrorKind.IndexKeyNotFound) return Result.Error(MdbxErrorMapper.Map(delRc));
+        }
+
+        Result metadataResolved = EnsureMetadataDbi(txn);
+        if (metadataResolved.IsError()) return metadataResolved;
+
+        var watermarkRc = txn.Put(metadataDbi, WatermarkKey, BitConverter.GetBytes(boundaryLsn), 0);
+        if (watermarkRc != 0) return Result.Error(MdbxErrorMapper.Map(watermarkRc));
+
+        var commitRc = txn.Commit();
+        if (commitRc != 0) return Result.Error(MdbxErrorMapper.Map(commitRc));
+
+        var syncRc = env.Sync(force: true, nonblock: false);
+        if (syncRc != 0 && syncRc != MdbxResultTrue) return Result.Error(MdbxErrorMapper.Map(syncRc));
+
+        var truncateError = await wal.Truncate();
+        return truncateError is { } err ? Result.Error(err) : Result.Ok();
+    }
+
+    private Result EnsureMetadataDbi(Transaction txn) {
+        if (metadataDbiResolved) return Result.Ok();
+
+        var rc = txn.OpenDbi(MetadataDbiName, CreateDbi, out var dbi);
+        if (rc != 0) return Result.Error(MdbxErrorMapper.Map(rc));
+
+        metadataDbi = dbi;
+        metadataDbiResolved = true;
+        return Result.Ok();
+    }
+}

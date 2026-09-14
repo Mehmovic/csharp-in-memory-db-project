@@ -226,17 +226,85 @@ successful experiment too, recorded and closed like the coalescing one was.
 - Crash rule: only the fsync'd prefix exists; everything past it is treated as
   never happened.
 
+**Sustained-load validation (2026-09-14, `WriteAheadLogSustainedLoadTests.cs`)** — Phase 0's
+numbers were all single-burst (fire N concurrently, wait for all, done). A first attempt at a
+sustained-load check used 16 workers each awaiting their own append before issuing their next one
+— that measured **~280 μs/op, ~10x worse than Phase 0's burst numbers**, alarming until the model
+itself was recognized as wrong: nothing in the real system ever calls `AppendConfirmed` that way.
+`PooledOperation.Run()` never awaits one operation's durability before `DbExecutionLoop.RunLoop`
+dequeues the next — the single writer thread dispatches back-to-back, non-blocking, which is much
+closer to Phase 0's burst shape than to a self-throttling request-response loop. Corrected to 10
+successive bursts of 5,000 (fired without individually awaiting each one, matching the real
+dispatch pattern) after a 20,000-op untimed warm-up: **15-40 μs/op steady state**, no degradation
+across the run (second-half average lower than first-half). Confirms group commit holds up over a
+longer sustained run, not just a single burst — and is a reminder that a benchmark's *concurrency
+shape*, not just its op count, has to match how the real caller actually behaves, or the number it
+produces is meaningless (worse: alarming in the wrong direction).
+
+**Correctness review findings (2026-09-14) — two real bugs, both fixed:**
+
+1. **Late-joiner race (durability-breaking).** The original `RunFlush` released `appendLock` right
+   after `Flush()` returned, then cleared `inFlightGroup` afterward under the *separate* `groupLock`.
+   An append landing in that gap would write bytes not covered by the flush that just happened, yet
+   still observe the stale `inFlightGroup` and get told it was durable when it wasn't. Fixed by
+   holding `appendLock` across the *whole* flush-then-clear sequence (`groupLock` nested inside it) —
+   no append can write and no group can be joined in the gap anymore. Regression test:
+   `AppendConfirmed_ManyConcurrentAppendsUnderLoad_EveryAcknowledgedEntryIsActuallyPersisted`
+   (`WriteAheadLogTests.cs`) — fires 5,000 concurrent appends and verifies every one acknowledged as
+   durable is actually present on disk afterward.
+2. **`Truncate` stranded the write position (corruption on next append).** `FileStream.SetLength`
+   doesn't move `Position`; nothing called `Seek` afterward, so the next `Write` landed at the stale
+   pre-truncate offset — a sparse hole instead of a clean WAL. Fixed with an explicit `Seek` to
+   `WalFileHeaderCodec.Size` right after `SetLength`. Regression test:
+   `Truncate_ThenAppend_WritesRightAfterTheHeaderNotAtTheStalePosition`.
+
+Also widened `RunFlush`'s catch from `IOException` to `Exception` (an `ObjectDisposedException` from
+a dispose racing a still-scheduled flush would otherwise escape uncaught, leaving `tcs` permanently
+uncompleted — a hang for every caller sharing that group, not just an unobserved exception), and made
+`Dispose` wait for any in-flight group before disposing the file stream.
+
+**A real, currently-unsolved follow-up, not pursued further today:** holding `appendLock` across the
+entire fsync means any append landing mid-flush blocks the calling thread for the flush's full
+duration — in production that thread is the single writer thread, which the whole pooled-execution
+redesign this session started with was built specifically to keep non-blocking. A same-day attempt at
+a lock-free fix (`RandomAccess.FlushToDisk` on the raw handle instead of `FileStream.Flush`, closing
+group membership right before the fsync call instead of after) reasoned out correctly on paper and
+matched the existing tests in a dry trace, but **crashed the test host process** when actually run —
+a real bug in that approach, not yet root-caused. Reverted to the lock-spanning version (proven
+correct via 5 repeated clean full-suite runs) rather than debug a process crash in an increasingly
+complex design under time pressure. This gap is real and worth a dedicated pass later — with more
+time, a smaller isolated repro, and probably native-level debugging — not blocking Phase 3 or the
+`ColdStore` wiring next, since the current design's throughput (15-40 μs/op sustained, see above) is
+already well under the mdbx cost it replaces even with this cost included.
+
 ### Phase 3 — checkpointing (WAL ↔ libmdbx integration)
 
 - **Checkpoint LSN** stored in a small libmdbx metadata sub-database: "all
   changes ≤ LSN are fully materialized in this snapshot."
-- Checkpoint procedure (writer thread only — single-writer makes this simple):
+- **Checkpoint procedure — revised 2026-09-14 during implementation, two
+  changes from the original framing above, both tightening it:**
   1. freeze the current group's boundary LSN;
-  2. dump every in-memory table's settled rows into their mdbx sub-databases —
-     the generated `Serialize` path already exists (bulk-load unchecked fast
-     path, like eager-load: data was validated at insert time);
-  3. fsync mdbx, then atomically record the checkpoint LSN in the metadata db;
-  4. fsync the WAL once more, then truncate it to zero and fsync again — the
+  2. **one single mdbx write transaction** does *both* the row dump *and* the
+     watermark record — not two separate steps. Rationale: the original
+     "fsync mdbx, then atomically record the checkpoint LSN" framing read as
+     two transactions, which would reopen exactly the crash window risk #2
+     names ("crash between mdbx dump and LSN record"). Folding both into one
+     `Commit()` makes that crash window **impossible by construction** — the
+     dumped rows and the watermark either both land or neither does. One
+     fewer failure mode to test for, not a corner cut.
+  3. **the transaction also deletes every key removed since the last
+     checkpoint, not just puts resident rows — a gap in the original
+     procedure, caught during implementation.** "Dump every in-memory table's
+     settled rows" only covers rows still resident; a row that was deleted is
+     by definition no longer resident, so a naive resident-only dump would
+     silently leave a stale copy in mdbx forever. The fix: the checkpoint
+     transaction also replays every `ChangeKind.Delete` WAL entry since the
+     last checkpoint as an mdbx delete — the WAL tail is the only place those
+     tombstones exist before checkpoint, which is exactly why full-row-value
+     WAL entries (Phase 1, above) already carry a key-only tombstone for
+     deletes, ready to be consumed this way.
+  4. `Commit()`, then `env_sync_ex`;
+  5. fsync the WAL once more, then truncate it to zero and fsync again — the
      WAL after a checkpoint logically starts at checkpointLSN+1.
 - **Restart = open mdbx + replay WAL entries > checkpoint LSN** through the
   normal generated `Apply` machinery (bounded work: only the tail since the
