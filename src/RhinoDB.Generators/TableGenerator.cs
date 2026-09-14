@@ -326,6 +326,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private string IndexFieldName(IndexModel idx) => $"{Camel(idx.AccessorName)}Index";
 
+    static private uint ComputeTableId(string accessor) {
+        return Encoding.UTF8.GetBytes(accessor)
+            .Aggregate(2166136261u, (current, b) => (current ^ b) * 16777619u);
+    }
+
     static private string EmitOpsClass(TableModel table, string ownerSimpleName) =>
         table.Kind == TableKind.Persistent ? EmitPersistentOpsClass(table, ownerSimpleName) : EmitInstantOpsClass(table, ownerSimpleName);
 
@@ -337,7 +342,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using System.Runtime.InteropServices;");
         sb.AppendLine("using RhinoDB.Core;");
-        if (isPersistent) sb.AppendLine("using RhinoDB.Lib.Cold;");
+        if (isPersistent) {
+            sb.AppendLine("using MemoryPack;");
+            sb.AppendLine("using RhinoDB.Lib.Cold;");
+        }
         sb.AppendLine("using RhinoDB.Lib.Indexing;");
         sb.AppendLine("using RhinoDB.Lib.Storage;");
         sb.AppendLine("using RhinoDB.Lib.Tables;");
@@ -666,6 +674,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitOpsClassHeader(sb, table, isPersistent: true);
 
         sb.AppendLine($"public sealed class {opsName} {{");
+        sb.AppendLine($"    private const uint TableId = {ComputeTableId(table.Accessor)}u;");
         EmitStorageAndIndexFields(sb, table, primaryIndexType);
         sb.AppendLine($"    private readonly ColdTable<{key}, {row}> coldTable;");
         sb.AppendLine("    private readonly ColdStore cold;");
@@ -708,8 +717,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    primaryIndex.Insert(pk, offset);");
         foreach (var idx in table.Indexes)
             sb.AppendLine($"                    {IndexFieldName(idx)}.Insert({KeyExpr("c.Row", idx)}, offset);");
-        sb.AppendLine("                    var coldPutResult = cold.Put(coldTable, pk, c.Row);");
-        sb.AppendLine("                    if (coldPutResult.IsError()) { lastError = coldPutResult.GetError(); break; }");
+        sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Insert, MemoryPackSerializer.Serialize(pk), MemoryPackSerializer.Serialize(c.Row));");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("                case ChangeKind.Update: {");
@@ -726,8 +734,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"                        {IndexFieldName(idx)}.Insert({KeyExpr("c.Row", idx)}, offset);");
             sb.AppendLine("                    }");
         }
-        sb.AppendLine("                    var coldPutResult = cold.Put(coldTable, c.Key, c.Row);");
-        sb.AppendLine("                    if (coldPutResult.IsError()) { lastError = coldPutResult.GetError(); break; }");
+        sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Update, MemoryPackSerializer.Serialize(c.Key), MemoryPackSerializer.Serialize(c.Row));");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("                default: {");
@@ -752,8 +759,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"                        {IndexFieldName(idx)}.Insert({KeyExpr("swappedRow", idx)}, offset);");
         }
         sb.AppendLine("                    }");
-        sb.AppendLine("                    var coldDeleteResult = cold.Delete(coldTable, c.Key);");
-        sb.AppendLine("                    if (coldDeleteResult.IsError()) { lastError = coldDeleteResult.GetError(); break; }");
+        sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Delete, MemoryPackSerializer.Serialize(c.Key), null);");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
@@ -795,7 +801,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    private Result LoadInternal({key} id) {{");
         sb.AppendLine("        if (primaryIndex.GetOffset(id).IsOk()) return Result.Ok();");
         sb.AppendLine("        if (!cold.IsScopeActive) return Result.Error(DbError.NoActiveTransaction());");
-        sb.AppendLine("        var coldResult = cold.Get(coldTable, id);");
+        sb.AppendLine("        var coldResult = cold.Peek(coldTable, id);");
         sb.AppendLine("        if (coldResult.IsError()) return coldResult.Void();");
         sb.AppendLine("        var row = coldResult.Unwrap();");
         sb.AppendLine("        var offset = storage.Insert(row);");

@@ -165,14 +165,29 @@ public class PersistentSecondaryIndexTests {
         Assert.That(found, Is.True, "The swap-relocated row's unique-index entry must still resolve at its new offset.");
     }
 
+    // Evict only removes a row from memory - it has never write-through'd to
+    // cold storage on its own. Under the WAL, "reaches cold storage"
+    // additionally now requires a checkpoint, which (until step 6's
+    // live-checkpoint plumbing lands) only happens via startup recovery - so
+    // this test inserts, closes/reopens through CompleteRecovery to get the
+    // row into mdbx, then evicts before checking Storage.Load restores it.
     [Test]
     public async Task StorageEvict_RemovesTheSecondaryIndexEntry_StorageLoadRestoresIt() {
-        using var cold = ColdStore.Open(dir).Unwrap();
-        var (db, txType, asm) = NewDb(cold);
+        System.Reflection.Assembly asm;
+        Type dbType, txType;
+        using (var cold = ColdStore.Open(dir).Unwrap()) {
+            (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
+            dbType = asm.GetType("TestNs.BankDb")!;
+            txType = asm.GetType("TestNs.BankDbTransaction")!;
+            var seedDb = Activator.CreateInstance(dbType, cold)!;
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                seedDb, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1001, 1, 100m)); return Result.Ok(); },
+                PropagationMode.Confirmed);
+        }
 
-        await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1001, 1, 100m)); return Result.Ok(); },
-            PropagationMode.Confirmed);
+        using var reopenedCold = ColdStore.Open(dir).Unwrap();
+        var db = Activator.CreateInstance(dbType, reopenedCold)!;
+        reopenedCold.CompleteRecovery();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Evict(1); return Result.Ok(); },
@@ -237,6 +252,7 @@ public class PersistentSecondaryIndexTests {
 
         using var reopenedCold = ColdStore.Open(dir).Unwrap();
         var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
+        reopenedCold.CompleteRecovery();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             reopenedDb, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Load(1); return Result.Ok(); },

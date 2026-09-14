@@ -146,6 +146,7 @@ public class PersistentDurabilityTests {
 
         using var reopenedCold = ColdStore.Open(dir).Unwrap();
         var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
+        reopenedCold.CompleteRecovery();
 
         bool loaded = false, found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
@@ -334,6 +335,7 @@ public class PersistentDurabilityTests {
 
         using var reopenedCold = ColdStore.Open(dir).Unwrap();
         var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
+        reopenedCold.CompleteRecovery();
 
         bool firstLoaded = false, secondLoaded = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(

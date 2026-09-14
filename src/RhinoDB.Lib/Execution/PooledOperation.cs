@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using System.Threading.Tasks.Sources;
-using RhinoDB.Lib.Cold;
 
 namespace RhinoDB.Lib.Execution;
 
@@ -76,17 +75,17 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
         catch (Exception ex) { result = TValue.FromException(ex); }
         if (txCreated && !result.IsOk()) tx.Discard();
 
-        Complete(result, ctx.Cold?.EndScope(commit: result.IsOk(), forceSync: mode == PropagationMode.Confirmed));
-    }
-    
-    private void Complete(TValue result, Task<int>? syncTask) {
-        if (syncTask is null || syncTask.IsCompleted) {
-            core.SetResult(Finalize(result, syncTask));
-            return;
-        }
-        syncTask.ContinueWith(t => core.SetResult(Finalize(result, t)), TaskScheduler.Default);
+        Complete(result, ctx.Cold?.EndScope(commit: result.IsOk(), mode));
     }
 
-    static private TValue Finalize(TValue result, Task<int>? syncTask) =>
-        syncTask is { Result: var rc } && rc != 0 ? TValue.FromError(MdbxErrorMapper.Map(rc)) : result;
+    private void Complete(TValue result, Task<DbError?>? durabilityTask) {
+        if (durabilityTask is null || durabilityTask.IsCompleted) {
+            core.SetResult(Finalize(result, durabilityTask));
+            return;
+        }
+        durabilityTask.ContinueWith(t => core.SetResult(Finalize(result, t)), TaskScheduler.Default);
+    }
+
+    static private TValue Finalize(TValue result, Task<DbError?>? durabilityTask) =>
+        durabilityTask is { Result: { } err } ? TValue.FromError(err) : result;
 }

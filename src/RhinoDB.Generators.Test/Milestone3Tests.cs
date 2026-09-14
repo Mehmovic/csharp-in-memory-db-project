@@ -160,6 +160,7 @@ public class Milestone3Tests {
 
         using var reopenedCold = ColdStore.Open(dir).Unwrap();
         var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
+        reopenedCold.CompleteRecovery();
 
         var loaded = false;
         decimal balance = -1;
@@ -175,42 +176,68 @@ public class Milestone3Tests {
         Assert.That(balance, Is.EqualTo(100m));
     }
 
+    // Evict only removes a row from memory - it has never write-through'd to
+    // cold storage on its own (a pre-existing gap, unrelated to the WAL
+    // rework). Under the WAL, "reaches cold storage" additionally now
+    // requires a checkpoint, which (until step 6's live-checkpoint plumbing
+    // lands) only happens via startup recovery - so these tests insert,
+    // close/reopen through CompleteRecovery to get the row into mdbx, then
+    // evict against a resident-free table before checking Storage.Load/Peek.
     [Test]
     public async Task Evict_ThenGet_ReportsNotFound_ButStorageLoadRestoresIt() {
-        using var cold = ColdStore.Open(dir).Unwrap();
-        var (db, txType, asm) = NewDb(cold);
+        System.Reflection.Assembly asm;
+        Type dbType, txType;
+        using (var cold = ColdStore.Open(dir).Unwrap()) {
+            (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
+            dbType = asm.GetType("TestNs.BankDb")!;
+            txType = asm.GetType("TestNs.BankDbTransaction")!;
+            var db = Activator.CreateInstance(dbType, cold)!;
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+                PropagationMode.Confirmed);
+        }
 
-        await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
-            PropagationMode.Confirmed);
+        using var reopenedCold = ColdStore.Open(dir).Unwrap();
+        var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
+        reopenedCold.CompleteRecovery();
 
         var evicted = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { evicted = ((dynamic)tx).Account.Storage.Evict(1).IsOk(); return Result.Ok(); },
+            reopenedDb, txType, (ctx, tx) => { evicted = ((dynamic)tx).Account.Storage.Evict(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
         Assert.That(evicted, Is.True);
 
         var foundAfterEvict = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { foundAfterEvict = ((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
+            reopenedDb, txType, (ctx, tx) => { foundAfterEvict = ((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
         Assert.That(foundAfterEvict, Is.False, "Get must never implicitly reload from cold storage.");
 
         var loaded = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { loaded = ((dynamic)tx).Account.Storage.Load(1).IsOk(); return Result.Ok(); },
+            reopenedDb, txType, (ctx, tx) => { loaded = ((dynamic)tx).Account.Storage.Load(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
         Assert.That(loaded, Is.True);
     }
 
     [Test]
     public async Task Peek_AnEvictedRow_ReturnsItsValueWithoutReloadingIntoMemory() {
-        using var cold = ColdStore.Open(dir).Unwrap();
-        var (db, txType, asm) = NewDb(cold);
+        System.Reflection.Assembly asm;
+        Type dbType, txType;
+        using (var cold = ColdStore.Open(dir).Unwrap()) {
+            (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
+            dbType = asm.GetType("TestNs.BankDb")!;
+            txType = asm.GetType("TestNs.BankDbTransaction")!;
+            var seedDb = Activator.CreateInstance(dbType, cold)!;
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                seedDb, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+                PropagationMode.Confirmed);
+        }
 
-        await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
-            PropagationMode.Confirmed);
+        using var reopenedCold = ColdStore.Open(dir).Unwrap();
+        var db = Activator.CreateInstance(dbType, reopenedCold)!;
+        reopenedCold.CompleteRecovery();
+
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Evict(1); return Result.Ok(); },
             PropagationMode.Optimistic);

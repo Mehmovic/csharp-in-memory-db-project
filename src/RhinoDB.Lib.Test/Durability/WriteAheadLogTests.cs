@@ -205,6 +205,58 @@ public class WriteAheadLogTests {
     }
 
     [Test]
+    public async Task Open_AgainstAPreviouslyClosedWal_RecoversAllPreviouslyDurableEntries() {
+        var path = Path.Combine(dir, "wal.dat");
+        var databaseId = Guid.NewGuid();
+        using (var wal = WriteAheadLog.Create(path, databaseId).Unwrap()) {
+            await wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange());
+            await wal.AppendConfirmed(2, WalEntryKind.Operation, OneChange(2));
+        }
+
+        var opened = WriteAheadLog.Open(path).Unwrap();
+        using var reopenedWal = opened.Wal;
+
+        Assert.That(opened.Entries.Select(e => e.Lsn), Is.EquivalentTo(new long[] { 1, 2 }));
+
+        var error = await reopenedWal.AppendConfirmed(3, WalEntryKind.Operation, OneChange(3));
+        Assert.That(error, Is.Null);
+    }
+
+    [Test]
+    public void Open_WithATornTailEntry_TruncatesToTheLastGoodEntryAndStillOpens() {
+        var path = Path.Combine(dir, "wal.dat");
+        using (var wal = WriteAheadLog.Create(path, Guid.NewGuid()).Unwrap()) {
+            wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange()).GetAwaiter().GetResult();
+        }
+        using (var fs = new FileStream(path, FileMode.Append)) fs.Write([1, 2, 3]); // simulate a torn/partial trailing write
+
+        var opened = WriteAheadLog.Open(path).Unwrap();
+        using var reopenedWal = opened.Wal;
+
+        Assert.That(opened.Entries.Select(e => e.Lsn), Is.EquivalentTo(new long[] { 1 }));
+    }
+
+    [Test]
+    public void Open_WithMidFileCorruption_RefusesToOpen() {
+        var path = Path.Combine(dir, "wal.dat");
+        using (var wal = WriteAheadLog.Create(path, Guid.NewGuid()).Unwrap()) {
+            wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange()).GetAwaiter().GetResult();
+            wal.AppendConfirmed(2, WalEntryKind.Operation, OneChange(2)).GetAwaiter().GetResult();
+        }
+        using (var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite)) {
+            // Corrupt a byte inside the first entry's PAYLOAD (after its fixed header, so the
+            // stored length still matches what's actually there) - corrupting the length field
+            // itself would just look like a torn tail, not the mid-file corruption this test wants.
+            fs.Seek(WalFileHeaderCodec.Size + WalRecordCodec.HeaderSize + 1, SeekOrigin.Begin);
+            fs.WriteByte(0xFF);
+        }
+
+        var opened = WriteAheadLog.Open(path);
+
+        Assert.That(opened.IsError(), Is.True);
+    }
+
+    [Test]
     public async Task AppendConfirmed_ManyConcurrentAppendsUnderLoad_EveryAcknowledgedEntryIsActuallyPersisted() {
         const int OperationCount = 5_000;
         var path = Path.Combine(dir, "wal.dat");

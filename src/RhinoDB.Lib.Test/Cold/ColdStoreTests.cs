@@ -1,16 +1,22 @@
+using MemoryPack;
+using RhinoDB.Core;
+using RhinoDB.Lib.Durability;
+using RhinoDB.Lib.Execution;
+using RhinoDB.Lib.Tables;
+
 namespace RhinoDB.Lib.Cold.Test;
 
-// ColdStore is the per-DbContext libmdbx environment wrapper, per
-// Docs/02-architecture.md "Cold storage" - generated code (via TableGenerator)
-// drives it directly now, through a narrow public surface (OpenTable/Put/Get/
-// Delete/Peek/IsScopeActive). This suite exercises the LOWER-level, still-internal
-// primitives directly instead (RhinoDB.Lib.Test sees them via InternalsVisibleTo,
-// same as every other internal-surface suite in this project) - EnsureWriteTxn/
-// BeginScope/EndScope/ColdTable's own Put/Get(Transaction,...) overloads - since
-// those never cross the assembly boundary generated code lives behind. These tests
-// exercise real libmdbx via the Part A native binding against a real temp
-// directory - no mocking layer, matching how every other stage in this repo has
-// been proven (e.g. Test.Native's real dotnet test runs against the actual mdbx.dll).
+// ColdStore is the per-DbContext durability owner, per Docs/05-wal-design.md - generated
+// code (via TableGenerator) drives it directly through its public surface (OpenTable/Stage/
+// Peek/ScanAll/CompleteRecovery/IsScopeActive). Writes no longer touch libmdbx synchronously:
+// Stage buffers an operation's changes in memory, EndScope hands them to the WriteAheadLog
+// (Confirmed waits on its group fsync, Optimistic doesn't), and libmdbx only sees them via
+// CompleteRecovery's replay (on reopen) - there's no automatic live checkpointing yet (a
+// deliberately deferred follow-up, see the plan), so within a single open ColdStore instance,
+// Peek/ScanAll against libmdbx only reflect a *previous* session's recovered writes, not the
+// current session's, until the process is closed and reopened. These tests exercise real
+// libmdbx and a real WAL file against a real temp directory - no mocking layer, matching how
+// every other stage in this repo has been proven.
 public class ColdStoreTests {
     private string dir = "";
 
@@ -25,6 +31,15 @@ public class ColdStoreTests {
         if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
     }
 
+    static private void Stage(ColdStore store, string tableName, ChangeKind kind, int key, Account? row) =>
+        store.Stage(TableIdHash.Compute(tableName), kind, MemoryPackSerializer.Serialize(key), row is null ? null : MemoryPackSerializer.Serialize(row.Value));
+
+    static private async Task<DbError?> RunConfirmed(ColdStore store, Action stageActions) {
+        store.BeginScope();
+        stageActions();
+        return await store.EndScope(commit: true, PropagationMode.Confirmed);
+    }
+
     [Test]
     public void Open_AgainstAFreshDirectory_Succeeds() {
         var result = ColdStore.Open(dir);
@@ -35,9 +50,6 @@ public class ColdStoreTests {
 
     [Test]
     public void Open_AgainstADirectoryThatDoesNotExistYet_CreatesItAndSucceeds() {
-        // libmdbx creates a missing target directory itself (confirmed here, not assumed) -
-        // the isFreshDirectory check (Directory.Exists(path) before Open()) still correctly
-        // identifies this as fresh and doesn't throw despite the path not existing yet.
         var missing = Path.Combine(dir, "does-not-exist-yet");
 
         var result = ColdStore.Open(missing);
@@ -48,46 +60,12 @@ public class ColdStoreTests {
 
     [Test]
     public void Open_AgainstADirectoryThatAlreadyContainsAnUnrelatedFile_StillSucceeds() {
-        // The isFreshDirectory heuristic (Docs/Dev/RhinoDB.Lib/Cold/ColdStore.md) treats
-        // "any pre-existing file" as "not fresh" and skips the one-time directory-fsync -
-        // this must not be confused for a real failure.
         File.WriteAllText(Path.Combine(dir, "leftover.txt"), "");
 
         var result = ColdStore.Open(dir);
 
         Assert.That(result.IsOk(), Is.True);
         result.Unwrap().Dispose();
-    }
-
-    [Test]
-    public void OpenTable_TwoDifferentNames_WritesUnderOneNameDoNotAppearUnderTheOther() {
-        using var store = ColdStore.Open(dir).Unwrap();
-        var accounts = store.OpenTable<int, Account>("accounts");
-        var otherAccounts = store.OpenTable<int, Account>("other-accounts");
-
-        var txn = store.EnsureWriteTxn();
-        accounts.Put(txn, 1, new Account(1, "alice@example.com", 100m));
-        store.EndScope(commit: true, forceSync: false);
-
-        var readTxn = store.EnsureWriteTxn();
-        Assert.That(accounts.Get(readTxn, 1).IsOk(), Is.True);
-        Assert.That(otherAccounts.Get(readTxn, 1).IsError(), Is.True);
-        store.EndScope(commit: true, forceSync: false);
-    }
-
-    [Test]
-    public void OpenTable_SameNameTwiceWithinOneInstance_IsMemoized_WriteThroughOneHandleVisibleThroughTheOther() {
-        using var store = ColdStore.Open(dir).Unwrap();
-        var first = store.OpenTable<int, Account>("accounts");
-        var second = store.OpenTable<int, Account>("accounts");
-
-        var txn = store.EnsureWriteTxn();
-        first.Put(txn, 1, new Account(1, "alice@example.com", 100m));
-        store.EndScope(commit: true, forceSync: false);
-
-        var readTxn = store.EnsureWriteTxn();
-        Assert.That(second.Get(readTxn, 1).Unwrap(), Is.EqualTo(new Account(1, "alice@example.com", 100m)));
-        store.EndScope(commit: true, forceSync: false);
     }
 
     [Test]
@@ -100,65 +78,6 @@ public class ColdStoreTests {
         Assert.That(second, Is.SameAs(first));
     }
 
-    [Test]
-    public void OpenTable_SameName_ReopeningTheStoreAgainstTheSameDirectory_ResolvesTheSamePersistedData() {
-        using (var store = ColdStore.Open(dir).Unwrap()) {
-            var accounts = store.OpenTable<int, Account>("accounts");
-            var txn = store.EnsureWriteTxn();
-            accounts.Put(txn, 1, new Account(1, "alice@example.com", 100m));
-            store.EndScope(commit: true, forceSync: true);
-        }
-
-        using (var reopened = ColdStore.Open(dir).Unwrap()) {
-            var accounts = reopened.OpenTable<int, Account>("accounts");
-            var readTxn = reopened.EnsureWriteTxn();
-
-            Assert.That(accounts.Get(readTxn, 1).Unwrap(), Is.EqualTo(new Account(1, "alice@example.com", 100m)));
-            reopened.EndScope(commit: true, forceSync: false);
-        }
-    }
-
-    [Test]
-    public void EnsureWriteTxn_CalledTwiceWithoutEndScope_ReturnsTheSameAmbientTransaction() {
-        // Lazy, per-operation-scope ambient txn (Docs/02-architecture.md "Cold
-        // storage" / this plan's decision 5 & Part C) - two PersistentTable calls
-        // within the same Run must share one write txn, not open a second one
-        // (libmdbx only allows one write txn at a time per environment anyway).
-        using var store = ColdStore.Open(dir).Unwrap();
-
-        var first = store.EnsureWriteTxn();
-        var second = store.EnsureWriteTxn();
-
-        Assert.That(second, Is.SameAs(first));
-        store.EndScope(commit: false, forceSync: false);
-    }
-
-    [Test]
-    public void EndScope_WithCommitFalse_AbortsAndDiscardsTheWrite() {
-        using var store = ColdStore.Open(dir).Unwrap();
-        var accounts = store.OpenTable<int, Account>("accounts");
-
-        var txn = store.EnsureWriteTxn();
-        accounts.Put(txn, 1, new Account(1, "alice@example.com", 100m));
-        store.EndScope(commit: false, forceSync: false);
-
-        var readTxn = store.EnsureWriteTxn();
-        Assert.That(accounts.Get(readTxn, 1).IsError(), Is.True);
-        store.EndScope(commit: true, forceSync: false);
-    }
-
-    [Test]
-    public void EndScope_ClearsTheAmbientTransaction_NextEnsureWriteTxnOpensAFreshOne() {
-        using var store = ColdStore.Open(dir).Unwrap();
-
-        var txn1 = store.EnsureWriteTxn();
-        store.EndScope(commit: true, forceSync: false);
-        var txn2 = store.EnsureWriteTxn();
-
-        Assert.That(txn2, Is.Not.SameAs(txn1));
-        store.EndScope(commit: true, forceSync: false);
-    }
-
     // ---- Scope tracking (what generated Apply()'s NoActiveTransaction guard checks) ----
 
     [Test]
@@ -169,94 +88,165 @@ public class ColdStoreTests {
     }
 
     [Test]
-    public void BeginScope_SetsIsScopeActive_EndScopeClearsIt() {
+    public async Task BeginScope_SetsIsScopeActive_EndScopeClearsIt() {
         using var store = ColdStore.Open(dir).Unwrap();
 
         store.BeginScope();
         Assert.That(store.IsScopeActive, Is.True);
 
-        store.EndScope(commit: true, forceSync: false);
+        await store.EndScope(commit: true, PropagationMode.Optimistic);
         Assert.That(store.IsScopeActive, Is.False);
     }
 
-    // ---- Put/Get/Delete/Peek: the public wrapper surface generated code drives
-    // directly (added when PersistentTable<TKey,TRow> was retired in favor of
-    // codegen driving cold storage itself) - each wraps the ambient-txn machinery
-    // above without exposing RhinoDB.Native.Transaction across the assembly
-    // boundary. Callers check IsScopeActive themselves first (these three don't
-    // check it internally), so BeginScope() is called explicitly here too. ----
+    // ---- EndScope: staging, commit/discard, Confirmed vs Optimistic ----
 
     [Test]
-    public void Put_ThenGet_RoundTripsTheValue() {
+    public async Task EndScope_WithNothingStaged_CompletesImmediatelyWithNoError() {
         using var store = ColdStore.Open(dir).Unwrap();
-        var accounts = store.OpenTable<int, Account>("accounts");
+
         store.BeginScope();
+        var error = await store.EndScope(commit: true, PropagationMode.Confirmed);
 
-        var put = store.Put(accounts, 1, new Account(1, "alice@example.com", 100m));
-        var get = store.Get(accounts, 1);
-
-        Assert.That(put.IsOk(), Is.True);
-        Assert.That(get.Unwrap(), Is.EqualTo(new Account(1, "alice@example.com", 100m)));
-        store.EndScope(commit: true, forceSync: false);
+        Assert.That(error, Is.Null);
     }
 
     [Test]
-    public void Get_AGenuinelyAbsentKey_ReturnsError() {
-        using var store = ColdStore.Open(dir).Unwrap();
-        var accounts = store.OpenTable<int, Account>("accounts");
-        store.BeginScope();
+    public async Task EndScope_WithCommitFalse_DiscardsStagedChangesWithoutTouchingTheWal() {
+        var walPath = Path.Combine(dir, "wal.dat");
+        using (var store = ColdStore.Open(dir).Unwrap()) {
+            store.BeginScope();
+            Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m));
+            var error = await store.EndScope(commit: false, PropagationMode.Confirmed);
+            Assert.That(error, Is.Null);
+        }
 
-        var get = store.Get(accounts, 999);
-
-        Assert.That(get.IsError(), Is.True);
-        store.EndScope(commit: true, forceSync: false);
+        var bytes = File.ReadAllBytes(walPath);
+        Assert.That(bytes.Length, Is.EqualTo(WalFileHeaderCodec.Size), "A discarded (commit: false) operation must never reach the WAL at all.");
     }
 
     [Test]
-    public void Delete_ThenGet_ReturnsError() {
+    public async Task EndScope_Confirmed_WaitsForItsGroupFsyncBeforeCompleting() {
         using var store = ColdStore.Open(dir).Unwrap();
-        var accounts = store.OpenTable<int, Account>("accounts");
-        store.BeginScope();
-        store.Put(accounts, 1, new Account(1, "alice@example.com", 100m));
+        var error = await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m)));
 
-        var delete = store.Delete(accounts, 1);
-        var get = store.Get(accounts, 1);
+        Assert.That(error, Is.Null);
+    }
 
-        Assert.That(delete.IsOk(), Is.True);
-        Assert.That(get.IsError(), Is.True);
-        store.EndScope(commit: true, forceSync: false);
+    // ---- CompleteRecovery: WAL tail -> mdbx, exercised by closing and reopening ----
+
+    [Test]
+    public async Task CompleteRecovery_AfterAConfirmedInsertAndReopen_MakesTheRowVisibleToPeek() {
+        using (var store = ColdStore.Open(dir).Unwrap()) {
+            var accounts = store.OpenTable<int, Account>("accounts");
+            var error = await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m)));
+            Assert.That(error, Is.Null);
+            // Peek reads mdbx directly - nothing is there yet within this same session, since
+            // there's no automatic live checkpointing (a deliberately deferred follow-up).
+            Assert.That(store.Peek(accounts, 1).IsError(), Is.True);
+        }
+
+        using var reopened = ColdStore.Open(dir).Unwrap();
+        var reopenedAccounts = reopened.OpenTable<int, Account>("accounts");
+        var recoverResult = reopened.CompleteRecovery();
+
+        Assert.That(recoverResult.IsOk(), Is.True);
+        Assert.That(reopenedAccounts, Is.SameAs(reopened.OpenTable<int, Account>("accounts")));
+        Assert.That(reopened.Peek(reopenedAccounts, 1).Unwrap(), Is.EqualTo(new Account(1, "alice@example.com", 100m)));
     }
 
     [Test]
-    public void Peek_AfterCommit_ReadsTheValueWithoutRequiringAnActiveScope() {
-        using var store = ColdStore.Open(dir).Unwrap();
-        var accounts = store.OpenTable<int, Account>("accounts");
-        store.BeginScope();
-        store.Put(accounts, 1, new Account(1, "alice@example.com", 100m));
-        store.EndScope(commit: true, forceSync: false);
+    public async Task CompleteRecovery_ADeleteAfterReopen_LeavesTheRowGenuinelyGone() {
+        using (var store = ColdStore.Open(dir).Unwrap()) {
+            store.OpenTable<int, Account>("accounts");
+            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m)));
+            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Delete, 1, null));
+        }
 
-        // No BeginScope() here - Peek opens its own independent read-only txn.
-        var peek = store.Peek(accounts, 1);
+        using var reopened = ColdStore.Open(dir).Unwrap();
+        var accounts = reopened.OpenTable<int, Account>("accounts");
+        reopened.CompleteRecovery();
 
-        Assert.That(peek.Unwrap(), Is.EqualTo(new Account(1, "alice@example.com", 100m)));
+        Assert.That(reopened.Peek(accounts, 1).IsError(), Is.True);
     }
 
-    // ---- ScanAll: full-table scan for eager loading, no active scope required ----
+    [Test]
+    public async Task CompleteRecovery_AKeyDeletedThenReinsertedWithinTheSameTail_ResolvesToTheReinsertedValue() {
+        // Pins the last-write-wins bucketing this relies on: naively feeding every Put and
+        // every Delete seen in the tail to RunCheckpoint independently (put-then-delete order)
+        // would incorrectly leave this key deleted, since RunCheckpoint's own ordering assumes
+        // each key appears in at most one of the two sets.
+        using (var store = ColdStore.Open(dir).Unwrap()) {
+            store.OpenTable<int, Account>("accounts");
+            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m)));
+            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Delete, 1, null));
+            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice-reinserted@example.com", 250m)));
+        }
+
+        using var reopened = ColdStore.Open(dir).Unwrap();
+        var accounts = reopened.OpenTable<int, Account>("accounts");
+        reopened.CompleteRecovery();
+
+        Assert.That(reopened.Peek(accounts, 1).Unwrap(), Is.EqualTo(new Account(1, "alice-reinserted@example.com", 250m)));
+    }
 
     [Test]
-    public void ScanAll_ReturnsEveryPersistedRow_WithoutRequiringAnActiveScope() {
+    public void CompleteRecovery_WithNothingToRecover_IsANoOp() {
+        using var store = ColdStore.Open(dir).Unwrap();
+
+        var result = store.CompleteRecovery();
+
+        Assert.That(result.IsOk(), Is.True);
+    }
+
+    [Test]
+    public async Task CompleteRecovery_CalledTwice_IsIdempotent() {
+        using (var store = ColdStore.Open(dir).Unwrap()) {
+            store.OpenTable<int, Account>("accounts");
+            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m)));
+        }
+
+        using var reopened = ColdStore.Open(dir).Unwrap();
+        var accounts = reopened.OpenTable<int, Account>("accounts");
+
+        var first = reopened.CompleteRecovery();
+        var second = reopened.CompleteRecovery();
+
+        Assert.That(first.IsOk(), Is.True);
+        Assert.That(second.IsOk(), Is.True);
+        Assert.That(reopened.Peek(accounts, 1).Unwrap(), Is.EqualTo(new Account(1, "alice@example.com", 100m)));
+    }
+
+    [Test]
+    public async Task CompleteRecovery_TwoDifferentTables_EachRecoversUnderItsOwnDbi() {
+        using (var store = ColdStore.Open(dir).Unwrap()) {
+            store.OpenTable<int, Account>("accounts");
+            store.OpenTable<int, Account>("other-accounts");
+            await RunConfirmed(store, () => {
+                Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m));
+                Stage(store, "other-accounts", ChangeKind.Insert, 2, new Account(2, "bob@example.com", 200m));
+            });
+        }
+
+        using var reopened = ColdStore.Open(dir).Unwrap();
+        var accounts = reopened.OpenTable<int, Account>("accounts");
+        var otherAccounts = reopened.OpenTable<int, Account>("other-accounts");
+        reopened.CompleteRecovery();
+
+        Assert.That(reopened.Peek(accounts, 1).Unwrap(), Is.EqualTo(new Account(1, "alice@example.com", 100m)));
+        Assert.That(reopened.Peek(accounts, 2).IsError(), Is.True, "A write to a different table must not appear under this one.");
+        Assert.That(reopened.Peek(otherAccounts, 2).Unwrap(), Is.EqualTo(new Account(2, "bob@example.com", 200m)));
+    }
+
+    // ---- Peek/ScanAll: read-only surface, independent of any active scope ----
+
+    [Test]
+    public void Peek_AnAbsentKey_ReturnsError() {
         using var store = ColdStore.Open(dir).Unwrap();
         var accounts = store.OpenTable<int, Account>("accounts");
-        store.BeginScope();
-        store.Put(accounts, 1, new Account(1, "alice@example.com", 100m));
-        store.Put(accounts, 2, new Account(2, "bob@example.com", 200m));
-        store.EndScope(commit: true, forceSync: false);
 
-        var scanned = store.ScanAll(accounts).ToList();
+        var peek = store.Peek(accounts, 999);
 
-        Assert.That(scanned, Has.Count.EqualTo(2));
-        Assert.That(scanned, Has.Some.Matches<(int Key, Account Row)>(p => p.Key == 1 && p.Row.Equals(new Account(1, "alice@example.com", 100m))));
-        Assert.That(scanned, Has.Some.Matches<(int Key, Account Row)>(p => p.Key == 2 && p.Row.Equals(new Account(2, "bob@example.com", 200m))));
+        Assert.That(peek.IsError(), Is.True);
     }
 
     [Test]
@@ -270,83 +260,46 @@ public class ColdStoreTests {
     }
 
     [Test]
-    public void ScanAll_DoesNotSeeARowThatWasPutThenAborted() {
-        using var store = ColdStore.Open(dir).Unwrap();
-        var accounts = store.OpenTable<int, Account>("accounts");
-        store.BeginScope();
-        store.Put(accounts, 1, new Account(1, "alice@example.com", 100m));
-        store.EndScope(commit: false, forceSync: false);
+    public async Task ScanAll_AfterRecovery_ReturnsEveryRecoveredRow() {
+        using (var store = ColdStore.Open(dir).Unwrap()) {
+            store.OpenTable<int, Account>("accounts");
+            await RunConfirmed(store, () => {
+                Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m));
+                Stage(store, "accounts", ChangeKind.Insert, 2, new Account(2, "bob@example.com", 200m));
+            });
+        }
 
-        // The write txn is fully closed (aborted) before this runs - calling
-        // ScanAll on the same thread WHILE a write txn is still open would
-        // fail with MDBX_TXN_OVERLAPPING (libmdbx ties a txn to the OS
-        // thread that opened it and refuses an overlapping read+write pair
-        // on that thread) - never an issue for real eager-loading, since the
-        // loader runs before any write scope exists at all.
-        var scanned = store.ScanAll(accounts).ToList();
+        using var reopened = ColdStore.Open(dir).Unwrap();
+        var accounts = reopened.OpenTable<int, Account>("accounts");
+        reopened.CompleteRecovery();
 
-        Assert.That(scanned, Is.Empty);
-    }
+        var scanned = reopened.ScanAll(accounts).ToList();
 
-    // ---- Confirmed commit-coalescing window (Docs/02-architecture.md "Confirmed
-    // commit batching") - opt-in via Open's commitCoalescingWindow, default Zero
-    // preserves the exact prior one-sync-call-per-Confirmed-commit behavior
-    // (already covered by every test above that never passes this parameter). ----
-
-    [Test]
-    public void EndScope_WithCoalescingWindow_TwoConfirmedCommitsWithinTheWindow_ShareOneSyncCall() {
-        using var store = ColdStore.Open(dir, commitCoalescingWindow: TimeSpan.FromMilliseconds(200)).Unwrap();
-        var accounts = store.OpenTable<int, Account>("accounts");
-
-        store.BeginScope();
-        var txn1 = store.EnsureWriteTxn();
-        accounts.Put(txn1, 1, new Account(1, "alice@example.com", 100m));
-        var syncTask1 = store.EndScope(commit: true, forceSync: true);
-
-        store.BeginScope();
-        var txn2 = store.EnsureWriteTxn();
-        accounts.Put(txn2, 2, new Account(2, "bob@example.com", 200m));
-        var syncTask2 = store.EndScope(commit: true, forceSync: true);
-
-        Assert.That(syncTask2, Is.SameAs(syncTask1), "Two Confirmed commits arriving within the coalescing window should share exactly one physical sync call.");
-        Assert.That(syncTask1.Result, Is.EqualTo(0));
+        Assert.That(scanned, Has.Count.EqualTo(2));
+        Assert.That(scanned, Has.Some.Matches<(int Key, Account Row)>(p => p.Key == 1 && p.Row.Equals(new Account(1, "alice@example.com", 100m))));
+        Assert.That(scanned, Has.Some.Matches<(int Key, Account Row)>(p => p.Key == 2 && p.Row.Equals(new Account(2, "bob@example.com", 200m))));
     }
 
     [Test]
-    public async Task EndScope_WithCoalescingWindow_ACommitAfterTheWindowElapses_GetsItsOwnSyncCall() {
-        using var store = ColdStore.Open(dir, commitCoalescingWindow: TimeSpan.FromMilliseconds(20)).Unwrap();
-        var accounts = store.OpenTable<int, Account>("accounts");
+    public async Task ScanAll_TwoTablesConcurrently_BothCompleteWithCorrectData() {
+        // libmdbx is multi-reader - two ScanAll calls against different tables must be able to
+        // run at the same time without one blocking or corrupting the other.
+        using (var store = ColdStore.Open(dir).Unwrap()) {
+            store.OpenTable<int, Account>("accounts");
+            store.OpenTable<int, Account>("other-accounts");
+            await RunConfirmed(store, () => {
+                Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m));
+                Stage(store, "other-accounts", ChangeKind.Insert, 2, new Account(2, "bob@example.com", 200m));
+            });
+        }
 
-        store.BeginScope();
-        var txn1 = store.EnsureWriteTxn();
-        accounts.Put(txn1, 1, new Account(1, "alice@example.com", 100m));
-        var syncTask1 = store.EndScope(commit: true, forceSync: true);
-        await syncTask1;
+        using var reopened = ColdStore.Open(dir).Unwrap();
+        var accounts = reopened.OpenTable<int, Account>("accounts");
+        var otherAccounts = reopened.OpenTable<int, Account>("other-accounts");
+        reopened.CompleteRecovery();
 
-        store.BeginScope();
-        var txn2 = store.EnsureWriteTxn();
-        accounts.Put(txn2, 2, new Account(2, "bob@example.com", 200m));
-        var syncTask2 = store.EndScope(commit: true, forceSync: true);
-
-        Assert.That(syncTask2, Is.Not.SameAs(syncTask1), "A commit arriving after the window has already closed must get its own sync call, not join a stale one.");
-        Assert.That((await syncTask2), Is.EqualTo(0));
-    }
-
-    [Test]
-    public void ScanAll_TwoTablesConcurrently_BothCompleteWithCorrectData() {
-        // libmdbx is multi-reader - two ScanAll calls against different
-        // tables must be able to run at the same time without one blocking
-        // or corrupting the other.
-        using var store = ColdStore.Open(dir).Unwrap();
-        var accounts = store.OpenTable<int, Account>("accounts");
-        var otherAccounts = store.OpenTable<int, Account>("other-accounts");
-        store.BeginScope();
-        store.Put(accounts, 1, new Account(1, "alice@example.com", 100m));
-        store.Put(otherAccounts, 2, new Account(2, "bob@example.com", 200m));
-        store.EndScope(commit: true, forceSync: false);
-
-        var firstTask = Task.Run(() => store.ScanAll(accounts).ToList());
-        var secondTask = Task.Run(() => store.ScanAll(otherAccounts).ToList());
+        var firstTask = Task.Run(() => reopened.ScanAll(accounts).ToList());
+        var secondTask = Task.Run(() => reopened.ScanAll(otherAccounts).ToList());
         Task.WaitAll(firstTask, secondTask);
 
         Assert.That(firstTask.Result, Has.Count.EqualTo(1));

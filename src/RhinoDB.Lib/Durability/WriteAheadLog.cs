@@ -48,6 +48,41 @@ public sealed class WriteAheadLog : IDisposable {
         return Result<WriteAheadLog>.Ok(new WriteAheadLog(fileStream, sizeThresholdBytes, periodicFlushInterval));
     }
 
+    static public Result<(WriteAheadLog Wal, DecodedWalEntry[] Entries)> Open(
+        string path, long sizeThresholdBytes = DefaultSizeThresholdBytes, TimeSpan periodicFlushInterval = default) {
+        if (periodicFlushInterval == TimeSpan.Zero) periodicFlushInterval = DefaultPeriodicFlushInterval;
+
+        FileStream fileStream;
+        try {
+            fileStream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None, BufferSize, FileOptions.None);
+        } catch (IOException ex) {
+            return Result<(WriteAheadLog, DecodedWalEntry[])>.Error(DbError.SystemFailure(ex));
+        }
+
+        var headerBytes = new byte[WalFileHeaderCodec.Size];
+        var headerRead = fileStream.Read(headerBytes, 0, headerBytes.Length);
+        if (headerRead < headerBytes.Length || !WalFileHeaderCodec.TryDecode(headerBytes, out _)) {
+            fileStream.Dispose();
+            return Result<(WriteAheadLog, DecodedWalEntry[])>.Error(DbError.WalCorrupted());
+        }
+
+        var tailLength = (int)(fileStream.Length - WalFileHeaderCodec.Size);
+        var tailBytes = new byte[tailLength];
+        fileStream.ReadExactly(tailBytes, 0, tailLength);
+
+        WalScanResult scan = WalRecordCodec.Scan(tailBytes);
+        if (scan.Status == WalScanStatus.Corrupted) {
+            fileStream.Dispose();
+            return Result<(WriteAheadLog, DecodedWalEntry[])>.Error(DbError.WalCorrupted());
+        }
+
+        if (scan.Status == WalScanStatus.TornTail) fileStream.SetLength(WalFileHeaderCodec.Size + scan.ValidLength);
+        fileStream.Seek(0, SeekOrigin.End);
+
+        return Result<(WriteAheadLog, DecodedWalEntry[])>.Ok(
+            (new WriteAheadLog(fileStream, sizeThresholdBytes, periodicFlushInterval), scan.Entries.ToArray()));
+    }
+
     internal Task<DbError?> AppendConfirmed(long lsn, WalEntryKind kind, WalChange[] changes) {
         AppendOnly(lsn, kind, changes);
         return JoinGroupCommit();

@@ -1,32 +1,37 @@
+using RhinoDB.Lib.Durability;
+using RhinoDB.Lib.Execution;
+using RhinoDB.Lib.Tables;
 using RhinoDB.Native;
 
 namespace RhinoDB.Lib.Cold;
 
 public sealed class ColdStore : IDisposable {
-    private const uint SafeNoSync = 0x10000;
     private const uint CreateDbi = 0x40000;
     private const uint ReadOnlyTxn = 0x20000;
     private const ushort DefaultUnixMode = 0b110_100_100;
-
-    private const int MdbxResultTrue = -1;
+    private const uint SafeNoSync = 0x10000;
+    private const string WalFileName = "wal.dat";
 
     private readonly MdbxEnvironment env;
+    private readonly WriteAheadLog wal;
+    private readonly CheckpointEngine checkpoint;
     private readonly Dictionary<string, object> tables = [];
-    private readonly TimeSpan commitCoalescingWindow;
-    private readonly Lock syncLock = new Lock();
-    private Task<int> pendingSync = Task.FromResult(0);
-    private TaskCompletionSource<int>? openBatch;
-
-    internal Transaction? ActiveWriteTxn { get; private set; }
+    private readonly Dictionary<uint, uint> tableDbisById = [];
+    private readonly List<WalChange> currentOperationChanges = [];
+    private DecodedWalEntry[] pendingRecoveryEntries;
+    private long nextLsn;
 
     public bool IsScopeActive { get; private set; }
 
-    private ColdStore(MdbxEnvironment env, TimeSpan commitCoalescingWindow) {
+    private ColdStore(MdbxEnvironment env, WriteAheadLog wal, DecodedWalEntry[] pendingRecoveryEntries, long nextLsn) {
         this.env = env;
-        this.commitCoalescingWindow = commitCoalescingWindow;
+        this.wal = wal;
+        this.pendingRecoveryEntries = pendingRecoveryEntries;
+        this.nextLsn = nextLsn;
+        checkpoint = new CheckpointEngine(env, wal);
     }
 
-    static public Result<ColdStore> Open(string path, nint sizeUpperBytes = -1, nint sizeNowBytes = -1, TimeSpan commitCoalescingWindow = default) {
+    static public Result<ColdStore> Open(string path, nint sizeUpperBytes = -1, nint sizeNowBytes = -1) {
         var isFreshDirectory = !Directory.Exists(path) || !Directory.EnumerateFileSystemEntries(path).Any();
 
         var rcCreate = MdbxEnvironment.Create(out MdbxEnvironment? env);
@@ -46,67 +51,71 @@ public sealed class ColdStore : IDisposable {
             return Result<ColdStore>.Error(DbError.ColdStorageDirectorySyncFailed());
         }
 
-        return Result<ColdStore>.Ok(new ColdStore(env, commitCoalescingWindow));
-    }
+        var walPath = Path.Combine(path, WalFileName);
+        WriteAheadLog wal;
+        var tailEntries = Array.Empty<DecodedWalEntry>();
 
-    internal void BeginScope() => IsScopeActive = true;
-
-    internal Transaction EnsureWriteTxn() {
-        if (ActiveWriteTxn is { } active) return active;
-
-        var rc = env.BeginTxn(0, out Transaction? txn);
-        if (rc != 0 || txn is null) throw MdbxErrorMapper.Map(rc).ToException();
-
-        ActiveWriteTxn = txn;
-        return txn;
-    }
-
-    internal Task<int> EndScope(bool commit, bool forceSync) {
-        IsScopeActive = false;
-
-        Transaction? txn = ActiveWriteTxn;
-        ActiveWriteTxn = null;
-        if (txn is null) return Task.FromResult(0);
-
-        var rc = commit ? txn.Commit() : txn.Abort();
-        if (!commit || !forceSync || rc != 0) return Task.FromResult(rc);
-
-        return commitCoalescingWindow > TimeSpan.Zero ? ScheduleCoalescedSync() : FireSyncImmediately();
-    }
-
-    private Task<int> FireSyncImmediately() {
-        pendingSync = pendingSync.ContinueWith(_ => RunSync(), TaskScheduler.Default);
-        return pendingSync;
-    }
-
-    private Task<int> ScheduleCoalescedSync() {
-        lock (syncLock) {
-            if (openBatch is { } batch) return batch.Task;
-
-            var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-            openBatch = tcs;
-            var previous = pendingSync;
-            pendingSync = RunCoalescedBatch(tcs, previous);
-            return tcs.Task;
+        if (File.Exists(walPath)) {
+            var openResult = WriteAheadLog.Open(walPath);
+            if (openResult.IsError()) { env.Dispose(); return Result<ColdStore>.Error(openResult.GetError()); }
+            (wal, tailEntries) = openResult.Unwrap();
+        } else {
+            var createResult = WriteAheadLog.Create(walPath, Guid.NewGuid());
+            if (createResult.IsError()) { env.Dispose(); return Result<ColdStore>.Error(createResult.GetError()); }
+            wal = createResult.Unwrap();
         }
+
+        var checkpointEngine = new CheckpointEngine(env, wal);
+        var checkpointedLsnResult = checkpointEngine.ReadCheckpointedLsn();
+        if (checkpointedLsnResult.IsError()) {
+            wal.Dispose();
+            env.Dispose();
+            return Result<ColdStore>.Error(checkpointedLsnResult.GetError());
+        }
+        var checkpointedLsn = checkpointedLsnResult.Unwrap();
+
+        var operationEntries = tailEntries.Where(e => e.Kind == WalEntryKind.Operation).ToArray();
+        var maxTailLsn = operationEntries.Length > 0 ? operationEntries.Max(e => e.Lsn) : checkpointedLsn;
+        var pendingRecovery = operationEntries.Where(e => e.Lsn > checkpointedLsn).ToArray();
+
+        return Result<ColdStore>.Ok(new ColdStore(env, wal, pendingRecovery, Math.Max(checkpointedLsn, maxTailLsn)));
     }
 
-    private async Task<int> RunCoalescedBatch(TaskCompletionSource<int> tcs, Task<int> previous) {
-        await Task.Delay(commitCoalescingWindow);
-        lock (syncLock) { if (ReferenceEquals(openBatch, tcs)) openBatch = null; }
+    public Result CompleteRecovery() {
+        var entries = pendingRecoveryEntries;
+        pendingRecoveryEntries = [];
+        if (entries.Length == 0) return Result.Ok();
 
-        // Native sync calls must stay strictly serialized (never two mdbx_env_sync_ex
-        // calls in flight at once) - awaiting whatever batch preceded this one preserves
-        // that guarantee exactly like the un-coalesced path's ContinueWith chain did.
-        await previous;
-        var result = RunSync();
-        tcs.SetResult(result);
-        return result;
+        var latest = new Dictionary<(uint TableId, string KeyBase64), WalChange>();
+        foreach (var entry in entries)
+            foreach (var change in entry.Changes)
+                latest[(change.TableId, Convert.ToBase64String(change.Key))] = change;
+
+        var residentRows = latest.Values.Where(c => c.Kind != ChangeKind.Delete)
+            .Select(c => new CheckpointRow(c.TableId, c.Key, c.Row!)).ToArray();
+        var deletedKeys = latest.Values.Where(c => c.Kind == ChangeKind.Delete)
+            .Select(c => (c.TableId, c.Key)).ToArray();
+
+        return checkpoint.RunCheckpoint(nextLsn, tableDbisById, residentRows, deletedKeys).GetAwaiter().GetResult();
     }
 
-    private int RunSync() {
-        var syncRc = env.Sync(force: true, nonblock: false);
-        return syncRc == MdbxResultTrue ? 0 : syncRc;
+    internal void BeginScope() { IsScopeActive = true; currentOperationChanges.Clear(); }
+
+    public void Stage(uint tableId, ChangeKind kind, byte[] key, byte[]? row) =>
+        currentOperationChanges.Add(new WalChange(tableId, kind, key, row));
+
+    internal Task<DbError?> EndScope(bool commit, PropagationMode mode) {
+        IsScopeActive = false;
+        if (!commit || currentOperationChanges.Count == 0) { currentOperationChanges.Clear(); return Task.FromResult<DbError?>(null); }
+
+        var lsn = ++nextLsn;
+        var changes = currentOperationChanges.ToArray();
+        currentOperationChanges.Clear();
+
+        if (mode == PropagationMode.Confirmed) return wal.AppendConfirmed(lsn, WalEntryKind.Operation, changes);
+
+        wal.AppendOptimistic(lsn, WalEntryKind.Operation, changes);
+        return Task.FromResult<DbError?>(null);
     }
 
     public ColdTable<TKey, TRow> OpenTable<TKey, TRow>(string name)
@@ -128,23 +137,9 @@ public sealed class ColdStore : IDisposable {
 
         var table = new ColdTable<TKey, TRow>(dbi);
         tables[name] = table;
+        tableDbisById[TableIdHash.Compute(name)] = dbi;
         return table;
     }
-
-    public Result Put<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key, TRow row)
-        where TKey : IEquatable<TKey>, IComparable<TKey>
-        where TRow : struct
-        => table.Put(EnsureWriteTxn(), key, row);
-
-    public Result<TRow> Get<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key)
-        where TKey : IEquatable<TKey>, IComparable<TKey>
-        where TRow : struct
-        => table.Get(EnsureWriteTxn(), key);
-
-    public Result Delete<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key)
-        where TKey : IEquatable<TKey>, IComparable<TKey>
-        where TRow : struct
-        => table.Delete(EnsureWriteTxn(), key);
 
     public Result<TRow> Peek<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key)
         where TKey : IEquatable<TKey>, IComparable<TKey>
@@ -167,7 +162,7 @@ public sealed class ColdStore : IDisposable {
     }
 
     public void Dispose() {
-        pendingSync.Wait();
+        wal.Dispose();
         env.Dispose();
     }
 }

@@ -14,9 +14,6 @@ public class ConfirmedCoalescingBenchmarks {
     private const int ConcurrentWriters = 16;
     static private readonly nint MapSizeUpperBytes = unchecked((nint)137_438_953_472L);
 
-    [Params(0, 20)]
-    public int CommitCoalescingWindowMs;
-
     private string dataDir = null!;
     private ColdStore cold = null!;
     private PersistentBenchDb db = null!;
@@ -30,7 +27,7 @@ public class ConfirmedCoalescingBenchmarks {
         Directory.CreateDirectory(dataDir);
         var estimatedBytes = Math.Max(16L * 1024 * 1024, SeedRecordCount * 64L) + 64L * 1024 * 1024;
         var sizeNowBytes = unchecked((nint)Math.Min(estimatedBytes, (long)MapSizeUpperBytes));
-        cold = ColdStore.Open(dataDir, MapSizeUpperBytes, sizeNowBytes, TimeSpan.FromMilliseconds(CommitCoalescingWindowMs)).Unwrap();
+        cold = ColdStore.Open(dataDir, MapSizeUpperBytes, sizeNowBytes).Unwrap();
         db = new PersistentBenchDb(cold);
         nextInsertId = SeedRecordCount;
         lookupKey = SeedRecordCount / 2;

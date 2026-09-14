@@ -67,6 +67,7 @@ public class LoaderTests {
 
             using var reopenedCold = ColdStore.Open(dir).Unwrap();
             var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
+            reopenedCold.CompleteRecovery();
             var loader = Activator.CreateInstance(loaderType)!;
 
             await (Task)loaderType.GetMethod("LoadAsync")!.Invoke(loader, [reopenedDb])!;
@@ -144,6 +145,7 @@ public class LoaderTests {
 
             using var reopenedCold = ColdStore.Open(dir).Unwrap();
             var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
+            reopenedCold.CompleteRecovery();
 
             // Simulate a LoadAsync override without a real C#-authored
             // subclass: call the base default (Clubs), then reach the
