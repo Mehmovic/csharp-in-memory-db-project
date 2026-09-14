@@ -263,19 +263,43 @@ a dispose racing a still-scheduled flush would otherwise escape uncaught, leavin
 uncompleted — a hang for every caller sharing that group, not just an unobserved exception), and made
 `Dispose` wait for any in-flight group before disposing the file stream.
 
-**A real, currently-unsolved follow-up, not pursued further today:** holding `appendLock` across the
-entire fsync means any append landing mid-flush blocks the calling thread for the flush's full
-duration — in production that thread is the single writer thread, which the whole pooled-execution
-redesign this session started with was built specifically to keep non-blocking. A same-day attempt at
-a lock-free fix (`RandomAccess.FlushToDisk` on the raw handle instead of `FileStream.Flush`, closing
-group membership right before the fsync call instead of after) reasoned out correctly on paper and
-matched the existing tests in a dry trace, but **crashed the test host process** when actually run —
-a real bug in that approach, not yet root-caused. Reverted to the lock-spanning version (proven
-correct via 5 repeated clean full-suite runs) rather than debug a process crash in an increasingly
-complex design under time pressure. This gap is real and worth a dedicated pass later — with more
-time, a smaller isolated repro, and probably native-level debugging — not blocking Phase 3 or the
-`ColdStore` wiring next, since the current design's throughput (15-40 μs/op sustained, see above) is
-already well under the mdbx cost it replaces even with this cost included.
+**Still unresolved — a second lock-free attempt was tried, tested harder, and
+disproven, not fixed.** Holding `appendLock` across the entire fsync blocking
+any append landing mid-flush for the flush's full duration (in production, the
+single writer thread) is real, but two separate attempts at removing that lock
+have both failed under actual verification, not just review:
+
+- **Attempt 1** (`RandomAccess.FlushToDisk` on the raw handle, group membership
+  closed right before the fsync call): crashed the test host process outright.
+- **Attempt 2** (same idea, refined: managed `fileStream.Flush()` + membership
+  close bundled atomically under `appendLock`, then `RandomAccess.FlushToDisk`
+  with no lock held): no longer crashed, and passed cleanly on an initial run —
+  but **failed reproducibly under its own stress test** once re-run repeatedly:
+  `AppendConfirmed_ManyConcurrentAppendsUnderLoad_EveryAcknowledgedEntryIsActua
+  llyPersisted` (5,000 concurrent appends) lost entries (4974-4980 of 5000
+  landed) or reported the file outright `Corrupted`, in 4 of 5 repeated runs.
+  This is real data loss/corruption under concurrent load, not flakiness — the
+  theoretical reasoning behind both attempts checked out on paper (traced
+  against the existing tests by hand) but the empirical result says mixing
+  `FileStream` write/managed-flush operations with `RandomAccess.FlushToDisk`
+  on the *same* `SafeFileHandle` from concurrent threads is not actually safe
+  in practice, contrary to the documented split (managed buffer vs. OS-level
+  handle state) both attempts' reasoning relied on.
+
+**Both attempts reverted.** The lock-spanning version is what ships — verified
+this time with real repeated stress, not a single clean run: the exact stress
+test that broke attempt 2 (5,000 concurrent appends) passed **10/10** repeated
+runs against the lock-spanning version, and the full Durability suite passed
+**8/8** repeated full runs. Full solution green: 9 + 62 + 99 + 184 = 354 tests.
+
+**Standing lesson for this specific problem, not yet applied**: if this is
+revisited, "reasoned correct + passes once" is not sufficient evidence for a
+concurrency-critical fix — the bar is repeated runs of the specific stress
+scenario the change is meant to survive, every time, before calling it done.
+A real fix here likely needs a fundamentally different I/O ownership model
+(e.g. `RandomAccess` exclusively, no `FileStream` at all, so there's no
+mixed-API surface to reason about) rather than a further patch to the
+`FileStream`+`RandomAccess` hybrid — not attempted a third time today.
 
 ### Phase 3 — checkpointing (WAL ↔ libmdbx integration)
 

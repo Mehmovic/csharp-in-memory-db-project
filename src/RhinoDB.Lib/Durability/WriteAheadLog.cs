@@ -83,7 +83,12 @@ public sealed class WriteAheadLog : IDisposable {
     }
 
     private void TriggerPeriodicFlushIfPending() {
-        if (Volatile.Read(ref bytesSinceLastFlush) > 0) _ = JoinGroupCommit();
+        try {
+            if (Volatile.Read(ref bytesSinceLastFlush) > 0)
+                _ = JoinGroupCommit();
+        } catch {
+            // An exception escaping a Timer callback terminates the whole process
+        }
     }
 
     private Task<DbError?> JoinGroupCommit() {
