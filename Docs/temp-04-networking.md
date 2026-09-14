@@ -143,3 +143,37 @@ section](02-architecture.md#three-serialization-pipelines-not-one)):
   needs. The real-time layer adds no HTTP middleware of its own.
 - **Deployment neutrality unchanged**: RhinoDB hosts nothing; the game server
   process owns Kestrel and any future transport hosts.
+
+
+## Stage 8 scope boundary — what the WAL/ring provides vs. what this builds (2026-09-14)
+
+The WAL + change-ring design (see the TEMP draft `05-wal-design.md`) provides
+the **supply side** of client propagation: an LSN-indexed, operation-granular
+change stream per database, with RAM-fast reconnect catch-up (ring) and
+durable fallback (WAL tail), covering Instant and Persistent tables alike.
+It does **not** provide Stage 8 itself. What this doc's real-time layer still
+builds on top of it:
+
+1. **Subscription matching / fan-out** — routing ring entries to per-session
+   interest sets (views, keysets), per-session merge, backpressure per
+   priority. The ring is the input, not the substitute; this is the biggest
+   unbuilt risk in the project.
+2. **Initial snapshot** — first-time subscribers get current view state
+   serialized at the same serialization point as their starting cursor, then
+   diffs (memory scan + cold fallback for evicted rows — the WAL design's
+   merged cold+memory rule).
+3. **Lossy delivery** — the `Delivery` classification in the frame model maps
+   to reliable-ordered via the ring/fan-out today; lossy tick-state push is
+   fan-out policy, not ring behavior.
+4. **Client schema/codec** — generated from `[Table]`/command attributes (the
+   generator is the schema authority): schema descriptor + per-language codecs
+   (C# first, TS for web clients later). Rows are product types, so
+   MessagePack-plus-generated-schema is the default; a SpacetimeDB-style
+   algebraic type system stays backlogged until a real client language and a
+   demonstrated shortfall — the one place to watch is client→server commands,
+   which are naturally sum-typed.
+
+Protocol note: `Resume(session, cursor)` above is defined against the WAL
+ring's LSN space — the cursor *is* the LSN (operation-granular, so resuming
+never tears a multi-table operation). This is why the WAL design resolved LSN
+granularity to "one LSN per `Run` call."

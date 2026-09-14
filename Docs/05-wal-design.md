@@ -62,15 +62,17 @@ forced-drain point. The full picture:
   pages, ~50–130μs settled) stop being per-commit taxes and become amortized
   checkpoint cost.
 - **libmdbx is read-only on the hot path** — `Load`/`Peek` never wait and
-  never block; they're plain keyed reads (plus the RAM ring, below, for
-  un-checkpointed recent changes).
-- **The one forced drain point: eviction write-through.** Evicting a row whose
-  state is not yet materialized in mdbx must first apply that row's pending
-  WAL-tail changes to its mdbx sub-database (a per-row write-through — a few
-  `ColdTable.Put`s — *not* a full checkpoint), then drop the row from memory.
-  This is what makes `Load`'s no-wait safety possible: the invariant it rests
-  on is "there is never newer-in-WAL-only state for an evicted row," because
-  eviction would have flushed it first.
+  never block on anything but their own single keyed read (see `Load`/`Peek`
+  final semantics in Phase 3 — the ring is *not* involved).
+- **The one forced drain point: eviction write-through — batched (refined
+  2026-09-14).** Evicting rows first writes their current in-memory values
+  into their mdbx sub-databases, then drops them from memory — staged like
+  changes and applied as **one batch (one mdbx txn, one fsync)**, not per-row
+  (details and crash rules in Phase 3). This is what makes `Load`'s no-wait
+  safety possible: the invariant it rests on is "there is never
+  newer-in-WAL-only state for an evicted row" — eviction itself puts the row's
+  exact current value into mdbx, so "pending in the WAL" never matters for a
+  non-resident row.
 - **Eviction and checkpointing cooperate**: because eviction implies "this row
   is fully settled in mdbx," checkpoints may skip evicted rows outright —
   high-eviction workloads effectively checkpoint themselves incrementally.
@@ -184,6 +186,19 @@ successful experiment too, recorded and closed like the coalescing one was.
   like IDC):
   `[u32 length][u32 checksum][u64 lsn][byte kind][payload]` — kind ∈
   `Insert/Update/Delete/CheckpointMarker`. Delete carries the key only.
+- **Entries carry full row values, not field deltas — decided.** The rule:
+  *one entry per operation; the entry lists only the rows the operation
+  touched; each touched row is recorded as its complete new value (or a
+  key-only tombstone).* Scope comes from the operation (only touched rows),
+  completeness comes from the update model (`Update(TKey, TRow newRow)` already
+  produces complete replacement rows — the WAL payload is the serialized form
+  of what `Apply()` consumes today). Field-level delta encoding is rejected:
+  it makes replay state-dependent (deltas against intermediate states), breaks
+  on every row-shape change, and saves tens of bytes on small structs — a
+  non-cost. Whole-data snapshot entries are equally rejected for the obvious
+  reason; "whole data" belongs to the checkpoint, exactly once, not per-entry.
+  Consequence worth keeping: full-value entries make replay stateless and
+  idempotent, and make ring/catch-up entries self-contained for clients.
 - **Checksum every entry** (CRC32C-class). The #1 crash-corruption defense: a
   torn/partial tail entry is detected by checksum and dropped — replay stops
   at the first bad entry and treats the tail as never-committed (must match
@@ -230,20 +245,62 @@ successful experiment too, recorded and closed like the coalescing one was.
   N) and/or time-based; both configurable, conservative defaults. Checkpoint I/O
   must never run concurrently with a group fsync on the same file — serialized
   on the writer thread.
-- **Eviction rule (clarified 2026-09-14 — see "The data flow" above):** the
-  one forced-drain point in the whole design. Evicting a row whose state is
-  not yet materialized in mdbx performs a **per-row write-through** first —
-  apply that row's pending WAL-tail changes to its mdbx sub-database
-  (`ColdTable.Put`), then drop the row from memory. This replaces the earlier
-  two-option framing (apply-through-cold-path vs. direct `Put` at append time)
-  with a single, simpler rule, and is what keeps the invariant testable:
-  **mdbx's copy of any evicted row is never older than the WAL tail.**
-- **`Peek` semantics (default proposal):** read mdbx first; on a miss (or for
-  freshness of a row whose LSN is past the checkpoint), consult the RAM ring
-  buffer before answering. One buffer scan, and `Peek`'s semantics stay
-  identical to today's — "the current durable state of this row," not "the
-  checkpointed state as of some earlier moment." Alternative (accept
-  stale-until-checkpoint) is explicitly *not* the default.
+- **Eviction rule (refined 2026-09-14, final):** the one forced-drain point in
+  the whole design, and simpler than first drafted. `Apply()` already puts the
+  latest value into the in-memory `DenseArray` synchronously — so the current
+  in-memory row *is* always the latest value, full stop. Eviction is therefore
+  not a replay of "pending WAL changes" (of which there may be many; only the
+  final value matters to mdbx): it is one `cold.Put(coldTable, key,
+  storage.Get(offset))` of the current value, read straight from the table's
+  own storage, then drop the row from memory. No pending-writes index, no ring
+  scan, no per-row LSN watermark — the ring stays purely a catch-up cache with
+  no eviction-correctness obligation. The invariant is:
+  **mdbx's copy of any evicted row is exactly current** — and crash windows
+  are safe on both sides of the Put (before it: WAL replay restores the row
+  resident; after it, before the memory drop: replay restores it with the
+  identical value).
+- **Eviction is batched, not per-row (decided 2026-09-14):** eviction
+  candidates are staged like changes are, and applied as **one batch — one
+  mdbx write txn, one commit, one fsync** for all rows in it. Rules:
+  - Batch is applied on the writer thread between `Run` calls (no locks, no
+    concurrency); its mdbx txn is atomic across all staged rows for free.
+  - At batch-apply time each staged row is re-read from `DenseArray` — if the
+    row was updated between staging and apply, the *current* value is what
+    gets written (memory is authoritative at apply time, so staging races are
+    moot by construction); alternatively a re-staged "hot again" row can be
+    skipped — reading-at-apply is the default.
+  - Crash/failure rule unchanged: batch commit fails → no rows evicted, all
+    stay resident (eviction remains best-effort reclaim, never
+    correctness-required); commit succeeds then crash before the memory drops
+    → replay restores the rows resident with identical values.
+  - The trade: rows may stay resident marginally longer (until the batch
+    boundary) — a non-cost for a reclaim optimization — in exchange for one
+    fsync amortized over many evictions, the same group-commit economics as
+    the WAL applied to the mdbx side.
+  - Bounded like every staging buffer: size cap / flush trigger (same shape as
+    the WAL staging buffer's hard cap, risk #4) so an eviction burst cannot
+    grow memory without limit.
+- **`Load`/`Peek` (final):** memory first (resident rows are always current);
+  non-resident rows are one synchronous `cold.Get` — safe with zero
+  synchronization because eviction guarantees "evicted ⇒ mdbx exactly
+  current." It's a synchronous wait, yes — but a cheap one (single keyed read
+  through mmap, often OS page cache), paid only for non-resident rows, and it
+  is the correctness price of "current durable value of this row."
+  **The earlier "Peek consults the RAM ring" proposal is dropped** — the
+  write-through eviction rule removed the only state that made it necessary;
+  Peek never touches the WAL or the ring.
+- **Merged cold+memory queries (final):** for a view/query over an
+  `Evictable` table with partly-resident rows: iterate `DenseArray` for
+  resident rows, then cursor-scan the cold store **skipping resident keys**.
+  No conflict resolution needed because the key space is **strictly
+  partitioned** — a key is either resident (memory authoritative, mdbx copy
+  maybe stale) or evicted (mdbx copy exactly current), never both — so
+  `memory ∪ (cold − resident keys)` is the whole table with no overlapping
+  versions. The single writer thread performs both reads (already the model:
+  internal reads are serialized at the same point as writes), so there is no
+  concurrent-modification question either. The cold scan is a cursor walk —
+  slower than the dense array, fine: that path serves query completeness, not
+  the hot path.
 
 ### Phase 4 — ring buffer: reconnect catch-up without touching disk
 
@@ -398,3 +455,50 @@ platform* is an empirical question answered only by running both.
    index, no ring scan, and no per-row LSN watermark — and keeps the ring
    buffer purely a catch-up cache with no eviction-correctness obligation,
    consistent with risk #5 as already written.
+
+## Client sync — what the WAL/ring provides and what it doesn't (2026-09-14)
+
+Scope boundary with [Networking](04-networking.md)'s Stage 8: the WAL and ring
+are the **supply side** of client propagation. A reconnecting client asking
+"everything since cursor L" is fully served — LSN-indexed, operation-granular
+(never a torn multi-table op), RAM-fast catch-up for short disconnects,
+WAL-fallback for long ones, both table kinds recorded. But client sync has
+four components, and the other three live in Stage 8, on top of this — not in
+it:
+
+1. **The subscription/fan-out engine** — the ring is a firehose per database;
+   a client subscribes to *views* (keysets, predicates). Matching every ring
+   entry to every session's interest set, per-session merging, and
+   backpressure per priority is Stage 8's real work and its biggest risk. The
+   ring is its input, not its substitute.
+2. **The initial snapshot** — a first-time subscriber needs current view state
+   serialized *then* diffs from a consistent cursor (snapshot taken at the
+   same serialization point as the cursor assignment, so nothing is skipped or
+   double-sent). The WAL is history, not current state; the snapshot path
+   (memory scan + cold fallback — the merged cold+memory rule in Phase 3 is
+   exactly this) is new Stage 8 code on top of existing pieces.
+3. **Lossy delivery** — the ring is reliable-ordered, correct for standings
+   and wrong for ball position on tick N (dropping is *correct* there). The
+   `Delivery` classification lives in 04-networking's frame model; live lossy
+   push is fan-out's job.
+4. **The client-side schema/codec** — a connecting client has no C# types. The
+   client-access pipeline (already declared as a separate wire format in
+   Architecture's three-serialization-pipelines decision) needs a schema
+   descriptor **generated from the `[Table]`/command attributes** — the
+   generator is already the schema authority — plus generated codecs per
+   client language. Server→client rows are product types:
+   MessagePack-plus-generated-schema suffices; a SATS/BSATN-style algebraic
+   type system (SpacetimeDB built one because their client surface spans four
+   languages and WASM module boundaries with sum-typed reducer arguments)
+   stays in the backlog until a real client language exists and MessagePack
+   demonstrably falls short — same evidence gate as UDP and ART. The one place
+   algebraic pressure is real: client→server *commands* are naturally a tagged
+   union; revisit if that surface grows.
+
+Why the WAL decisions made here matter downstream: operation-granular LSNs are
+exactly the resume primitive fan-out and the snapshot path need; full-value
+entries make catch-up entries self-contained (no "fetch base row first"
+round-trip — which matters especially for Instant-table catch-up, where no
+cold store exists to fetch from). Nothing in Phase 1–4 is invalidated by
+Stage 8's needs; the boundary is clean.
+

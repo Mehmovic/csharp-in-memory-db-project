@@ -1,0 +1,103 @@
+using RhinoDB.Native;
+
+namespace RhinoDB.Lib.Durability;
+
+public sealed class WriteAheadLog : IDisposable {
+    static private readonly TimeSpan DefaultPeriodicFlushInterval = TimeSpan.FromMilliseconds(100);
+    private const long DefaultSizeThresholdBytes = 4 * 1024 * 1024;
+    private const int BufferSize = 4096;
+
+    private readonly FileStream fileStream;
+    private readonly Timer periodicFlushTimer;
+    private readonly long sizeThresholdBytes;
+    private readonly Lock appendLock = new Lock();
+    private readonly Lock groupLock = new Lock();
+    private TaskCompletionSource<DbError?>? inFlightGroup;
+    private long bytesSinceLastFlush;
+    private bool disposed;
+
+    internal Action? TestOnlyBeforeFlush { get; set; }
+
+    private WriteAheadLog(FileStream fileStream, long sizeThresholdBytes, TimeSpan periodicFlushInterval) {
+        this.fileStream = fileStream;
+        this.sizeThresholdBytes = sizeThresholdBytes;
+        periodicFlushTimer = new Timer(_ => TriggerPeriodicFlushIfPending(), null, periodicFlushInterval, periodicFlushInterval);
+    }
+
+    static public Result<WriteAheadLog> Create(
+        string path, Guid databaseId, long sizeThresholdBytes = DefaultSizeThresholdBytes, TimeSpan periodicFlushInterval = default) {
+        if (periodicFlushInterval == TimeSpan.Zero) periodicFlushInterval = DefaultPeriodicFlushInterval;
+
+        FileStream fileStream;
+        try {
+            fileStream = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, BufferSize, FileOptions.None);
+        } catch (IOException ex) {
+            return Result<WriteAheadLog>.Error(DbError.SystemFailure(ex));
+        }
+
+        var header = WalFileHeaderCodec.Encode(databaseId);
+        fileStream.Write(header, 0, header.Length);
+        fileStream.Flush(flushToDisk: true);
+
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory) && !DirectorySync.TrySync(directory, out _)) {
+            fileStream.Dispose();
+            return Result<WriteAheadLog>.Error(DbError.WalDirectorySyncFailed());
+        }
+
+        return Result<WriteAheadLog>.Ok(new WriteAheadLog(fileStream, sizeThresholdBytes, periodicFlushInterval));
+    }
+
+    internal Task<DbError?> AppendConfirmed(long lsn, WalEntryKind kind, WalChange[] changes) {
+        AppendOnly(lsn, kind, changes);
+        return JoinGroupCommit();
+    }
+
+    internal void AppendOptimistic(long lsn, WalEntryKind kind, WalChange[] changes) {
+        var frameLength = AppendOnly(lsn, kind, changes);
+        if (Interlocked.Add(ref bytesSinceLastFlush, frameLength) >= sizeThresholdBytes) _ = JoinGroupCommit();
+    }
+
+    private int AppendOnly(long lsn, WalEntryKind kind, WalChange[] changes) {
+        var frame = WalRecordCodec.Encode(lsn, kind, changes);
+        lock (appendLock) fileStream.Write(frame, 0, frame.Length);
+        return frame.Length;
+    }
+
+    private void TriggerPeriodicFlushIfPending() {
+        if (Volatile.Read(ref bytesSinceLastFlush) > 0) _ = JoinGroupCommit();
+    }
+
+    private Task<DbError?> JoinGroupCommit() {
+        lock (groupLock) {
+            if (inFlightGroup is { } existing) return existing.Task;
+
+            var tcs = new TaskCompletionSource<DbError?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            inFlightGroup = tcs;
+            _ = Task.Run(() => RunFlush(tcs));
+            return tcs.Task;
+        }
+    }
+
+    private void RunFlush(TaskCompletionSource<DbError?> tcs) {
+        DbError? error = null;
+        try {
+            TestOnlyBeforeFlush?.Invoke();
+            lock (appendLock) fileStream.Flush(flushToDisk: true);
+            Interlocked.Exchange(ref bytesSinceLastFlush, 0);
+        } catch (IOException ex) {
+            error = DbError.SystemFailure(ex);
+        }
+
+        lock (groupLock) { if (ReferenceEquals(inFlightGroup, tcs)) inFlightGroup = null; }
+        tcs.SetResult(error);
+    }
+
+    public void Dispose() {
+        if (disposed) return;
+        disposed = true;
+        periodicFlushTimer.Dispose();
+        lock (appendLock) fileStream.Flush(flushToDisk: true);
+        fileStream.Dispose();
+    }
+}
