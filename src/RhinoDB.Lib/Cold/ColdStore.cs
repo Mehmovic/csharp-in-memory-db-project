@@ -13,7 +13,6 @@ public sealed class ColdStore : IDisposable {
     private const string WalFileName = "wal.dat";
 
     private readonly MdbxEnvironment env;
-    private readonly WriteAheadLog wal;
     private readonly CheckpointEngine checkpoint;
     private readonly Dictionary<string, object> tables = [];
     private readonly Dictionary<uint, uint> tableDbisById = [];
@@ -24,12 +23,18 @@ public sealed class ColdStore : IDisposable {
     private readonly List<EvictionCandidate> appliedEvictions = [];
     private DecodedWalEntry[] pendingRecoveryEntries;
     private long nextLsn;
+    private DbError? durabilityFailure;
 
+    internal DbError DurabilityFailureError => durabilityFailure!.Value;
+    internal void PoisonDurability(DbError error) => durabilityFailure ??= error;
+    internal WriteAheadLog TestOnlyWal { get; }
+    public bool IsDurabilityPoisoned => durabilityFailure is not null;
+    
     public bool IsScopeActive { get; private set; }
 
     private ColdStore(MdbxEnvironment env, WriteAheadLog wal, DecodedWalEntry[] pendingRecoveryEntries, long nextLsn, long evictionBatchThresholdBytes) {
         this.env = env;
-        this.wal = wal;
+        this.TestOnlyWal = wal;
         this.pendingRecoveryEntries = pendingRecoveryEntries;
         this.nextLsn = nextLsn;
         checkpoint = new CheckpointEngine(env, wal);
@@ -140,6 +145,8 @@ public sealed class ColdStore : IDisposable {
     public void RegisterEvictionDrop(uint tableId, Func<byte[], byte[]?> tryGetCurrentRow, Action<byte[]> drop) =>
         evictionDrops[tableId] = new EvictionDropRegistration(tryGetCurrentRow, drop);
 
+    // Generated-code seam only: called by emitted `Apply` bodies to record each
+    // change into the operation's staging buffer. Never call from user code.
     public void Stage(uint tableId, ChangeKind kind, byte[] key, byte[]? row) =>
         currentOperationChanges.Add(new WalChange(tableId, kind, key, row));
 
@@ -151,9 +158,9 @@ public sealed class ColdStore : IDisposable {
         var changes = currentOperationChanges.ToArray();
         currentOperationChanges.Clear();
 
-        if (mode == PropagationMode.Confirmed) return wal.AppendConfirmed(lsn, WalEntryKind.Operation, changes);
+        if (mode == PropagationMode.Confirmed) return TestOnlyWal.AppendConfirmed(lsn, WalEntryKind.Operation, changes);
 
-        wal.AppendOptimistic(lsn, WalEntryKind.Operation, changes);
+        TestOnlyWal.AppendOptimistic(lsn, WalEntryKind.Operation, changes);
         return Task.FromResult<DbError?>(null);
     }
 
@@ -201,7 +208,7 @@ public sealed class ColdStore : IDisposable {
     }
 
     public void Dispose() {
-        wal.Dispose();
+        TestOnlyWal.Dispose();
         env.Dispose();
     }
 }

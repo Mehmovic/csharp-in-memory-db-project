@@ -478,6 +478,14 @@ mixed-API surface to reason about) rather than a further patch to the
    that reasons about mdbx-commit-success (per-table delivery guarantees, IDC's
    Confirmed-gates-propagation rule, `ColdStoreTests`' durability assertions)
    must be re-derived against the new gate. Not drift — a dated decision entry.
+   **Decided 2026-09-14, implemented**: a WAL fsync failure breaks the
+   durability gate — memory has already applied what no later fsync can
+   guarantee — so the database **poisons itself** (`ColdStore.IsDurabilityPoisoned`):
+   every further operation, `Optimistic` or `Confirmed`, is refused with
+   `WalDurabilityFailed` until restart, which is the only recovery. The failed
+   call itself surfaces the underlying error; refused calls get the dedicated
+   kind, with the raw failure reachable via `ColdStore.DurabilityFailureError`.
+   Never "return an error and keep running with dirty memory."
 2. **Checkpoint/WAL consistency is now your bug surface.** The crash matrix to
    test exhaustively (crash-injection tests, not happy paths): crash between
    mdbx dump and LSN record; between LSN record and WAL truncate; torn WAL

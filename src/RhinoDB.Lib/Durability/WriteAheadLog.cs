@@ -138,8 +138,10 @@ public sealed class WriteAheadLog : IDisposable {
     }
 
     private void RunFlush(TaskCompletionSource<DbError?> tcs) {
+        if (TestOnlyBeforeFlushInvocationFailed(tcs)) return;
+        
         DbError? error = null;
-        TestOnlyBeforeFlush?.Invoke();
+
         lock (appendLock) {
             try {
                 fileStream.Flush(flushToDisk: true);
@@ -152,6 +154,19 @@ public sealed class WriteAheadLog : IDisposable {
         }
 
         tcs.SetResult(error);
+    }
+
+    private bool TestOnlyBeforeFlushInvocationFailed(TaskCompletionSource<DbError?> tcs) {
+        try {
+            TestOnlyBeforeFlush?.Invoke();
+            return false;
+        } catch (Exception ex) {
+            lock (appendLock) {
+                lock (groupLock) { if (ReferenceEquals(inFlightGroup, tcs)) inFlightGroup = null; }
+            }
+            tcs.SetResult(DbError.SystemFailure(ex));
+            return true;
+        }
     }
 
     public void Dispose() {

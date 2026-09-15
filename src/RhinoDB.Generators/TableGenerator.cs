@@ -434,6 +434,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"    private readonly AutoIncrementCounter {Camel(aif.FieldName)}Counter;");
         foreach (var idx in table.Indexes)
             sb.AppendLine($"    private readonly {ConcreteIndexType(idx)} {IndexFieldName(idx)};");
+        if (table.Indexes.Any(ShouldCreateOffsetBuffer))
+            sb.AppendLine("    private readonly List<int> offsetBuffer = [];");
+
+        return;
+        static bool ShouldCreateOffsetBuffer(IndexModel indexModel) {
+            return indexModel.Uniqueness != Uniqueness.Unique ||
+                   indexModel.Kind is IndexKind.LiteBTree or IndexKind.RedBlackOrdered;
+        }
     }
 
     static private void EmitChangeTrackingFields(StringBuilder sb, string key, string row) {
@@ -530,8 +538,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine("                if (supersededByLater) continue;");
                 sb.AppendLine($"                if (c.Kind != ChangeKind.Delete && {rowKeyExpr}.Equals({keyExpr})) result.Add(c.Row);");
                 sb.AppendLine("            }");
-                sb.AppendLine($"            var overlayOffsets = {IndexFieldName(idx)}.GetOffsets({keyExpr});");
-                sb.AppendLine("            foreach (var offset in overlayOffsets) {");
+                sb.AppendLine("            offsetBuffer.Clear();");
+                sb.AppendLine($"            {IndexFieldName(idx)}.GetOffsets({keyExpr}, offsetBuffer);");
+                sb.AppendLine("            foreach (var offset in offsetBuffer) {");
                 sb.AppendLine("                var candidate = storage.Get(offset);");
                 sb.AppendLine($"                var candidateKey = candidate.{table.PrimaryKeyName};");
                 sb.AppendLine("                var touchedByBatch = false;");
@@ -540,9 +549,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine("            }");
                 sb.AppendLine("            return result;");
                 sb.AppendLine("        }");
-                sb.AppendLine($"        var offsets = {IndexFieldName(idx)}.GetOffsets({keyExpr});");
-                sb.AppendLine($"        var realResult = new List<{row}>(offsets.Count);");
-                sb.AppendLine("        foreach (var offset in offsets) realResult.Add(storage.Get(offset));");
+                sb.AppendLine("        offsetBuffer.Clear();");
+                sb.AppendLine($"        {IndexFieldName(idx)}.GetOffsets({keyExpr}, offsetBuffer);");
+                sb.AppendLine($"        var realResult = new List<{row}>(offsetBuffer.Count);");
+                sb.AppendLine("        foreach (var offset in offsetBuffer) realResult.Add(storage.Get(offset));");
                 sb.AppendLine("        return realResult;");
                 sb.AppendLine("    }");
             }

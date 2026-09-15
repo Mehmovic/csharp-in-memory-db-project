@@ -551,4 +551,57 @@ public class PersistentDurabilityTests {
             "Crossing the eviction batch's size threshold must flush immediately, not wait for the next operation boundary.");
         Assert.That(persisted, Is.EqualTo(100m));
     }
+
+    // ---- Finding 3: a Confirmed fsync failure poisons the database ----
+
+    [Test]
+    public async Task Confirmed_WhenTheWalFsyncFails_ReturnsTheFsyncErrorAndPoisonsTheDatabase() {
+        using var cold = ColdStore.Open(dir).Unwrap();
+        var (db, txType, asm) = NewDb(cold);
+
+        var insert = await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            PropagationMode.Confirmed);
+        Assert.That(insert.IsOk(), Is.True);
+
+        cold.TestOnlyWal.TestOnlyBeforeFlush = () => throw new IOException("injected fsync failure");
+
+        var confirmed = await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 500m)); return Result.Ok(); },
+            PropagationMode.Confirmed);
+
+        Assert.That(confirmed.IsError(), Is.True);
+        Assert.That(confirmed.GetError().Kind, Is.EqualTo(ErrorKind.SystemFailure));
+        Assert.That(cold.IsDurabilityPoisoned, Is.True,
+            "A failed fsync breaks the durability gate - the database must refuse further operations rather than keep running with memory ahead of durability.");
+    }
+
+    [Test]
+    public async Task AfterAConfirmedFsyncFailure_EverySubsequentOperationIsRefusedUntilRestart() {
+        using var cold = ColdStore.Open(dir).Unwrap();
+        var (db, txType, asm) = NewDb(cold);
+
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            PropagationMode.Confirmed);
+
+        cold.TestOnlyWal.TestOnlyBeforeFlush = () => throw new IOException("injected fsync failure");
+
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 500m)); return Result.Ok(); },
+            PropagationMode.Confirmed);
+        Assert.That(cold.IsDurabilityPoisoned, Is.True);
+
+        var optimistic = await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 900m)); return Result.Ok(); },
+            PropagationMode.Optimistic);
+        var confirmed = await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 900m)); return Result.Ok(); },
+            PropagationMode.Confirmed);
+
+        Assert.That(optimistic.IsError(), Is.True);
+        Assert.That(optimistic.GetError().Kind, Is.EqualTo(ErrorKind.WalDurabilityFailed));
+        Assert.That(confirmed.IsError(), Is.True);
+        Assert.That(confirmed.GetError().Kind, Is.EqualTo(ErrorKind.WalDurabilityFailed));
+    }
 }

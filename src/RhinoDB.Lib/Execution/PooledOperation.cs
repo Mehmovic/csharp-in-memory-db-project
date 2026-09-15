@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using System.Threading.Tasks.Sources;
 
+using RhinoDB.Lib.Cold;
+
 namespace RhinoDB.Lib.Execution;
 
 internal interface IExecutionWorkItem {
@@ -59,7 +61,13 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
 
     public void Run() {
         var ctx = context!;
-        ctx.Cold?.BeginScope();
+        ColdStore? cold = ctx.Cold;
+        if (cold is { IsDurabilityPoisoned: true }) {
+            Complete(TValue.FromError(DbError.WalDurabilityFailed()), ctx, null);
+            return;
+        }
+
+        cold?.BeginScope();
         TValue result;
         TTx tx = default!;
         var txCreated = false;
@@ -75,17 +83,21 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
         catch (Exception ex) { result = TValue.FromException(ex); }
         if (txCreated && !result.IsOk()) tx.Discard();
 
-        Complete(result, ctx.Cold?.EndScope(commit: result.IsOk(), mode));
+        Complete(result, ctx, cold?.EndScope(commit: result.IsOk(), mode));
     }
 
-    private void Complete(TValue result, Task<DbError?>? durabilityTask) {
+    private void Complete(TValue result, DbContext<TTx> ctx, Task<DbError?>? durabilityTask) {
         if (durabilityTask is null || durabilityTask.IsCompleted) {
-            core.SetResult(Finalize(result, durabilityTask));
+            core.SetResult(Finalize(result, durabilityTask, ctx));
             return;
         }
-        durabilityTask.ContinueWith(t => core.SetResult(Finalize(result, t)), TaskScheduler.Default);
+        durabilityTask.ContinueWith(t => core.SetResult(Finalize(result, t, ctx)), TaskScheduler.Default);
     }
 
-    static private TValue Finalize(TValue result, Task<DbError?>? durabilityTask) =>
-        durabilityTask is { Result: { } err } ? TValue.FromError(err) : result;
+    static private TValue Finalize(TValue result, Task<DbError?>? durabilityTask, DbContext<TTx> ctx) {
+        if (durabilityTask is not { Result: { } err }) return result;
+        
+        ctx.Cold?.PoisonDurability(err);
+        return TValue.FromError(err);
+    }
 }
