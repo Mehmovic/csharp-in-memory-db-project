@@ -450,8 +450,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
     }
 
     static private void AppendAutoIncrementAndIndexParams(StringBuilder sb, TableModel table) {
-        foreach (var aif in table.AutoIncrementFields) sb.Append($", AutoIncrementCounter {Camel(aif.FieldName)}Counter");
-        foreach (var idx in table.Indexes) sb.Append($", {ConcreteIndexType(idx)} {IndexFieldName(idx)}");
+        foreach (var aif in table.AutoIncrementFields) sb.AppendLine($"        ,AutoIncrementCounter {Camel(aif.FieldName)}Counter");
+        foreach (var idx in table.Indexes) sb.AppendLine($"        ,{ConcreteIndexType(idx)} {IndexFieldName(idx)}");
     }
 
     static private void AppendAutoIncrementAndIndexAssignments(StringBuilder sb, TableModel table) {
@@ -661,9 +661,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitStorageAndIndexFields(sb, table, primaryIndexType);
         EmitChangeTrackingFields(sb, key, row);
 
-        sb.Append($"    public {opsName}(DenseArray<{row}> storage, {primaryIndexType} primaryIndex");
+        sb.AppendLine($"    public {opsName}(");
+        sb.AppendLine($"        DenseArray<{row}> storage");
+        sb.AppendLine($"        ,{primaryIndexType} primaryIndex");
         AppendAutoIncrementAndIndexParams(sb, table);
-        sb.AppendLine(") {");
+        sb.AppendLine("    ) {");
         sb.AppendLine("        this.storage = storage;");
         sb.AppendLine("        this.primaryIndex = primaryIndex;");
         AppendAutoIncrementAndIndexAssignments(sb, table);
@@ -757,9 +759,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitChangeTrackingFields(sb, key, row);
         EmitEvictableField(sb, table);
 
-        sb.Append($"    public {opsName}(DenseArray<{row}> storage, {primaryIndexType} primaryIndex, ColdTable<{key}, {row}> coldTable, ColdStore cold");
+        sb.AppendLine($"    public {opsName}(");
+        sb.AppendLine($"        DenseArray<{row}> storage");
+        sb.AppendLine($"        ,{primaryIndexType} primaryIndex");
+        sb.AppendLine($"        ,ColdTable<{key}, {row}> coldTable");
+        sb.AppendLine($"        ,ColdStore cold");
         AppendAutoIncrementAndIndexParams(sb, table);
-        sb.AppendLine(") {");
+        sb.AppendLine("    ) {");
         sb.AppendLine("        this.storage = storage;");
         sb.AppendLine("        this.primaryIndex = primaryIndex;");
         sb.AppendLine("        this.coldTable = coldTable;");
