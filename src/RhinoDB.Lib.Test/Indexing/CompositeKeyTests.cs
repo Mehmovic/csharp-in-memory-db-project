@@ -99,29 +99,39 @@ public class NonUniqueHashSetIndex_CompositeKeyTests {
 
     [Test]
     public void Insert_MultipleEntitiesAtSameCoordinate_GetOffsetsReturnsAllOfThem() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert((5, 10), 1);
         index.Insert((5, 10), 2);
+        index.GetOffsets((5, 10), offsets);
 
-        Assert.That(index.GetOffsets((5, 10)), Is.EquivalentTo(new[] { 1, 2 }));
+        Assert.That(offsets, Is.EquivalentTo(new[] { 1, 2 }));
     }
 
     [Test]
     public void GetOffsets_PartialMatchOnlyX_ReturnsEmpty() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert((5, 10), 1);
+        index.GetOffsets((5, 999), offsets);
 
-        Assert.That(index.GetOffsets((5, 999)), Is.Empty);
+        Assert.That(offsets, Is.Empty);
     }
 
     [Test]
     public void Insert_SameXDifferentY_TreatedAsDistinctKeys() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert((5, 10), 1);
         index.Insert((5, 20), 2);
 
-        Assert.That(index.GetOffsets((5, 10)), Is.EqualTo(new[] { 1 }));
-        Assert.That(index.GetOffsets((5, 20)), Is.EqualTo(new[] { 2 }));
+        index.GetOffsets((5, 10), offsets);
+        Assert.That(offsets, Is.EqualTo(new[] { 1 }));
+        
+        offsets.Clear();
+        index.GetOffsets((5, 20), offsets);
+
+        Assert.That(offsets, Is.EqualTo(new[] { 2 }));
     }
 }
 

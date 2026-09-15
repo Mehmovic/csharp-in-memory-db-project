@@ -661,7 +661,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitStorageAndIndexFields(sb, table, primaryIndexType);
         EmitChangeTrackingFields(sb, key, row);
 
-        sb.AppendLine($"    public {opsName}(");
+        sb.AppendLine($"    public {opsName}");
+        sb.AppendLine("    (");
         sb.AppendLine($"        DenseArray<{row}> storage");
         sb.AppendLine($"        ,{primaryIndexType} primaryIndex");
         AppendAutoIncrementAndIndexParams(sb, table);
@@ -759,7 +760,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitChangeTrackingFields(sb, key, row);
         EmitEvictableField(sb, table);
 
-        sb.AppendLine($"    public {opsName}(");
+        sb.AppendLine($"    public {opsName}");
+        sb.AppendLine("    (");
         sb.AppendLine($"        DenseArray<{row}> storage");
         sb.AppendLine($"        ,{primaryIndexType} primaryIndex");
         sb.AppendLine($"        ,ColdTable<{key}, {row}> coldTable");

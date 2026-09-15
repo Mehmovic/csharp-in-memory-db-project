@@ -19,7 +19,9 @@ public class NonUniqueHashSetIndex<TKey>
         if (offsets.Count == 0) hashMap.Remove(key);
     }
 
-    public ICollection<int> GetOffsets(TKey key) {
-        return hashMap.TryGetValue(key, out var offsets) ? offsets : [];
+    public void GetOffsets(TKey key, ICollection<int> into) {
+        if (!hashMap.TryGetValue(key, out var offsets)) return;
+        
+        foreach (var offset in offsets) into.Add(offset);
     }
 }
