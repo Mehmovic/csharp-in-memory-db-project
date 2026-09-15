@@ -1,6 +1,6 @@
 namespace RhinoDB.Lib.Indexing;
 
-public class OrderedIndex<TKey> : IUniqueIndex<TKey>
+public class RedBlackTreeIndex<TKey> : IUniqueIndex<TKey>
     where TKey : notnull {
     private readonly SortedSet<(TKey Key, int Offset)> sortedSet =
         new SortedSet<(TKey Key, int Offset)>(
@@ -23,13 +23,10 @@ public class OrderedIndex<TKey> : IUniqueIndex<TKey>
         sortedSet.Remove((key, 0));
     }
 
-    public ICollection<int> Range(TKey from, TKey to) {
-        if (Comparer<TKey>.Default.Compare(from, to) > 0) return [];
+    public void Range(TKey from, TKey to, ICollection<int> into) {
+        if (Comparer<TKey>.Default.Compare(from, to) > 0) return;
 
-        var offsets = new List<int>();
         foreach ((TKey Key, int Offset) entry in sortedSet.GetViewBetween((from, 0), (to, 0)))
-            offsets.Add(entry.Offset);
-
-        return offsets;
+            into.Add(entry.Offset);
     }
 }

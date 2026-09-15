@@ -20,5 +20,5 @@ public class HashIndex<TKey> : IUniqueIndex<TKey>
         hashMap.Remove(key);
     }
     
-    public ICollection<int> Range(TKey from, TKey to) => throw new NotSupportedException();
+    public void Range(TKey from, TKey to, ICollection<int> into) => throw new NotSupportedException();
 }

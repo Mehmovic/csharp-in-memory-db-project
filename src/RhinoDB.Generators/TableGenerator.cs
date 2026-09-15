@@ -373,9 +373,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var keyType = KeyType(idx);
         return (idx.Kind, idx.Uniqueness) switch {
             (IndexKind.Hash, Uniqueness.Unique) => $"HashIndex<{keyType}>",
-            (IndexKind.RedBlackOrdered, Uniqueness.Unique) => $"OrderedIndex<{keyType}>",
             (IndexKind.Hash, Uniqueness.NonUnique) => $"NonUniqueHashSetIndex<{keyType}>",
-            _ => $"NonUniqueOrderedIndex<{keyType}>",
+
+            (IndexKind.LiteBTree, Uniqueness.Unique) => $"LiteBTreeIndex<{keyType}>",
+            (IndexKind.LiteBTree, Uniqueness.NonUnique) => $"NonUniqueLiteBTreeIndex<{keyType}>",
+
+            (IndexKind.RedBlackOrdered, Uniqueness.Unique) => $"RedBlackTreeIndex<{keyType}>",
+            (IndexKind.RedBlackOrdered, Uniqueness.NonUnique) => $"NonUniqueRedBlackTreeIndex<{keyType}>",
+            
+            _ => throw new Exception("Invalid index kind or uniqueness") 
         };
     }
 
@@ -1118,6 +1124,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
     }
 
     private enum TableKind { Instant, Persistent }
-    private enum IndexKind { Hash, RedBlackOrdered }
+    private enum IndexKind { Hash, RedBlackOrdered, LiteBTree }
     private enum Uniqueness { Unique, NonUnique }
 }

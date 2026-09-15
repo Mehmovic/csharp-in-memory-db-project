@@ -9,5 +9,5 @@ public interface IUniqueIndex<in TKey> where TKey : notnull {
 
     void Delete(TKey key);
 
-    ICollection<int> Range(TKey from, TKey to);
+    void Range(TKey from, TKey to, ICollection<int> into);
 }

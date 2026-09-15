@@ -2,8 +2,8 @@ using RhinoDB.Core.Exceptions;
 
 namespace RhinoDB.Lib.Indexing.Test;
 
-public class OrderedIndexTests {
-    static private OrderedIndex<int> NewIndex() => new OrderedIndex<int>();
+public class LiteBTreeIndexTests {
+    static private LiteBTreeIndex<int> NewIndex() => new LiteBTreeIndex<int>();
 
     [Test]
     public void Insert_ThenGetOffset_ReturnsTheOffset() {
@@ -76,6 +76,7 @@ public class OrderedIndexTests {
 
     [Test]
     public void Range_ReturnsOffsetsWithinBoundsInclusive_InAscendingKeyOrder() {
+        var offsets = new List<int>();
         var index = NewIndex();
         // Inserted out of key order on purpose - ordering must come from the index
         // itself, not from insertion order.
@@ -85,76 +86,82 @@ public class OrderedIndexTests {
         index.Insert(4, 40);
         index.Insert(2, 20);
 
-        var offsets = index.Range(2, 4);
+        index.Range(2, 4, offsets);
 
         Assert.That(offsets, Is.EqualTo(new[] { 20, 30, 40 }));
     }
 
     [Test]
     public void Range_BoundsAreInclusive() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert(1, 10);
         index.Insert(2, 20);
         index.Insert(3, 30);
 
-        var offsets = index.Range(1, 3);
+        index.Range(1, 3, offsets);
 
         Assert.That(offsets, Is.EqualTo(new[] { 10, 20, 30 }));
     }
 
     [Test]
     public void Range_WithNoMatches_ReturnsEmpty() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert(1, 10);
 
-        var offsets = index.Range(100, 200);
+        index.Range(100, 200, offsets);
 
         Assert.That(offsets, Is.Empty);
     }
 
     [Test]
     public void Range_WhenFromIsGreaterThanTo_ReturnsEmpty() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert(1, 10);
         index.Insert(2, 20);
 
-        var offsets = index.Range(2, 1);
+        index.Range(2, 1, offsets);
 
         Assert.That(offsets, Is.Empty);
     }
 
     [Test]
     public void Range_ReflectsStateAfterADelete() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert(1, 10);
         index.Insert(2, 20);
         index.Insert(3, 30);
 
         index.Delete(2);
-        var offsets = index.Range(1, 3);
+        index.Range(1, 3, offsets);
 
         Assert.That(offsets, Is.EqualTo(new[] { 10, 30 }));
     }
 
     [Test]
     public void Range_FromEqualsTo_OnExistingKey_ReturnsThatSingleOffset() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert(1, 10);
         index.Insert(2, 20);
 
-        var offsets = index.Range(2, 2);
+        index.Range(2, 2, offsets);
 
         Assert.That(offsets, Is.EqualTo(new[] { 20 }));
     }
 
     [Test]
     public void Insert_KeysOutOfOrder_RangeStillReturnsAscendingOrder() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert(3, 300);
         index.Insert(1, 100);
         index.Insert(2, 200);
 
-        var offsets = index.Range(1, 3);
+        index.Range(1, 3, offsets);
 
         Assert.That(offsets, Is.EqualTo(new[] { 100, 200, 300 }));
     }

@@ -49,7 +49,7 @@ public class HashIndex_CompositeKeyTests {
 }
 
 public class OrderedIndex_CompositeKeyTests {
-    static private OrderedIndex<(int X, int Y)> NewIndex() => new OrderedIndex<(int X, int Y)>();
+    static private RedBlackTreeIndex<(int X, int Y)> NewIndex() => new RedBlackTreeIndex<(int X, int Y)>();
 
     [Test]
     public void Insert_SameXDifferentY_BothRetrievable() {
@@ -64,6 +64,7 @@ public class OrderedIndex_CompositeKeyTests {
 
     [Test]
     public void Range_OrdersByXThenY() {
+        var offsets = new List<int>();
         var index = NewIndex();
         // Inserted out of order on purpose - ordering must come from the index.
         index.Insert((2, 5), 1);
@@ -71,7 +72,7 @@ public class OrderedIndex_CompositeKeyTests {
         index.Insert((1, 1), 3);
         index.Insert((2, 1), 4);
 
-        var offsets = index.Range((1, 0), (2, 9));
+        index.Range((1, 0), (2, 9), offsets);
 
         Assert.That(offsets, Is.EqualTo(new[] { 3, 2, 4, 1 }));
     }
@@ -80,13 +81,14 @@ public class OrderedIndex_CompositeKeyTests {
     public void Range_FixedXRangeOnY_LeftmostPrefixQuery() {
         // The common composite-index access pattern: exact match on the leading
         // column, range on the trailing one.
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert((5, 10), 1);
         index.Insert((5, 20), 2);
         index.Insert((5, 30), 3);
         index.Insert((6, 15), 4); // different X - must not appear
 
-        var offsets = index.Range((5, 10), (5, 20));
+        index.Range((5, 10), (5, 20), offsets);
 
         Assert.That(offsets, Is.EqualTo(new[] { 1, 2 }));
     }
@@ -124,44 +126,50 @@ public class NonUniqueHashSetIndex_CompositeKeyTests {
 }
 
 public class NonUniqueOrderedIndex_CompositeKeyTests {
-    static private NonUniqueOrderedIndex<(int X, int Y)> NewIndex() => new NonUniqueOrderedIndex<(int X, int Y)>();
+    static private NonUniqueRedBlackTreeIndex<(int X, int Y)> NewIndex() => new NonUniqueRedBlackTreeIndex<(int X, int Y)>();
 
     [Test]
     public void Insert_MultipleEntitiesAtSameCoordinate_GetOffsetsReturnsAllOfThem() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert((5, 10), 1);
         index.Insert((5, 10), 2);
 
-        Assert.That(index.GetOffsets((5, 10)), Is.EquivalentTo(new[] { 1, 2 }));
+        index.GetOffsets((5, 10), offsets);
+
+        Assert.That(offsets, Is.EquivalentTo(new[] { 1, 2 }));
     }
 
     [Test]
     public void Range_OrdersByXThenY_AcrossDuplicateCoordinates() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert((2, 5), 1);
         index.Insert((1, 9), 2);
         index.Insert((1, 1), 3);
         index.Insert((1, 1), 4); // same (X,Y) as offset 3 - must coexist
 
-        var offsets = index.Range((1, 0), (2, 9));
+        index.Range((1, 0), (2, 9), offsets);
 
         Assert.That(offsets, Is.EqualTo(new[] { 3, 4, 2, 1 }));
     }
 
     [Test]
     public void Range_FixedXRangeOnY_LeftmostPrefixQuery() {
+        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert((5, 10), 1);
         index.Insert((5, 20), 2);
         index.Insert((6, 15), 3); // different X - must not appear
 
-        var offsets = index.Range((5, 10), (5, 20));
+        index.Range((5, 10), (5, 20), offsets);
 
         Assert.That(offsets, Is.EquivalentTo(new[] { 1, 2 }));
     }
 
     [Test]
     public void Range_DoesNotComposeAsIndependentBoundingBox() {
+        var offsets = new List<int>();
         // Documents the caveat: Range on a composite key is lexicographic, not a
         // rectangle. An offset can fall inside the bound even when one of its columns
         // is far outside what looks like that column's range, because the other
@@ -172,7 +180,7 @@ public class NonUniqueOrderedIndex_CompositeKeyTests {
         index.Insert((1, 5), withinIntendedBox);
         index.Insert((1, 50), lexicographicallyBetweenButYOutOfRange);
 
-        var offsets = index.Range((1, 0), (2, 9));
+        index.Range((1, 0), (2, 9), offsets);
 
         // Both come back, even though entry 2's Y (50) is well outside the [0,9]
         // bound someone might have intended as an independent Y-axis limit.

@@ -9,8 +9,8 @@ public class NonUniqueLiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
         public readonly int[] Offsets = new int[capacity];
         public int Count = 0;
 
-        public readonly TKey MinKey => Keys[0];
-        public readonly TKey MaxKey => Keys[Count - 1];
+        public readonly TKey MinKey => Count > 0 ? Keys[0] : default!;
+        public readonly TKey MaxKey => Count > 0 ? Keys[Count - 1] : default!;
         public readonly bool IsFull => Count == Keys.Length;
     }
 
@@ -149,7 +149,8 @@ public class NonUniqueLiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
     private int FindTargetChunkForInsertion(TKey key) {
         ReadOnlySpan<IndexChunk> chunkSpan = CollectionsMarshal.AsSpan(chunks);
         for (var i = 0; i < chunkSpan.Length; i++) {
-            if (chunkSpan[i].MaxKey.CompareTo(key) >= 0 || i == chunkSpan.Length - 1) {
+            ref readonly IndexChunk chunk = ref chunkSpan[i];
+            if (chunk.Count == 0 || chunk.MaxKey.CompareTo(key) >= 0 || i == chunkSpan.Length - 1) {
                 return i;
             }
         }
