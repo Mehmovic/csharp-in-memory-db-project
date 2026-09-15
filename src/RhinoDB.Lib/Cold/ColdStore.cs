@@ -100,10 +100,10 @@ public sealed class ColdStore : IDisposable {
         pendingRecoveryEntries = [];
         if (entries.Length == 0) return Task.FromResult(Result.Ok());
 
-        var latest = new Dictionary<(uint TableId, string KeyBase64), WalChange>();
+        var latest = new Dictionary<(uint TableId, byte[] Key), WalChange>(WalKeyComparer.Instance);
         foreach (DecodedWalEntry entry in entries)
         foreach (WalChange change in entry.Changes)
-            latest[(change.TableId, Convert.ToBase64String(change.Key))] = change;
+            latest[(change.TableId, change.Key)] = change;
 
         var residentRows = latest.Values.Where(c => c.Kind != ChangeKind.Delete)
             .Select(c => new CheckpointRow(c.TableId, c.Key, c.Row!)).ToArray();
