@@ -34,7 +34,7 @@ public class PrimaryKeyKindTests {
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Ranking.Insert((dynamic)ranking);
-                found = dtx.Ranking.Get(7).IsOk();
+                found = dtx.Ranking.Find(7).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -56,7 +56,7 @@ public class PrimaryKeyKindTests {
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Ranking.Insert((dynamic)ranking);
-                found = dtx.Ranking.Get(7).IsOk();
+                found = dtx.Ranking.Find(7).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

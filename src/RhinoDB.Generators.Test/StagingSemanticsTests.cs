@@ -45,7 +45,7 @@ public class StagingSemanticsTests {
                 dynamic dtx = tx;
                 dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
                 dtx.Widget.Update(1, (dynamic)NewWidget(asm, 1, "Ada", 42));
-                stock = (int)dtx.Widget.Get(1).Unwrap().Stock;
+                stock = (int)dtx.Widget.Find(1).Unwrap().Stock;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -62,7 +62,7 @@ public class StagingSemanticsTests {
                 dynamic dtx = tx;
                 dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
                 dtx.Widget.Delete(1);
-                foundWithinSameOperation = dtx.Widget.Get(1).IsOk();
+                foundWithinSameOperation = dtx.Widget.Find(1).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -86,7 +86,7 @@ public class StagingSemanticsTests {
                 dynamic dtx = tx;
                 dtx.Widget.Delete(1);
                 dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 99));
-                stock = (int)dtx.Widget.Get(1).Unwrap().Stock;
+                stock = (int)dtx.Widget.Find(1).Unwrap().Stock;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -108,8 +108,8 @@ public class StagingSemanticsTests {
                 dynamic dtx = tx;
                 dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
                 dtx.Widget.Delete(2);
-                foundOne = dtx.Widget.Get(1).IsOk();
-                foundTwoAfterDelete = dtx.Widget.Get(2).IsOk();
+                foundOne = dtx.Widget.Find(1).IsOk();
+                foundTwoAfterDelete = dtx.Widget.Find(2).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

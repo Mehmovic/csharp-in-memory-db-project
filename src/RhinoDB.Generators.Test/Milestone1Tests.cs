@@ -47,7 +47,7 @@ public class Milestone1Tests {
 
         var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic got = ((dynamic)tx).Widget.Get(1);
+                dynamic got = ((dynamic)tx).Widget.Find(1);
                 return got.IsOk() ? Result.Ok() : Result.Error((DbError)got.GetError());
             }, PropagationMode.Optimistic);
         Assert.That(getResult.IsOk(), Is.True);
@@ -67,7 +67,7 @@ public class Milestone1Tests {
         int stock = -1;
         var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic got = ((dynamic)tx).Widget.Get(1);
+                dynamic got = ((dynamic)tx).Widget.Find(1);
                 stock = (int)got.Unwrap().Stock;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -89,7 +89,7 @@ public class Milestone1Tests {
         var foundAfterDelete = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic got = ((dynamic)tx).Widget.Get(1);
+                dynamic got = ((dynamic)tx).Widget.Find(1);
                 foundAfterDelete = got.IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -99,7 +99,7 @@ public class Milestone1Tests {
 
     [Test]
     public async Task InsertThenGet_WithinTheSameOperation_SeesTheStagedRow() {
-        // Read-your-own-writes: a Get inside the same operation as a not-yet-
+        // Read-your-own-writes: a Find inside the same operation as a not-yet-
         // applied Insert must see it via the staged-changes overlay.
         var (db, txType, asm) = NewDb();
         var widget = NewWidget(asm, 1, "Ada", 10);
@@ -109,7 +109,7 @@ public class Milestone1Tests {
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Widget.Insert((dynamic)widget);
-                foundWithinSameOperation = dtx.Widget.Get(1).IsOk();
+                foundWithinSameOperation = dtx.Widget.Find(1).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

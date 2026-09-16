@@ -40,7 +40,7 @@ public class AutoIncrementTests {
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Gadget.Insert((dynamic)gadget);
-                dynamic found = dtx.Gadget.Get(1);
+                dynamic found = dtx.Gadget.Find(1);
                 assignedId = found.IsOk() ? 1 : -1;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -61,7 +61,7 @@ public class AutoIncrementTests {
                 dynamic dtx = tx;
                 dtx.Gadget.Insert((dynamic)first);
                 dtx.Gadget.Insert((dynamic)second);
-                foundBoth = dtx.Gadget.Get(1).IsOk() && dtx.Gadget.Get(2).IsOk();
+                foundBoth = dtx.Gadget.Find(1).IsOk() && dtx.Gadget.Find(2).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -78,7 +78,7 @@ public class AutoIncrementTests {
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Gadget.Insert((dynamic)gadget);
-                found = dtx.Gadget.Get(42).IsOk();
+                found = dtx.Gadget.Find(42).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -100,7 +100,7 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                foundSecond = dtx.Gadget.Get(2).IsOk();
+                foundSecond = dtx.Gadget.Find(2).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -142,7 +142,7 @@ public class AutoIncrementTests {
                 dynamic dtx = tx;
                 dtx.Widget.Insert((dynamic)rowA);
                 dtx.Widget.Insert((dynamic)rowB);
-                dynamic found = dtx.Widget.Get(2);
+                dynamic found = dtx.Widget.Find(2);
                 sequenceOfB = found.IsOk() ? (long)found.Unwrap().Sequence : -1;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -224,7 +224,7 @@ public class AutoIncrementTests {
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Item.Insert((dynamic)negative);
-                dynamic found = dtx.Item.Get(1);
+                dynamic found = dtx.Item.Find(1);
                 assignedPositive = found.IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -266,8 +266,8 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dynamic byAuto = dtx.Crate.Get(1u);
-                dynamic byExplicit = dtx.Crate.Get(7u);
+                dynamic byAuto = dtx.Crate.Find(1u);
+                dynamic byExplicit = dtx.Crate.Find(7u);
                 autoAssignedFound = byAuto.IsOk();
                 explicitPreserved = byExplicit.IsOk();
                 Assert.That(autoAssignedFound, Is.True);

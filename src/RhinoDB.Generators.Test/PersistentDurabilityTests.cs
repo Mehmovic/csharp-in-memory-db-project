@@ -6,7 +6,7 @@ namespace RhinoDB.Test.Generators;
 
 // PersistentTable<TKey,TRow> is gone from the codebase entirely (retired
 // 2026-09-12, the same "hand-prove then delete the scaffold" treatment
-// Table<TKey,TRow> got) - its cold-storage decisions (Get/Update are
+// Table<TKey,TRow> got) - its cold-storage decisions (Find/Update are
 // memory-only, Insert unconditionally upserts over a cold-only key, Evict
 // never touches cold storage) now live entirely in generated code. This
 // suite ports the scenarios from the deleted Cold/PersistentTableTests.cs
@@ -53,7 +53,7 @@ public class PersistentDurabilityTests {
         return Activator.CreateInstance(t, id, ownerId, balance)!;
     }
 
-    // ---- Decision 1: Get never touches cold storage ----
+    // ---- Decision 1: Find never touches cold storage ----
 
     [Test]
     public async Task Get_ForARowThatOnlyExistsColdAndWasNeverLoaded_ReturnsNotFound() {
@@ -74,10 +74,10 @@ public class PersistentDurabilityTests {
 
         var found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
+            reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Find(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
-        Assert.That(found, Is.False, "A fresh in-memory table has an empty primaryIndex even though the row is durably present - Get must not silently reach for cold storage.");
+        Assert.That(found, Is.False, "A fresh in-memory table has an empty primaryIndex even though the row is durably present - Find must not silently reach for cold storage.");
     }
 
     // ---- Decision 4: no implicit load-then-update ----
@@ -153,7 +153,7 @@ public class PersistentDurabilityTests {
             reopenedDb, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 loaded = dtx.Account.Storage.Load(1).IsOk();
-                found = dtx.Account.Get(1).IsOk();
+                found = dtx.Account.Find(1).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -207,7 +207,7 @@ public class PersistentDurabilityTests {
 
         var goneFromMemory = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { goneFromMemory = !((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { goneFromMemory = !((dynamic)tx).Account.Find(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
         Assert.That(goneFromMemory, Is.True, "Sanity: genuinely gone from memory now, only reachable through Load/Peek.");
 
@@ -221,7 +221,7 @@ public class PersistentDurabilityTests {
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Account.Storage.Load(1);
-                balance = (decimal)dtx.Account.Get(1).Unwrap().Balance;
+                balance = (decimal)dtx.Account.Find(1).Unwrap().Balance;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
         Assert.That(balance, Is.EqualTo(999m), "The durable copy must be the overwritten value, not the original evicted one.");
@@ -396,7 +396,7 @@ public class PersistentDurabilityTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                inMemory = dtx.Account.Get(1).IsOk();
+                inMemory = dtx.Account.Find(1).IsOk();
                 var peek = dtx.Account.Storage.Peek(1);
                 peeked = peek.IsOk() && peek.Unwrap().Balance == 100m;
                 reloaded = dtx.Account.Storage.Load(1).IsOk();
@@ -434,7 +434,7 @@ public class PersistentDurabilityTests {
                 var peek = dtx.Account.Storage.Peek(1);
                 persisted = peek.IsOk() ? peek.Unwrap().Balance : -1m;
                 if (dtx.Account.Storage.Load(1).IsOk()) {
-                    var get = dtx.Account.Get(1);
+                    var get = dtx.Account.Find(1);
                     reloaded = get.IsOk() ? get.Unwrap().Balance : -1m;
                 }
                 return Result.Ok();
@@ -478,7 +478,7 @@ public class PersistentDurabilityTests {
 
         bool found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
+            reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Find(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.False,
@@ -514,7 +514,7 @@ public class PersistentDurabilityTests {
             reopenedDb, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 loaded = dtx.Account.Storage.Load(1).IsOk();
-                found = dtx.Account.Get(1).IsOk();
+                found = dtx.Account.Find(1).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -541,7 +541,7 @@ public class PersistentDurabilityTests {
                 // it - the batch must be applied (mdbx write-through + memory drop)
                 // before this same operation returns, not deferred to the next
                 // operation's BeginScope boundary.
-                droppedWithinSameOperation = !dtx.Account.Get(1).IsOk();
+                droppedWithinSameOperation = !dtx.Account.Find(1).IsOk();
                 var peek = dtx.Account.Storage.Peek(1);
                 persisted = peek.IsOk() ? peek.Unwrap().Balance : -1m;
                 return Result.Ok();

@@ -73,7 +73,7 @@ public class Milestone5Tests {
 
         var found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Club.Get(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = ((dynamic)tx).Club.Find(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.False);

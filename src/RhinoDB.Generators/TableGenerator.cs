@@ -188,7 +188,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var (pkAccessorProvided, pkAccessorValue) = StringNamedArg(primaryKeyAttribute, "Accessor");
         if (pkAccessorProvided && pkAccessorValue == "")
             rowDiagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(primaryKeyAttribute), $"[PrimaryKey] on '{rowType.Name}.{primaryKeyParam.Name}'"));
-        var primaryKeyAccessor = pkAccessorProvided && pkAccessorValue != "" ? pkAccessorValue! : "Get";
+        var primaryKeyAccessor = pkAccessorProvided && pkAccessorValue != "" ? pkAccessorValue! : "Find";
 
         var autoIncrementFields = ImmutableArray.CreateBuilder<AutoIncrementFieldModel>();
         foreach (var p in primaryCtor.Parameters) {

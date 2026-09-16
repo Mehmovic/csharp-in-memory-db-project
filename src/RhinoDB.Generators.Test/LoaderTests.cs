@@ -76,8 +76,8 @@ public class LoaderTests {
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 reopenedDb, txType, (ctx, tx) => {
                     dynamic dtx = tx;
-                    club1Found = dtx.Club.Get(1).IsOk();
-                    club2Found = dtx.Club.Get(2).IsOk();
+                    club1Found = dtx.Club.Find(1).IsOk();
+                    club2Found = dtx.Club.Find(2).IsOk();
                     return Result.Ok();
                 }, PropagationMode.Optimistic);
 
@@ -115,7 +115,7 @@ public class LoaderTests {
 
             var found = false;
             await (Task<Result>)GeneratorTestHost.RunTransactional(
-                reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Get(1).IsOk(); return Result.Ok(); },
+                reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Find(1).IsOk(); return Result.Ok(); },
                 PropagationMode.Optimistic);
 
             Assert.That(found, Is.False, "An Evictable table must not be eager-loaded by the default loader.");
@@ -160,7 +160,7 @@ public class LoaderTests {
             var bulkLoad = ((object)accountsOps).GetType().GetMethod("BulkLoadFromCold", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             bulkLoad.Invoke(accountsOps, null);
 
-            Assert.That((bool)accountsOps.Get(1).IsOk(), Is.True, "BulkLoadFromCold() must be usable directly by a custom LoadAsync override to eager-load an Evictable table too.");
+            Assert.That((bool)accountsOps.Find(1).IsOk(), Is.True, "BulkLoadFromCold() must be usable directly by a custom LoadAsync override to eager-load an Evictable table too.");
         } finally {
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
