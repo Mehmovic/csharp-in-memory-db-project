@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace RhinoDB.Lib.Indexing;
 
-public class BTreeIndex<TKey> where TKey : IComparable<TKey> {
+public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey> {
     private struct IndexChunk(int capacity) {
         public readonly TKey[] Keys = new TKey[capacity];
         public readonly int[] Offsets = new int[capacity];
@@ -99,23 +99,45 @@ public class BTreeIndex<TKey> where TKey : IComparable<TKey> {
         Insert(newKey, newOffset);
     }
 
-    public void Range(TKey from, TKey to, ICollection<int> into) {
-        if (chunks.Count == 0 || Count == 0) return;
+    protected override int Scan(IndexBound<TKey> from, IndexBound<TKey> to, ICollection<int> into) {
+        if (chunks.Count == 0 || Count == 0) return 0;
 
+        var added = 0;
         var chunkSpan = CollectionsMarshal.AsSpan(chunks);
-        for (var c = FindFirstChunkWithMaxKeyAtLeast(from); c < chunks.Count; c++) {
+        // An open lower bound skips the chunk search entirely and starts at chunk 0.
+        var startChunk = from.IsBounded ? FindFirstChunkWithMaxKeyAtLeast(from.Key) : 0;
+
+        for (var c = startChunk; c < chunks.Count; c++) {
             ref readonly IndexChunk chunk = ref chunkSpan[c];
 
-            if (chunk.MinKey.CompareTo(to) > 0) break;
+            // Keys are unique, so a chunk whose smallest key is above to (or equal to an
+            // exclusive to) cannot contribute anything.
+            if (to.IsBounded) {
+                var minCmp = chunk.MinKey.CompareTo(to.Key);
+                if (minCmp > 0 || (minCmp == 0 && !to.IsInclusive)) break;
+            }
 
-            var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, from);
-            if (internalIdx < 0) internalIdx = ~internalIdx;
+            var internalIdx = 0;
+            if (from.IsBounded) {
+                internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, from.Key);
+                if (internalIdx < 0) internalIdx = ~internalIdx;
+                // At most one entry can equal from, so an exclusive lower bound is that
+                // single entry skipped rather than a run walked.
+                else if (!from.IsInclusive) internalIdx++;
+            }
 
             for (var i = internalIdx; i < chunk.Count; i++) {
-                if (chunk.Keys[i].CompareTo(to) > 0) return;
+                if (to.IsBounded) {
+                    var cmp = chunk.Keys[i].CompareTo(to.Key);
+                    if (cmp > 0 || (cmp == 0 && !to.IsInclusive)) return added;
+                }
+
                 into.Add(chunk.Offsets[i]);
+                added++;
             }
         }
+
+        return added;
     }
 
     private int FindFirstChunkWithMaxKeyAtLeast(TKey from) {
@@ -138,14 +160,15 @@ public class BTreeIndex<TKey> where TKey : IComparable<TKey> {
     }
 
     private int FindTargetChunkForInsertion(TKey key) {
-        ReadOnlySpan<IndexChunk> chunkSpan = CollectionsMarshal.AsSpan(chunks);
-        for (var i = 0; i < chunkSpan.Length; i++) {
-            ref readonly IndexChunk chunk = ref chunkSpan[i];
-            if (chunk.Count == 0 || chunk.MaxKey.CompareTo(key) >= 0 || i == chunkSpan.Length - 1) {
-                return i;
-            }
-        }
-        return 0;
+        // Count == 0 is the only case where a chunk can be empty (Delete removes every
+        // emptied chunk), and the empty initial chunk keeps default! as its MaxKey -
+        // null for reference-type keys, so it must never be compared against.
+        if (Count == 0) return 0;
+
+        // Ascending chunks (guaranteed by SplitAndInsert) let this reuse the binary
+        // search the read paths already use, instead of a linear scan per insert.
+        var idx = FindFirstChunkWithMaxKeyAtLeast(key);
+        return idx < chunks.Count ? idx : chunks.Count - 1;
     }
 
     private int FindChunkContainingKey(TKey key) {

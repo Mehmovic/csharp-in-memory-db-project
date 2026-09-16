@@ -9,6 +9,8 @@ public class NonUniqueRedBlackTreeIndex<TKey>
             }
         )
     );
+    
+    public void GetOffsets(TKey key, ICollection<int> into) => Range(key, key, into);
 
     public void Insert(TKey key, int offset) {
         sortedSet.Add((key, offset));
@@ -17,8 +19,6 @@ public class NonUniqueRedBlackTreeIndex<TKey>
     public void Delete(TKey key, int offset) {
         sortedSet.Remove((key, offset));
     }
-
-    public void GetOffsets(TKey key, ICollection<int> into) => Range(key, key, into);
 
     public void Range(TKey from, TKey to, ICollection<int> into) {
         if (Comparer<TKey>.Default.Compare(from, to) > 0) return;

@@ -378,7 +378,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var keyType = KeyType(idx);
         return (idx.Kind, idx.Uniqueness) switch {
             (IndexKind.Hash, Uniqueness.Unique) => $"HashIndex<{keyType}>",
-            (IndexKind.Hash, Uniqueness.NonUnique) => $"NonUniqueHashSetIndex<{keyType}>",
+            (IndexKind.Hash, Uniqueness.NonUnique) => $"NonUniqueHashIndex<{keyType}>",
 
             (IndexKind.BTree, Uniqueness.Unique) => $"BTreeIndex<{keyType}>",
             (IndexKind.BTree, Uniqueness.NonUnique) => $"NonUniqueBTreeIndex<{keyType}>",

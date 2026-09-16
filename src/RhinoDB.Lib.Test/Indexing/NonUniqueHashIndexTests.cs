@@ -1,7 +1,7 @@
 namespace RhinoDB.Lib.Indexing.Test;
 
-public class NonUniqueHashSetIndexTests {
-    static private NonUniqueHashSetIndex<string> NewIndex() => new NonUniqueHashSetIndex<string>();
+public class NonUniqueHashIndexTests {
+    static private NonUniqueHashIndex<string> NewIndex() => new NonUniqueHashIndex<string>();
 
     [Test]
     public void GetOffsets_UnknownKey_ReturnsEmpty() {

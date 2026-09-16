@@ -25,9 +25,9 @@ public sealed class ColdStore : IDisposable {
     private long nextLsn;
     private DbError? durabilityFailure;
 
+    internal readonly WriteAheadLog TestOnlyWal;
     internal DbError DurabilityFailureError => durabilityFailure!.Value;
     internal void PoisonDurability(DbError error) => durabilityFailure ??= error;
-    internal WriteAheadLog TestOnlyWal { get; }
     public bool IsDurabilityPoisoned => durabilityFailure is not null;
     
     public bool IsScopeActive { get; private set; }
