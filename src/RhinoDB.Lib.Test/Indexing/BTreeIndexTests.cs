@@ -2,8 +2,8 @@ using RhinoDB.Core.Exceptions;
 
 namespace RhinoDB.Lib.Indexing.Test;
 
-public class LiteBTreeIndexTests {
-    static private LiteBTreeIndex<int> NewIndex() => new LiteBTreeIndex<int>();
+public class BTreeIndexTests {
+    static private BTreeIndex<int> NewIndex() => new BTreeIndex<int>();
 
     [Test]
     public void Insert_ThenGetOffset_ReturnsTheOffset() {
@@ -127,6 +127,55 @@ public class LiteBTreeIndexTests {
         Assert.That(offsets, Is.Empty);
     }
 
+    // ---- Multi-chunk Range paths (the binary-search start) ----
+
+    static private BTreeIndex<int> NewScrambledIndex(int count) {
+        // (i * 677) % 601 is a permutation of 0..600 - scrambled insertion order,
+        // forcing chunk splits, without any randomness.
+        var index = NewIndex();
+        for (var i = 0; i < count; i++) {
+            var key = i * 677 % 601;
+            index.Insert(key, key * 10);
+        }
+        return index;
+    }
+
+    [Test]
+    public void Range_AcrossManyChunks_ReturnsEveryOffsetInKeyOrder() {
+        var offsets = new List<int>();
+        var index = NewScrambledIndex(601);
+
+        index.Range(200, 300, offsets);
+
+        Assert.That(offsets, Is.EqualTo(Enumerable.Range(200, 101).Select(k => k * 10)));
+    }
+
+    [Test]
+    public void Range_PointQueryFarFromTheFirstChunk_ReturnsJustThatOffset() {
+        var offsets = new List<int>();
+        var index = NewScrambledIndex(601);
+
+        index.Range(450, 450, offsets);
+
+        Assert.That(offsets, Is.EqualTo(new[] { 4500 }));
+    }
+
+    [Test]
+    public void Range_WhenFromFallsInAKeyGap_ReturnsOnlyTheKeysAboveIt() {
+        var offsets = new List<int>();
+        // Walk the whole permutation of 0..600 and keep only the even keys, so the
+        // index holds exactly the even keys and every odd key is a gap.
+        var index = NewIndex();
+        for (var i = 0; i < 601; i++) {
+            var key = (i * 677) % 601;
+            if (key % 2 == 0) index.Insert(key, key * 10);
+        }
+
+        index.Range(399, 401, offsets);
+
+        Assert.That(offsets, Is.EqualTo(new[] { 4000 }));
+    }
+
     [Test]
     public void Range_ReflectsStateAfterADelete() {
         var offsets = new List<int>();
@@ -165,4 +214,25 @@ public class LiteBTreeIndexTests {
 
         Assert.That(offsets, Is.EqualTo(new[] { 100, 200, 300 }));
     }
+    [Test]
+    public void Range_AtScale_TensOfChunks_ReturnsTheExactWindow() {
+        var offsets = new List<int>();
+        var index = NewIndex();
+        // 10_000 keys against a 256-entry chunk size => ~40 chunks, so the
+        // start-chunk search really is a binary search over many chunks.
+        for (var key = 0; key < 10_000; key++)
+            index.Insert(key, key);
+
+        index.Range(4_000, 5_000, offsets);
+        Assert.That(offsets, Is.EqualTo(Enumerable.Range(4_000, 1_001)));
+
+        offsets.Clear();
+        index.Range(9_999, 9_999, offsets);
+        Assert.That(offsets, Is.EqualTo(new[] { 9_999 }));
+
+        offsets.Clear();
+        index.Range(0, 9_999, offsets);
+        Assert.That(offsets, Is.EqualTo(Enumerable.Range(0, 10_000)));
+    }
+
 }

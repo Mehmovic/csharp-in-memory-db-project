@@ -3,7 +3,7 @@ namespace RhinoDB.Core.Tables;
 [AttributeUsage(AttributeTargets.Parameter)]
 public sealed class IndexAttribute
 (
-    IndexKind kind = IndexKind.RedBlackOrdered,
+    IndexKind kind = IndexKind.BTree,
     Uniqueness uniqueness = Uniqueness.NonUnique
 ) : Attribute {
     public IndexKind Kind { get; } = kind;

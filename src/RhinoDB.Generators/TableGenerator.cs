@@ -364,10 +364,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
         context.AddSource($"{database.SimpleName}.g.cs", EmitDatabase(database, tables));
     }
 
-    static private string PrimaryIndexType(TableModel table) =>
-        table.PrimaryKeyKind == IndexKind.RedBlackOrdered
-            ? $"OrderedIndex<{table.PrimaryKeyTypeFullName}>"
-            : $"HashIndex<{table.PrimaryKeyTypeFullName}>";
+    static private string PrimaryIndexType(TableModel table) {
+        var keyType = table.PrimaryKeyTypeFullName;
+        return table.PrimaryKeyKind switch {
+            IndexKind.Hash => $"HashIndex<{keyType}>",
+            IndexKind.BTree => $"BTreeIndex<{keyType}>",
+            IndexKind.RedBlackTree =>$"RedBlackTreeIndex<{keyType}>",
+            _ => throw new Exception("Invalid index kind")
+        };
+    }
 
     static private string ConcreteIndexType(IndexModel idx) {
         var keyType = KeyType(idx);
@@ -375,11 +380,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
             (IndexKind.Hash, Uniqueness.Unique) => $"HashIndex<{keyType}>",
             (IndexKind.Hash, Uniqueness.NonUnique) => $"NonUniqueHashSetIndex<{keyType}>",
 
-            (IndexKind.LiteBTree, Uniqueness.Unique) => $"LiteBTreeIndex<{keyType}>",
-            (IndexKind.LiteBTree, Uniqueness.NonUnique) => $"NonUniqueLiteBTreeIndex<{keyType}>",
+            (IndexKind.BTree, Uniqueness.Unique) => $"BTreeIndex<{keyType}>",
+            (IndexKind.BTree, Uniqueness.NonUnique) => $"NonUniqueBTreeIndex<{keyType}>",
 
-            (IndexKind.RedBlackOrdered, Uniqueness.Unique) => $"RedBlackTreeIndex<{keyType}>",
-            (IndexKind.RedBlackOrdered, Uniqueness.NonUnique) => $"NonUniqueRedBlackTreeIndex<{keyType}>",
+            (IndexKind.RedBlackTree, Uniqueness.Unique) => $"RedBlackTreeIndex<{keyType}>",
+            (IndexKind.RedBlackTree, Uniqueness.NonUnique) => $"NonUniqueRedBlackTreeIndex<{keyType}>",
             
             _ => throw new Exception("Invalid index kind or uniqueness") 
         };
@@ -440,7 +445,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         return;
         static bool ShouldCreateOffsetBuffer(IndexModel indexModel) {
             return indexModel.Uniqueness != Uniqueness.Unique ||
-                   indexModel.Kind is IndexKind.LiteBTree or IndexKind.RedBlackOrdered;
+                   indexModel.Kind is IndexKind.BTree or IndexKind.RedBlackTree;
         }
     }
 
@@ -1142,6 +1147,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
     }
 
     private enum TableKind { Instant, Persistent }
-    private enum IndexKind { Hash, RedBlackOrdered, LiteBTree }
+    private enum IndexKind { Hash, BTree, RedBlackTree  }
     private enum Uniqueness { Unique, NonUnique }
 }

@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueLiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
+public class NonUniqueBTreeIndex<TKey> where TKey : IComparable<TKey> {
     private struct IndexChunk(int capacity) {
         public readonly TKey[] Keys = new TKey[capacity];
         public readonly int[] Offsets = new int[capacity];
@@ -19,27 +19,29 @@ public class NonUniqueLiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
 
     public int Count { get; private set; }
 
-    public NonUniqueLiteBTreeIndex(int chunkSize = 256) {
+    public NonUniqueBTreeIndex(int chunkSize = 256) {
         chunkCapacity = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(16, chunkSize));
         chunks = [new IndexChunk(chunkCapacity)];
         Count = 0;
     }
     
     public void GetOffsets(TKey key, ICollection<int> into) {
-        var chunkIdx = FindChunkContainingKey(key);
-        if (chunkIdx < 0) return;
+        if (chunks.Count == 0 || Count == 0) return;
 
-        ref readonly IndexChunk chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
-        var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
-        if (internalIdx < 0) return;
+        var chunkSpan = CollectionsMarshal.AsSpan(chunks);
+        for (var c = FindFirstChunkWithMaxKeyAtLeast(key); c < chunks.Count; c++) {
+            ref readonly IndexChunk chunk = ref chunkSpan[c];
+            if (chunk.MinKey.CompareTo(key) > 0) return;
 
-        var start = internalIdx;
-        while (start > 0 && chunk.Keys[start - 1].CompareTo(key) == 0) {
-            start--;
-        }
+            var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
+            if (internalIdx < 0) continue;
+            while (internalIdx > 0 && chunk.Keys[internalIdx - 1].CompareTo(key) == 0) {
+                internalIdx--;
+            }
 
-        for (var i = start; i < chunk.Count && chunk.Keys[i].CompareTo(key) == 0; i++) {
-            into.Add(chunk.Offsets[i]);
+            for (var i = internalIdx; i < chunk.Count && chunk.Keys[i].CompareTo(key) == 0; i++) {
+                into.Add(chunk.Offsets[i]);
+            }
         }
     }
 
@@ -58,7 +60,7 @@ public class NonUniqueLiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
         }
 
         if (chunk.IsFull) {
-            SplitAndInsert(ref chunkIdx, ref internalIdx, key, offset);
+            SplitAndInsert(chunkIdx, internalIdx, key, offset);
         } else {
             if (internalIdx < chunk.Count) {
                 Array.Copy(chunk.Keys, internalIdx, chunk.Keys, internalIdx + 1, chunk.Count - internalIdx);
@@ -74,76 +76,87 @@ public class NonUniqueLiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
     }
 
     public void Delete(TKey key, int offset) {
-        var chunkIdx = FindChunkContainingKey(key);
-        if (chunkIdx < 0) return;
+        if (chunks.Count == 0 || Count == 0) return;
 
-        ref IndexChunk chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
-        var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
-        if (internalIdx < 0) return;
+        var chunkSpan = CollectionsMarshal.AsSpan(chunks);
+        for (var c = FindFirstChunkWithMaxKeyAtLeast(key); c < chunks.Count; c++) {
+            ref IndexChunk chunk = ref chunkSpan[c];
+            if (chunk.MinKey.CompareTo(key) > 0) return;
 
-        var targetIdx = -1;
-        var scan = internalIdx;
-        while (scan >= 0 && chunk.Keys[scan].CompareTo(key) == 0) {
-            if (chunk.Offsets[scan] == offset) {
-                targetIdx = scan;
+            var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
+            if (internalIdx < 0) continue;
+
+            var start = internalIdx;
+            while (start > 0 && chunk.Keys[start - 1].CompareTo(key) == 0) {
+                start--;
+            }
+
+            var end = internalIdx;
+            while (end + 1 < chunk.Count && chunk.Keys[end + 1].CompareTo(key) == 0) {
+                end++;
+            }
+
+            var targetIdx = -1;
+            for (var i = start; i <= end; i++) {
+                if (chunk.Offsets[i] != offset) continue;
+                targetIdx = i;
                 break;
             }
-            scan--;
-        }
-        if (targetIdx < 0) {
-            scan = internalIdx + 1;
-            while (scan < chunk.Count && chunk.Keys[scan].CompareTo(key) == 0) {
-                if (chunk.Offsets[scan] == offset) {
-                    targetIdx = scan;
-                    break;
-                }
-                scan++;
+            if (targetIdx < 0) continue;
+
+            var moveCount = chunk.Count - targetIdx - 1;
+            if (moveCount > 0) {
+                Array.Copy(chunk.Keys, targetIdx + 1, chunk.Keys, targetIdx, moveCount);
+                Array.Copy(chunk.Offsets, targetIdx + 1, chunk.Offsets, targetIdx, moveCount);
             }
-        }
 
-        if (targetIdx < 0) return;
+            chunk.Count--;
+            Count--;
 
-        var moveCount = chunk.Count - targetIdx - 1;
-        if (moveCount > 0) {
-            Array.Copy(chunk.Keys, targetIdx + 1, chunk.Keys, targetIdx, moveCount);
-            Array.Copy(chunk.Offsets, targetIdx + 1, chunk.Offsets, targetIdx, moveCount);
-        }
-
-        chunk.Count--;
-        Count--;
-
-        if (chunk.Count == 0 && chunks.Count > 1) {
-            chunks.RemoveAt(chunkIdx);
+            if (chunk.Count == 0 && chunks.Count > 1) {
+                chunks.RemoveAt(c);
+            }
+            return;
         }
     }
 
     public void Range(TKey from, TKey to, ICollection<int> resultOffsets) {
         if (chunks.Count == 0 || Count == 0) return;
 
-        var startChunkIdx = 0;
         var chunkSpan = CollectionsMarshal.AsSpan(chunks);
-        while (startChunkIdx < chunks.Count && chunkSpan[startChunkIdx].MaxKey.CompareTo(from) < 0) {
-            startChunkIdx++;
-        }
-
-        for (var c = startChunkIdx; c < chunks.Count; c++) {
+        for (var c = FindFirstChunkWithMaxKeyAtLeast(from); c < chunks.Count; c++) {
             ref readonly IndexChunk chunk = ref chunkSpan[c];
 
             if (chunk.MinKey.CompareTo(to) > 0) break;
 
-            for (var i = 0; i < chunk.Count; i++) {
-                TKey currentKey = chunk.Keys[i];
+            var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, from);
+            if (internalIdx < 0) internalIdx = ~internalIdx;
+            else while (internalIdx > 0 && chunk.Keys[internalIdx - 1].CompareTo(from) == 0) internalIdx--;
 
-                var minCompare = currentKey.CompareTo(from);
-                var maxCompare = currentKey.CompareTo(to);
-
-                if (minCompare >= 0 && maxCompare <= 0) {
-                    resultOffsets.Add(chunk.Offsets[i]);
-                } else if (maxCompare > 0) {
-                    return;
-                }
+            for (var i = internalIdx; i < chunk.Count; i++) {
+                if (chunk.Keys[i].CompareTo(to) > 0) return;
+                resultOffsets.Add(chunk.Offsets[i]);
             }
         }
+    }
+
+    private int FindFirstChunkWithMaxKeyAtLeast(TKey from) {
+        var low = 0;
+        var high = chunks.Count - 1;
+        var result = chunks.Count;
+        ReadOnlySpan<IndexChunk> chunkSpan = CollectionsMarshal.AsSpan(chunks);
+
+        while (low <= high) {
+            var mid = low + (high - low) / 2;
+            if (chunkSpan[mid].MaxKey.CompareTo(from) >= 0) {
+                result = mid;
+                high = mid - 1;
+            } else {
+                low = mid + 1;
+            }
+        }
+
+        return result;
     }
 
     private int FindTargetChunkForInsertion(TKey key) {
@@ -157,28 +170,7 @@ public class NonUniqueLiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
         return 0;
     }
 
-    private int FindChunkContainingKey(TKey key) {
-        var low = 0;
-        var high = chunks.Count - 1;
-        ReadOnlySpan<IndexChunk> chunkSpan = CollectionsMarshal.AsSpan(chunks);
-
-        while (low <= high) {
-            var mid = low + ((high - low) >> 1);
-            ref readonly IndexChunk chunk = ref chunkSpan[mid];
-
-            if (chunk.MinKey.CompareTo(key) <= 0 && chunk.MaxKey.CompareTo(key) >= 0) {
-                return mid;
-            }
-            if (chunk.MaxKey.CompareTo(key) < 0) {
-                low = mid + 1;
-            } else {
-                high = mid - 1;
-            }
-        }
-        return -1;
-    }
-
-    private void SplitAndInsert(ref int chunkIdx, ref int internalIdx, TKey key, int offset) {
+    private void SplitAndInsert(int chunkIdx, int internalIdx, TKey key, int offset) {
         ref IndexChunk oldChunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
         var newChunk = new IndexChunk(chunkCapacity);
 
@@ -204,10 +196,8 @@ public class NonUniqueLiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
             newChunk.Keys[newIdx] = key;
             newChunk.Offsets[newIdx] = offset;
             newChunk.Count++;
-
-            chunkIdx++;
         }
 
-        chunks.Insert(chunkIdx, newChunk);
+        chunks.Insert(chunkIdx + 1, newChunk);
     }
 }

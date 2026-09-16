@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace RhinoDB.Lib.Indexing;
 
-public class LiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
+public class BTreeIndex<TKey> where TKey : IComparable<TKey> {
     private struct IndexChunk(int capacity) {
         public readonly TKey[] Keys = new TKey[capacity];
         public readonly int[] Offsets = new int[capacity];
@@ -19,7 +19,7 @@ public class LiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
 
     public int Count { get; private set; }
 
-    public LiteBTreeIndex(int chunkSize = 256) {
+    public BTreeIndex(int chunkSize = 256) {
         chunkCapacity = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(16, chunkSize));
         chunks = [new IndexChunk(chunkCapacity)];
         Count = 0;
@@ -46,7 +46,7 @@ public class LiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
         }
 
         if (chunk.IsFull) {
-            SplitAndInsert(ref chunkIdx, ref internalIdx, key, offset);
+            SplitAndInsert(chunkIdx, internalIdx, key, offset);
         } else {
             if (internalIdx < chunk.Count) {
                 Array.Copy(chunk.Keys, internalIdx, chunk.Keys, internalIdx + 1, chunk.Count - internalIdx);
@@ -102,30 +102,39 @@ public class LiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
     public void Range(TKey from, TKey to, ICollection<int> into) {
         if (chunks.Count == 0 || Count == 0) return;
 
-        var startChunkIdx = 0;
         var chunkSpan = CollectionsMarshal.AsSpan(chunks);
-        while (startChunkIdx < chunks.Count && chunkSpan[startChunkIdx].MaxKey.CompareTo(from) < 0) {
-            startChunkIdx++;
-        }
-
-        for (var c = startChunkIdx; c < chunks.Count; c++) {
+        for (var c = FindFirstChunkWithMaxKeyAtLeast(from); c < chunks.Count; c++) {
             ref readonly IndexChunk chunk = ref chunkSpan[c];
 
             if (chunk.MinKey.CompareTo(to) > 0) break;
 
-            for (var i = 0; i < chunk.Count; i++) {
-                TKey currentKey = chunk.Keys[i];
+            var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, from);
+            if (internalIdx < 0) internalIdx = ~internalIdx;
 
-                var minCompare = currentKey.CompareTo(from);
-                var maxCompare = currentKey.CompareTo(to);
-
-                if (minCompare >= 0 && maxCompare <= 0) {
-                    into.Add(chunk.Offsets[i]);
-                } else if (maxCompare > 0) {
-                    return;
-                }
+            for (var i = internalIdx; i < chunk.Count; i++) {
+                if (chunk.Keys[i].CompareTo(to) > 0) return;
+                into.Add(chunk.Offsets[i]);
             }
         }
+    }
+
+    private int FindFirstChunkWithMaxKeyAtLeast(TKey from) {
+        var low = 0;
+        var high = chunks.Count - 1;
+        var result = chunks.Count;
+        ReadOnlySpan<IndexChunk> chunkSpan = CollectionsMarshal.AsSpan(chunks);
+
+        while (low <= high) {
+            var mid = low + (high - low) / 2;
+            if (chunkSpan[mid].MaxKey.CompareTo(from) >= 0) {
+                result = mid;
+                high = mid - 1;
+            } else {
+                low = mid + 1;
+            }
+        }
+
+        return result;
     }
 
     private int FindTargetChunkForInsertion(TKey key) {
@@ -160,7 +169,7 @@ public class LiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
         return -1;
     }
 
-    private void SplitAndInsert(ref int chunkIdx, ref int internalIdx, TKey key, int offset) {
+    private void SplitAndInsert(int chunkIdx, int internalIdx, TKey key, int offset) {
         ref IndexChunk oldChunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
         var newChunk = new IndexChunk(chunkCapacity);
 
@@ -186,10 +195,8 @@ public class LiteBTreeIndex<TKey> where TKey : IComparable<TKey> {
             newChunk.Keys[newIdx] = key;
             newChunk.Offsets[newIdx] = offset;
             newChunk.Count++;
-
-            chunkIdx++;
         }
 
-        chunks.Insert(chunkIdx, newChunk);
+        chunks.Insert(chunkIdx + 1, newChunk);
     }
 }
