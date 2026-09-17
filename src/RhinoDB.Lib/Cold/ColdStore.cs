@@ -45,7 +45,7 @@ public sealed class ColdStore : IDisposable {
         string path, nint sizeUpperBytes = -1, nint sizeNowBytes = -1, long evictionBatchThresholdBytes = EvictionBatch.DefaultSizeThresholdBytes) {
         var isFreshDirectory = !Directory.Exists(path) || !Directory.EnumerateFileSystemEntries(path).Any();
 
-        var rcCreate = MdbxEnvironment.Create(out MdbxEnvironment? env);
+        var rcCreate = MdbxEnvironment.Create(out var env);
         if (rcCreate != 0 || env is null) return Result<ColdStore>.Error(MdbxErrorMapper.Map(rcCreate));
 
         env.SetMaxDbs(1024);
@@ -101,8 +101,8 @@ public sealed class ColdStore : IDisposable {
         if (entries.Length == 0) return Task.FromResult(Result.Ok());
 
         var latest = new Dictionary<(uint TableId, byte[] Key), WalChange>(WalKeyComparer.Instance);
-        foreach (DecodedWalEntry entry in entries)
-        foreach (WalChange change in entry.Changes)
+        foreach (var entry in entries)
+        foreach (var change in entry.Changes)
             latest[(change.TableId, change.Key)] = change;
 
         var residentRows = latest.Values.Where(c => c.Kind != ChangeKind.Delete)
@@ -124,7 +124,7 @@ public sealed class ColdStore : IDisposable {
         if (drainedEvictions.Count == 0) return;
 
         var appliedResult = EvictionBatchApplier.Apply(env, tableDbisById, drainedEvictions,
-            (tableId, key) => evictionDrops.TryGetValue(tableId, out EvictionDropRegistration registration)
+            (tableId, key) => evictionDrops.TryGetValue(tableId, out var registration)
                 ? registration.TryGetCurrentRow(key)
                 : null,
             appliedInto: appliedEvictions);
@@ -132,8 +132,8 @@ public sealed class ColdStore : IDisposable {
 
         var applied = appliedResult.Unwrap();
         for (var i = 0; i < applied.Count; i++) {
-            EvictionCandidate candidate = applied[i];
-            if (evictionDrops.TryGetValue(candidate.TableId, out EvictionDropRegistration registration))
+            var candidate = applied[i];
+            if (evictionDrops.TryGetValue(candidate.TableId, out var registration))
                 registration.Drop(candidate.Key);
         }
     }
@@ -169,7 +169,7 @@ public sealed class ColdStore : IDisposable {
         where TRow : struct {
         if (tables.TryGetValue(name, out var existing)) return (ColdTable<TKey, TRow>)existing;
 
-        var rcTxn = env.BeginTxn(0, out Transaction? txn);
+        var rcTxn = env.BeginTxn(0, out var txn);
         if (rcTxn != 0 || txn is null) throw MdbxErrorMapper.Map(rcTxn).ToException();
 
         var rcDbi = txn.OpenDbi(name, CreateDbi, out var dbi);
@@ -190,21 +190,21 @@ public sealed class ColdStore : IDisposable {
     public Result<TRow> Peek<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key)
         where TKey : IEquatable<TKey>, IComparable<TKey>
         where TRow : struct {
-        var rc = env.BeginTxn(ReadOnlyTxn, out Transaction? txn);
+        var rc = env.BeginTxn(ReadOnlyTxn, out var txn);
         if (rc != 0 || txn is null) return Result<TRow>.Error(MdbxErrorMapper.Map(rc));
 
-        using Transaction _ = txn;
+        using var _ = txn;
         return table.Get(txn, key);
     }
 
     public IEnumerable<(TKey Key, TRow Row)> ScanAll<TKey, TRow>(ColdTable<TKey, TRow> table)
         where TKey : IEquatable<TKey>, IComparable<TKey>
         where TRow : struct {
-        var rc = env.BeginTxn(ReadOnlyTxn, out Transaction? txn);
+        var rc = env.BeginTxn(ReadOnlyTxn, out var txn);
         if (rc != 0 || txn is null) throw MdbxErrorMapper.Map(rc).ToException();
 
-        using Transaction _ = txn;
-        foreach ((TKey Key, TRow Row) pair in table.ScanAll(txn)) yield return pair;
+        using var _ = txn;
+        foreach (var pair in table.ScanAll(txn)) yield return pair;
     }
 
     public void Dispose() {

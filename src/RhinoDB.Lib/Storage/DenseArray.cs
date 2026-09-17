@@ -63,7 +63,7 @@ public class DenseArray<T>
 
         var targetChunk = index >> chunkShift;
         var indexInChunk = index & chunkMask;
-        T lastItem = values[currentChunk][lastIndexInChunk];
+        var lastItem = values[currentChunk][lastIndexInChunk];
         values[targetChunk][indexInChunk] = lastItem;
 
         Count -= 1;

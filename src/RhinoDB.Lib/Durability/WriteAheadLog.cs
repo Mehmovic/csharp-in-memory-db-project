@@ -70,7 +70,7 @@ public sealed class WriteAheadLog : IDisposable {
         var tailBytes = new byte[tailLength];
         fileStream.ReadExactly(tailBytes, 0, tailLength);
 
-        WalScanResult scan = WalRecordCodec.Scan(tailBytes);
+        var scan = WalRecordCodec.Scan(tailBytes);
         if (scan.Status == WalScanStatus.Corrupted) {
             fileStream.Dispose();
             return Result<(WriteAheadLog, DecodedWalEntry[])>.Error(DbError.WalCorrupted());

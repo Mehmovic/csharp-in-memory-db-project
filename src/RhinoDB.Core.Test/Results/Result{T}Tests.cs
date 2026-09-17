@@ -139,7 +139,7 @@ public class ResultOfTTests
     [Test]
     public void ImplicitConversion_FromAFailedNonGenericResult_PropagatesTheError()
     {
-        Result failure = Result.Error(DbError.IndexKeyNotFound());
+        var failure = Result.Error(DbError.IndexKeyNotFound());
 
         Result<int> result = failure;
 
@@ -150,7 +150,7 @@ public class ResultOfTTests
     [Test]
     public void ImplicitConversion_FromASuccessfulNonGenericResult_ThrowsBecauseThereIsNoValueToCarry()
     {
-        Result success = Result.Ok();
+        var success = Result.Ok();
 
         Assert.Throws<InvalidOperationException>(() => { Result<int> _ = success; });
     }

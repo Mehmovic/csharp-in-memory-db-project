@@ -31,7 +31,7 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
         var chunkIdx = FindChunkContainingKey(key);
         if (chunkIdx < 0) return Result.Error(DbError.IndexKeyNotFound());
 
-        ref readonly IndexChunk chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
+        ref readonly var chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
         var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
         if (internalIdx < 0) return Result.Error(DbError.IndexKeyNotFound());
 
@@ -40,7 +40,7 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
 
     public void Insert(TKey key, int offset) {
         var chunkIdx = FindTargetChunkForInsertion(key);
-        ref IndexChunk chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
+        ref var chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
 
         var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
         if (internalIdx < 0) {
@@ -67,7 +67,7 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
         var chunkIdx = FindChunkContainingKey(key);
         if (chunkIdx < 0) return;
 
-        ref IndexChunk chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
+        ref var chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
         var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
         if (internalIdx < 0) return;
 
@@ -89,7 +89,7 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
         var chunkIdx = FindChunkContainingKey(key);
         if (chunkIdx < 0) return;
 
-        ref IndexChunk chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
+        ref var chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
         var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
         if (internalIdx < 0) return;
 
@@ -113,7 +113,7 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
         var startChunk = from.IsBounded ? FindFirstChunkWithMaxKeyAtLeast(from.Key) : 0;
 
         for (var c = startChunk; c < chunks.Count; c++) {
-            ref readonly IndexChunk chunk = ref chunkSpan[c];
+            ref readonly var chunk = ref chunkSpan[c];
 
             if (to.IsBounded) {
                 var minCmp = chunk.MinKey.CompareTo(to.Key);
@@ -175,7 +175,7 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
 
         while (low <= high) {
             var mid = low + (high - low) / 2;
-            ref readonly IndexChunk chunk = ref chunkSpan[mid];
+            ref readonly var chunk = ref chunkSpan[mid];
 
             if (chunk.MinKey.CompareTo(key) <= 0 && chunk.MaxKey.CompareTo(key) >= 0) {
                 return mid;
@@ -190,7 +190,7 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
     }
 
     private void SplitAndInsert(int chunkIdx, int internalIdx, TKey key, int offset) {
-        ref IndexChunk oldChunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
+        ref var oldChunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
         var newChunk = new IndexChunk(chunkCapacity);
 
         var splitPoint = oldChunk.Count >> 1;

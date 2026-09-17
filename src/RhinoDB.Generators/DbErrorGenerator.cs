@@ -71,7 +71,7 @@ public sealed class DbErrorGenerator : IIncrementalGenerator {
 
         sb.AppendLine("public enum ErrorKind : byte {");
         sb.AppendLine("    SystemFailure,");
-        foreach (ExceptionModel? error in errors)
+        foreach (var error in errors)
             sb.AppendLine($"    {error.FactoryName},");
         sb.AppendLine("    Custom,");
         sb.AppendLine("}");
@@ -80,7 +80,7 @@ public sealed class DbErrorGenerator : IIncrementalGenerator {
         sb.AppendLine("public readonly partial struct DbError {");
         sb.AppendLine("    public ushort CustomCode { get; }");
         sb.AppendLine();
-        foreach (ExceptionModel? error in errors)
+        foreach (var error in errors)
             sb.AppendLine($"    public static DbError {error.FactoryName}() => new(ErrorKind.{error.FactoryName});");
         sb.AppendLine();
 
@@ -96,7 +96,7 @@ public sealed class DbErrorGenerator : IIncrementalGenerator {
         sb.AppendLine("    public Exception ToException() => Kind switch {");
         sb.AppendLine("        ErrorKind.SystemFailure => systemException!,");
         sb.AppendLine("        ErrorKind.Custom => new Exception($\"Custom database error (code {CustomCode})\"),");
-        foreach (ExceptionModel? error in errors)
+        foreach (var error in errors)
             sb.AppendLine($"        ErrorKind.{error.FactoryName} => new {error.ExceptionType}(),");
         sb.AppendLine("        _ => new Exception(\"Unexpected error, empty exception caught\")");
         sb.AppendLine("    };");

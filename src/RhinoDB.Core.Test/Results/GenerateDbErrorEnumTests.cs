@@ -18,7 +18,7 @@ public enum Error {
 public class GenerateDbErrorEnumTests {
     [Test]
     public void GeneratedFactory_ProducesACustomKindError() {
-        DbError error = Err.InsufficientFunds();
+        var error = Err.InsufficientFunds();
 
         Assert.That(error.Kind, Is.EqualTo(ErrorKind.Custom));
     }
@@ -32,7 +32,7 @@ public class GenerateDbErrorEnumTests {
 
     [Test]
     public void Is_MatchesTheCorrespondingEnumMember() {
-        DbError error = Err.PlayerNotEligible();
+        var error = Err.PlayerNotEligible();
 
         Assert.That(error.Is(Error.PlayerNotEligible), Is.True);
         Assert.That(error.Is(Error.InsufficientFunds), Is.False);
@@ -40,7 +40,7 @@ public class GenerateDbErrorEnumTests {
 
     [Test]
     public void Is_DoesNotMatchALibraryError() {
-        DbError error = DbError.DuplicateKey();
+        var error = DbError.DuplicateKey();
 
         Assert.That(error.Is(Error.InsufficientFunds), Is.False);
     }

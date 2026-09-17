@@ -23,7 +23,7 @@ public class MdbxNativeSmokeTests {
     }
 
     private MdbxEnvironment OpenEnv() {
-        var rc = MdbxEnvironment.Create(out MdbxEnvironment? env);
+        var rc = MdbxEnvironment.Create(out var env);
         Assert.That(rc, Is.EqualTo(0), () => $"mdbx_env_create failed: {MdbxEnvironment.StrError(rc)}");
 
         Assert.That(env!.SetMaxDbs(4), Is.EqualTo(0));
@@ -36,14 +36,14 @@ public class MdbxNativeSmokeTests {
 
     [Test]
     public void EnvCreateOpenClose_RoundTrips() {
-        using MdbxEnvironment env = OpenEnv();
+        using var env = OpenEnv();
     }
 
     [Test]
     public void DbiOpen_ThenPutAndGet_RoundTripsTheValue() {
-        using MdbxEnvironment env = OpenEnv();
+        using var env = OpenEnv();
 
-        var beginRc = env.BeginTxn(0, out Transaction? txn);
+        var beginRc = env.BeginTxn(0, out var txn);
         Assert.That(beginRc, Is.EqualTo(0), () => $"mdbx_txn_begin_ex failed: {MdbxEnvironment.StrError(beginRc)}");
         using (txn) {
             Assert.That(txn!.OpenDbi("widgets", MdbxCreate, out var dbi), Is.EqualTo(0));
@@ -61,9 +61,9 @@ public class MdbxNativeSmokeTests {
 
     [Test]
     public void Delete_ThenGet_ReturnsNotFound() {
-        using MdbxEnvironment env = OpenEnv();
+        using var env = OpenEnv();
 
-        env.BeginTxn(0, out Transaction? txn);
+        env.BeginTxn(0, out var txn);
         using (txn) {
             txn!.OpenDbi("widgets", MdbxCreate, out var dbi);
             var key = Encoding.UTF8.GetBytes("key-to-delete");
@@ -87,9 +87,9 @@ public class MdbxNativeSmokeTests {
 
     [Test]
     public void NoOverwritePut_OnAnExistingKey_ReturnsKeyExist() {
-        using MdbxEnvironment env = OpenEnv();
+        using var env = OpenEnv();
 
-        env.BeginTxn(0, out Transaction? txn);
+        env.BeginTxn(0, out var txn);
         using (txn) {
             txn!.OpenDbi("widgets", MdbxCreate, out var dbi);
             var key = Encoding.UTF8.GetBytes("dup-key");
@@ -104,9 +104,9 @@ public class MdbxNativeSmokeTests {
 
     [Test]
     public void AbortedTransaction_DiscardsThePut() {
-        using MdbxEnvironment env = OpenEnv();
+        using var env = OpenEnv();
 
-        env.BeginTxn(0, out Transaction? txn);
+        env.BeginTxn(0, out var txn);
         using (txn) {
             txn!.OpenDbi("widgets", MdbxCreate, out var dbi);
             txn.Put(dbi, Encoding.UTF8.GetBytes("never-committed"), Encoding.UTF8.GetBytes("value"), 0);

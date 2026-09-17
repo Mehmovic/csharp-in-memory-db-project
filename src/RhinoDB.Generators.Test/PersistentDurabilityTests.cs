@@ -476,7 +476,7 @@ public class PersistentDurabilityTests {
         var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
         reopenedCold.CompleteRecovery();
 
-        bool found = true;
+        var found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Find(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);

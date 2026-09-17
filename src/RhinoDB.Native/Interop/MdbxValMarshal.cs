@@ -4,7 +4,7 @@ static internal unsafe class MdbxValMarshal {
     static public int Get(nint txn, uint dbi, ReadOnlySpan<byte> key, out byte[] value) {
         fixed (byte* keyPtr = key) {
             var keyVal = new MdbxVal { Data = (nint)keyPtr, Length = (nuint)key.Length };
-            var rc = MdbxNative.mdbx_get(txn, dbi, in keyVal, out MdbxVal dataVal);
+            var rc = MdbxNative.mdbx_get(txn, dbi, in keyVal, out var dataVal);
             if (rc != 0) {
                 value = [];
                 return rc;

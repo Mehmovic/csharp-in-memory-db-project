@@ -25,7 +25,7 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
     private PooledOperation() => core.RunContinuationsAsynchronously = true;
     
     public TValue GetResult(short token) {
-        TValue result = core.GetResult(token);
+        var result = core.GetResult(token);
 
         context = null;
         operation = null;
@@ -61,7 +61,7 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
 
     public void Run() {
         var ctx = context!;
-        ColdStore? cold = ctx.Cold;
+        var cold = ctx.Cold;
         if (cold is { IsDurabilityPoisoned: true }) {
             Complete(TValue.FromError(DbError.WalDurabilityFailed()), ctx, null);
             return;
@@ -76,7 +76,7 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
             txCreated = true;
             result = operation!.Invoke(ctx, tx, args);
             if (result.IsOk()) {
-                Result applyResult = tx.Apply();
+                var applyResult = tx.Apply();
                 if (applyResult.IsError()) result = TValue.FromError(applyResult.GetError());
             }
         }

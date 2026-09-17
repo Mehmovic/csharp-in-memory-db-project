@@ -24,7 +24,7 @@ public class CursorSmokeTests {
     }
 
     private MdbxEnvironment OpenEnv() {
-        var rc = MdbxEnvironment.Create(out MdbxEnvironment? env);
+        var rc = MdbxEnvironment.Create(out var env);
         Assert.That(rc, Is.EqualTo(0), () => $"mdbx_env_create failed: {MdbxEnvironment.StrError(rc)}");
 
         Assert.That(env!.SetMaxDbs(4), Is.EqualTo(0));
@@ -37,9 +37,9 @@ public class CursorSmokeTests {
 
     [Test]
     public void GetFirstThenGetNext_ScansEveryPutKeyInOrder() {
-        using MdbxEnvironment env = OpenEnv();
+        using var env = OpenEnv();
 
-        env.BeginTxn(0, out Transaction? txn);
+        env.BeginTxn(0, out var txn);
         using (txn) {
             txn!.OpenDbi("widgets", MdbxCreate, out var dbi);
             txn.Put(dbi, Encoding.UTF8.GetBytes("a"), Encoding.UTF8.GetBytes("1"), 0);
@@ -78,9 +78,9 @@ public class CursorSmokeTests {
 
     [Test]
     public void GetFirst_OnAnEmptyDatabase_ReturnsNotFound() {
-        using MdbxEnvironment env = OpenEnv();
+        using var env = OpenEnv();
 
-        env.BeginTxn(0, out Transaction? txn);
+        env.BeginTxn(0, out var txn);
         using (txn) {
             txn!.OpenDbi("empty", MdbxCreate, out var dbi);
             Assert.That(txn.OpenCursor(dbi, out var cursor), Is.EqualTo(0));

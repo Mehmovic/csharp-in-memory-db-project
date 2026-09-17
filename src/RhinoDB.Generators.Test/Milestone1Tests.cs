@@ -47,7 +47,7 @@ public class Milestone1Tests {
 
         var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic got = ((dynamic)tx).Widget.Find(1);
+                var got = ((dynamic)tx).Widget.Find(1);
                 return got.IsOk() ? Result.Ok() : Result.Error((DbError)got.GetError());
             }, PropagationMode.Optimistic);
         Assert.That(getResult.IsOk(), Is.True);
@@ -64,10 +64,10 @@ public class Milestone1Tests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Update(1, (dynamic)updated); return Result.Ok(); }, PropagationMode.Optimistic);
 
-        int stock = -1;
+        var stock = -1;
         var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic got = ((dynamic)tx).Widget.Find(1);
+                var got = ((dynamic)tx).Widget.Find(1);
                 stock = (int)got.Unwrap().Stock;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -89,7 +89,7 @@ public class Milestone1Tests {
         var foundAfterDelete = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic got = ((dynamic)tx).Widget.Find(1);
+                var got = ((dynamic)tx).Widget.Find(1);
                 foundAfterDelete = got.IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);

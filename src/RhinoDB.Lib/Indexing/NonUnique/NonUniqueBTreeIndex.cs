@@ -33,7 +33,7 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
         using var offsetBuilder = OffsetListBuilder.Create(Constants.OffsetBuilderInitialCapacity);
         var chunkSpan = CollectionsMarshal.AsSpan(chunks);
         for (var c = FindFirstChunkWithMaxKeyAtLeast(key); c < chunks.Count; c++) {
-            ref readonly IndexChunk chunk = ref chunkSpan[c];
+            ref readonly var chunk = ref chunkSpan[c];
             if (chunk.MinKey.CompareTo(key) > 0) return offsetBuilder.Build().Unwrap();
 
             var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
@@ -52,7 +52,7 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
 
     public void Insert(TKey key, int offset) {
         var chunkIdx = FindTargetChunkForInsertion(key);
-        ref IndexChunk chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
+        ref var chunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
 
         var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
         if (internalIdx < 0) {
@@ -85,7 +85,7 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
 
         var chunkSpan = CollectionsMarshal.AsSpan(chunks);
         for (var c = FindFirstChunkWithMaxKeyAtLeast(key); c < chunks.Count; c++) {
-            ref IndexChunk chunk = ref chunkSpan[c];
+            ref var chunk = ref chunkSpan[c];
             if (chunk.MinKey.CompareTo(key) > 0) return;
 
             var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
@@ -137,7 +137,7 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
         var startChunk = from.IsBounded ? FindFirstChunkWithMaxKeyAtLeast(from.Key) : 0;
 
         for (var c = startChunk; c < chunks.Count; c++) {
-            ref readonly IndexChunk chunk = ref chunkSpan[c];
+            ref readonly var chunk = ref chunkSpan[c];
 
             if (to.IsBounded) {
                 var minCmp = chunk.MinKey.CompareTo(to.Key);
@@ -194,7 +194,7 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
     private int FindTargetChunkForInsertion(TKey key) {
         ReadOnlySpan<IndexChunk> chunkSpan = CollectionsMarshal.AsSpan(chunks);
         for (var i = 0; i < chunkSpan.Length; i++) {
-            ref readonly IndexChunk chunk = ref chunkSpan[i];
+            ref readonly var chunk = ref chunkSpan[i];
             if (chunk.Count == 0 || chunk.MaxKey.CompareTo(key) >= 0 || i == chunkSpan.Length - 1) {
                 return i;
             }
@@ -203,7 +203,7 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
     }
 
     private void SplitAndInsert(int chunkIdx, int internalIdx, TKey key, int offset) {
-        ref IndexChunk oldChunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
+        ref var oldChunk = ref CollectionsMarshal.AsSpan(chunks)[chunkIdx];
         var newChunk = new IndexChunk(chunkCapacity);
 
         var splitPoint = oldChunk.Count >> 1;

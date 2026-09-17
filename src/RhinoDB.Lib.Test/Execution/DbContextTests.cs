@@ -35,8 +35,8 @@ public class DbContextTests {
     public async Task Run_NonGeneric_OkAndError_RoundTrip() {
         var ctx = new DbContext();
 
-        Result ok = await ctx.Run(c => Result.Ok());
-        Result error = await ctx.Run(c => Result.Error(DbError.DuplicateKey()));
+        var ok = await ctx.Run(c => Result.Ok());
+        var error = await ctx.Run(c => Result.Error(DbError.DuplicateKey()));
 
         Assert.That(ok.IsOk(), Is.True);
         Assert.That(error.IsError(), Is.True);
@@ -69,7 +69,7 @@ public class DbContextTests {
     public async Task Run_WithTArgs_NonGenericOverload_PassesTheArgsThrough() {
         var ctx = new DbContext();
 
-        Result result = await ctx.Run(
+        var result = await ctx.Run(
             static (c, shouldFail) => shouldFail ? Result.Error(DbError.DuplicateKey()) : Result.Ok(),
             false);
 
@@ -186,8 +186,8 @@ public class DbContextTests {
     public async Task RunConfirmed_NonGeneric_BehavesLikeRunWithConfirmedMode() {
         var ctx = new DbContext();
 
-        Result ok = await ctx.RunConfirmed(c => Result.Ok());
-        Result error = await ctx.RunConfirmed(c => Result.Error(DbError.DuplicateKey()));
+        var ok = await ctx.RunConfirmed(c => Result.Ok());
+        var error = await ctx.RunConfirmed(c => Result.Error(DbError.DuplicateKey()));
 
         Assert.That(ok.IsOk(), Is.True);
         Assert.That(error.IsError(), Is.True);
@@ -208,7 +208,7 @@ public class DbContextTests {
     public async Task RunConfirmed_WithTArgs_NonGeneric_PassesTheArgsThrough() {
         var ctx = new DbContext();
 
-        Result result = await ctx.RunConfirmed(
+        var result = await ctx.RunConfirmed(
             static (c, shouldFail) => shouldFail ? Result.Error(DbError.DuplicateKey()) : Result.Ok(),
             false);
 

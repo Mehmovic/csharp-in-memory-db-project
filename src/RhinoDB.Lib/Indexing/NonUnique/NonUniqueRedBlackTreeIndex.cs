@@ -36,7 +36,7 @@ public class NonUniqueRedBlackTreeIndex<TKey> : OrderedIndex<TKey> where TKey : 
             ? sortedSet.GetViewBetween((from.Key, int.MinValue), sortedSet.Max)
             : sortedSet;
 
-        foreach ((TKey Key, int Offset) entry in view) {
+        foreach (var entry in view) {
             if (filterParam is { } filter && filter.MustExclude(entry.Key)) continue;
 
             if (from is { IsBounded: true, IsInclusive: false } && Comparer<TKey>.Default.Compare(entry.Key, from.Key) == 0) continue;

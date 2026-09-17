@@ -76,7 +76,7 @@ public class OrderedIndexTests {
     [Test]
     public void Gte_IncludesTheBoundKey_AndEverythingAbove() {
         foreach (var impl in All) {
-            dynamic index = impl.Create();
+            var index = impl.Create();
             index.Insert(1, 10);
             index.Insert(2, 20);
             index.Insert(3, 30);
@@ -88,7 +88,7 @@ public class OrderedIndexTests {
     [Test]
     public void Gt_ExcludesTheBoundKey_ButIncludesEverythingAbove() {
         foreach (var impl in All) {
-            dynamic index = impl.Create();
+            var index = impl.Create();
             index.Insert(1, 10);
             index.Insert(2, 20);
             index.Insert(3, 30);
@@ -100,7 +100,7 @@ public class OrderedIndexTests {
     [Test]
     public void Lte_IncludesTheBoundKey_AndEverythingBelow() {
         foreach (var impl in All) {
-            dynamic index = impl.Create();
+            var index = impl.Create();
             index.Insert(1, 10);
             index.Insert(2, 20);
             index.Insert(3, 30);
@@ -112,7 +112,7 @@ public class OrderedIndexTests {
     [Test]
     public void Lt_ExcludesTheBoundKey_ButIncludesEverythingBelow() {
         foreach (var impl in All) {
-            dynamic index = impl.Create();
+            var index = impl.Create();
             index.Insert(1, 10);
             index.Insert(2, 20);
             index.Insert(3, 30);
@@ -124,7 +124,7 @@ public class OrderedIndexTests {
     [Test]
     public void Iter_ReturnsEveryOffset_InAscendingKeyOrder() {
         foreach (var impl in All) {
-            dynamic index = impl.Create();
+            var index = impl.Create();
             index.Insert(3, 30);
             index.Insert(1, 10);
             index.Insert(2, 20);
@@ -138,7 +138,7 @@ public class OrderedIndexTests {
         // Regression guard: SortedSet.GetViewBetween throws when its lower bound sits
         // above the largest key - both RedBlack scans must return empty instead.
         foreach (var impl in All) {
-            dynamic index = impl.Create();
+            var index = impl.Create();
             index.Insert(1, 10);
             index.Insert(2, 20);
 
@@ -149,7 +149,7 @@ public class OrderedIndexTests {
     [Test]
     public void Gt_FromTheLargestKey_ReturnsZeroOffsets() {
         foreach (var impl in All) {
-            dynamic index = impl.Create();
+            var index = impl.Create();
             index.Insert(1, 10);
             index.Insert(2, 20);
 
@@ -160,7 +160,7 @@ public class OrderedIndexTests {
     [Test]
     public void EveryOpenEndedMethod_OnAnEmptyIndex_ReturnsZeroWithoutThrowing() {
         foreach (var impl in All) {
-            dynamic index = impl.Create();
+            var index = impl.Create();
 
             Assert.That(impl.Gt(index, 1), Is.Empty, impl.Name);
             Assert.That(impl.Gte(index, 1), Is.Empty, impl.Name);
@@ -173,7 +173,7 @@ public class OrderedIndexTests {
     [Test]
     public void Range_WithAnInvertedSpan_ReturnsZero() {
         foreach (var impl in All) {
-            dynamic index = impl.Create();
+            var index = impl.Create();
             index.Insert(1, 10);
             index.Insert(2, 20);
             index.Insert(3, 30);
@@ -185,7 +185,7 @@ public class OrderedIndexTests {
     [Test]
     public void Gt_WithADuplicateRunAtTheBound_SkipsEveryDuplicate() {
         foreach (var impl in NonUniqueOnly) {
-            dynamic index = impl.Create();
+            var index = impl.Create();
             index.Insert(5, 50);
             index.Insert(5, 51);
             index.Insert(5, 52);
@@ -201,7 +201,7 @@ public class OrderedIndexTests {
     [Test]
     public void Lt_WithADuplicateRunAtTheBound_ExcludesEveryDuplicate() {
         foreach (var impl in NonUniqueOnly) {
-            dynamic index = impl.Create();
+            var index = impl.Create();
             index.Insert(1, 10);
             index.Insert(5, 50);
             index.Insert(5, 51);

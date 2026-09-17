@@ -12,13 +12,13 @@ static public class EvictionBatchApplier {
         IReadOnlyList<EvictionCandidate> candidates,
         Func<uint, byte[], byte[]?> readCurrentValue,
         List<EvictionCandidate>? appliedInto = null) {
-        var rcTxn = env.BeginTxn(0, out Transaction? txn);
+        var rcTxn = env.BeginTxn(0, out var txn);
         if (rcTxn != 0 || txn is null) return Result<IReadOnlyList<EvictionCandidate>>.Error(MdbxErrorMapper.Map(rcTxn));
-        using Transaction _ = txn;
+        using var _ = txn;
 
         var applied = appliedInto ?? [];
         applied.Clear();
-        foreach (EvictionCandidate candidate in candidates) {
+        foreach (var candidate in candidates) {
             var currentValue = readCurrentValue(candidate.TableId, candidate.Key);
             if (currentValue is null) continue;
             if (!tableDbis.TryGetValue(candidate.TableId, out var dbi)) continue;

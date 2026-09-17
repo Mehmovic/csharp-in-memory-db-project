@@ -7,7 +7,7 @@ public class DbErrorTests
     [Test]
     public void OffsetOutOfRange_ToException_BuildsTheGeneratedExceptionType()
     {
-        DbError error = DbError.OffsetOutOfRange();
+        var error = DbError.OffsetOutOfRange();
 
         var exception = error.ToException();
 
@@ -25,7 +25,7 @@ public class DbErrorTests
     [Test]
     public void Kind_IsExposedOnTheError()
     {
-        DbError error = DbError.DuplicateKey();
+        var error = DbError.DuplicateKey();
 
         Assert.That(error.Kind, Is.EqualTo(ErrorKind.DuplicateKey));
     }
@@ -46,7 +46,7 @@ public class DbErrorTests
     [Test]
     public void Custom_KindIsSetToCustom()
     {
-        DbError error = DbError.Custom(7);
+        var error = DbError.Custom(7);
 
         Assert.That(error.Kind, Is.EqualTo(ErrorKind.Custom));
     }
@@ -54,7 +54,7 @@ public class DbErrorTests
     [Test]
     public void Custom_ExposesTheGivenCode()
     {
-        DbError error = DbError.Custom(12345);
+        var error = DbError.Custom(12345);
 
         Assert.That(error.CustomCode, Is.EqualTo((ushort)12345));
     }
@@ -68,7 +68,7 @@ public class DbErrorTests
     [Test]
     public void Custom_ToException_SynthesizesAnExceptionWithoutRequiringOneUpFront()
     {
-        DbError error = DbError.Custom(3);
+        var error = DbError.Custom(3);
 
         var exception = error.ToException();
 

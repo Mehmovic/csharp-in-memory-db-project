@@ -156,7 +156,7 @@ public class LoaderTests {
 
             var createLoaderTx = dbType.GetMethod("CreateLoaderTransaction", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             dynamic tx = createLoaderTx.Invoke(reopenedDb, null)!;
-            dynamic accountsOps = tx.Account;
+            var accountsOps = tx.Account;
             var bulkLoad = ((object)accountsOps).GetType().GetMethod("BulkLoadFromCold", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             bulkLoad.Invoke(accountsOps, null);
 

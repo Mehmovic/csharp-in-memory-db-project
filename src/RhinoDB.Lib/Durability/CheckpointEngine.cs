@@ -13,11 +13,11 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal) {
     private bool metadataDbiResolved;
 
     public Result<long> ReadCheckpointedLsn() {
-        var rc = env.BeginTxn(0, out Transaction? txn);
+        var rc = env.BeginTxn(0, out var txn);
         if (rc != 0 || txn is null) return Result<long>.Error(MdbxErrorMapper.Map(rc));
-        using Transaction _ = txn;
+        using var _ = txn;
 
-        Result resolved = EnsureMetadataDbi(txn);
+        var resolved = EnsureMetadataDbi(txn);
         if (resolved.IsError()) return Result<long>.Error(resolved.GetError());
 
         var getRc = txn.Get(metadataDbi, WatermarkKey, out var bytes);
@@ -30,11 +30,11 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal) {
         IEnumerable<CheckpointRow> residentRows,
         IEnumerable<(uint TableId, byte[] Key)> deletedSinceLastCheckpoint
     ) {
-        var rcTxn = env.BeginTxn(0, out Transaction? txn);
+        var rcTxn = env.BeginTxn(0, out var txn);
         if (rcTxn != 0 || txn is null) return Result.Error(MdbxErrorMapper.Map(rcTxn));
-        using Transaction _ = txn;
+        using var _ = txn;
 
-        foreach (CheckpointRow row in residentRows) {
+        foreach (var row in residentRows) {
             if (!tableDbis.TryGetValue(row.TableId, out var dbi))
                 return UnknownTableIdResult(row.TableId);
 
@@ -50,7 +50,7 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal) {
             if (delRc != 0 && MdbxErrorMapper.Map(delRc).Kind != ErrorKind.IndexKeyNotFound) return Result.Error(MdbxErrorMapper.Map(delRc));
         }
 
-        Result metadataResolved = EnsureMetadataDbi(txn);
+        var metadataResolved = EnsureMetadataDbi(txn);
         if (metadataResolved.IsError()) return metadataResolved;
 
         var watermarkRc = txn.Put(metadataDbi, WatermarkKey, BitConverter.GetBytes(boundaryLsn), 0);

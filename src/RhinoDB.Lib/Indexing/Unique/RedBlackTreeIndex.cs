@@ -11,7 +11,7 @@ public class RedBlackTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparab
     public int Count => sortedSet.Count;
 
     public Result<int> GetOffset(TKey key) {
-        return sortedSet.TryGetValue((key, 0), out (TKey Key, int Offset) entry)
+        return sortedSet.TryGetValue((key, 0), out var entry)
             ? entry.Offset
             : Result.Error(DbError.IndexKeyNotFound());
     }
@@ -38,7 +38,7 @@ public class RedBlackTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparab
             ? sortedSet.GetViewBetween((from.Key, 0), sortedSet.Max)
             : sortedSet;
 
-        foreach ((TKey Key, int Offset) entry in view) {
+        foreach (var entry in view) {
             if (filterParam is { } filter && filter.MustExclude(entry.Key)) continue;
 
             if (from is { IsBounded: true, IsInclusive: false } && Comparer<TKey>.Default.Compare(entry.Key, from.Key) == 0) continue;

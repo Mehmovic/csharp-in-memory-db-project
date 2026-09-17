@@ -16,7 +16,7 @@ public sealed class ColdTable<TKey, TRow>(uint dbi)
     }
 
     internal IEnumerable<(TKey Key, TRow Row)> ScanAll(Transaction txn) {
-        var rc = txn.OpenCursor(Dbi, out Cursor? cursor);
+        var rc = txn.OpenCursor(Dbi, out var cursor);
         if (rc != 0) throw MdbxErrorMapper.Map(rc).ToException();
 
         using (cursor) {

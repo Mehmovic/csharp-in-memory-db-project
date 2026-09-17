@@ -32,7 +32,7 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
         PooledOperation<TTx, Result<T>, TArgs>.Enqueue(channel, context, operation, args, mode);
 
     private async Task RunLoop() {
-        await foreach (IExecutionWorkItem item in channel.Reader.ReadAllAsync()) {
+        await foreach (var item in channel.Reader.ReadAllAsync()) {
             item.Run();
         }
     }
