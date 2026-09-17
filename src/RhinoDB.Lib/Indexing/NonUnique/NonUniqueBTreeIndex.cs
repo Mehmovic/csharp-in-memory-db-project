@@ -5,7 +5,7 @@ using RhinoDB.Lib.Settings;
 
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey> {
+public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey>, IEquatable<TKey> {
     private struct IndexChunk(int capacity) {
         public readonly TKey[] Keys = new TKey[capacity];
         public readonly int[] Offsets = new int[capacity];
@@ -26,7 +26,7 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
         chunks = [new IndexChunk(chunkCapacity)];
         Count = 0;
     }
-    
+
     public OffsetList GetOffsets(TKey key) {
         if (chunks.Count == 0 || Count == 0) return OffsetList.Empty();
 
@@ -125,7 +125,11 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
         }
     }
 
-    protected override OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to, (bool filter, TKey key)? filterCondition = null) {
+    protected override OffsetList Scan(
+        IndexBound<TKey> from,
+        IndexBound<TKey> to,
+        FilterDescriptor<TKey>? filterParam = null
+    ) {
         if (chunks.Count == 0 || Count == 0) return OffsetList.Empty();
 
         using var offsetBuilder = OffsetListBuilder.Create(Constants.OffsetBuilderInitialCapacity);
@@ -154,8 +158,8 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
             }
 
             for (var i = internalIdx; i < chunk.Count; i++) {
-                if (filterCondition is { filter: true } filter && chunk.Keys[i].CompareTo(filter.key) == 0) continue;
-                
+                if (filterParam is { } filter && filter.MustExclude(chunk.Keys[i])) continue;
+
                 if (to.IsBounded) {
                     var cmp = chunk.Keys[i].CompareTo(to.Key);
                     if (cmp > 0 || (cmp == 0 && !to.IsInclusive)) return offsetBuilder.Build().Unwrap();

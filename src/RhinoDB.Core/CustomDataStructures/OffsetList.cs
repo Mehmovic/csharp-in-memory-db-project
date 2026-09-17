@@ -94,8 +94,8 @@ public ref struct OffsetList : IDisposable {
             : StackResult<ReadOnlySpan<int>>.Ok(buffer);
     }
 
-    public ReadOnlySpan<int> Buffer() {
-        return IsDisposed() ? throw new OffsetListDisposedException() : buffer;
+    public readonly ReadOnlySpan<int> Buffer() {
+        return array == null ? throw new OffsetListDisposedException() : buffer;
     }
 
     public void Dispose() {

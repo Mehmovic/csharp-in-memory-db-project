@@ -2,8 +2,7 @@ using RhinoDB.Lib.Settings;
 
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueHashIndex<TKey>
-    where TKey : notnull {
+public class NonUniqueHashIndex<TKey> where TKey : IEquatable<TKey> {
     private readonly Dictionary<TKey, HashSet<int>> hashMap = new Dictionary<TKey, HashSet<int>>();
 
     public OffsetList GetOffsets(TKey key) {
@@ -29,24 +28,24 @@ public class NonUniqueHashIndex<TKey>
         if (offsets.Count == 0) hashMap.Remove(key);
     }
 
-    public OffsetList Iter() {
-        if (hashMap.Count == 0) return OffsetList.Empty();
+    public OffsetList Iter() => Scan();
 
-        using var offsetBuilder = OffsetListBuilder.Create(Constants.OffsetBuilderInitialCapacity);
-        foreach (var offset in hashMap.Values.SelectMany(hashSet => hashSet))
-            offsetBuilder.Add(offset);
-
-        return offsetBuilder.Build().Unwrap();
-    }
-    
     public OffsetList Filter(TKey key) {
+        return Scan(FilterDescriptor.Include(key));
+    }
+
+    public OffsetList Except(TKey key) {
+        return Scan(FilterDescriptor.Exclude(key));
+    }
+
+    private OffsetList Scan(FilterDescriptor<TKey>? filterParam = null) {
         if (hashMap.Count == 0) return OffsetList.Empty();
 
         using var offsetBuilder = OffsetListBuilder.Create(Constants.OffsetBuilderInitialCapacity);
 
         foreach (var kvp in hashMap) {
-            if (Comparer<TKey>.Default.Compare(kvp.Key, key) == 0) continue;
-            
+            if (filterParam is { } filter && filter.MustExclude(kvp.Key)) continue;
+
             foreach (var offset in kvp.Value) {
                 offsetBuilder.Add(offset);
             }

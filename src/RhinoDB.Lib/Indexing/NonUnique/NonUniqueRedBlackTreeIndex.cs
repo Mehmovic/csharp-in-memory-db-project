@@ -2,8 +2,7 @@ using RhinoDB.Lib.Settings;
 
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueRedBlackTreeIndex<TKey> : OrderedIndex<TKey>
-    where TKey : IComparable<TKey> {
+public class NonUniqueRedBlackTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey>, IEquatable<TKey> {
     private readonly SortedSet<(TKey Key, int Offset)> sortedSet = new SortedSet<(TKey Key, int Offset)>(
         Comparer<(TKey Key, int Offset)>.Create((a, b) => {
                 var cmp = Comparer<TKey>.Default.Compare(a.Key, b.Key);
@@ -23,7 +22,11 @@ public class NonUniqueRedBlackTreeIndex<TKey> : OrderedIndex<TKey>
         sortedSet.Remove((key, offset));
     }
 
-    protected override OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to, (bool filter, TKey key)? filterCondition = null) {
+    protected override OffsetList Scan(
+        IndexBound<TKey> from,
+        IndexBound<TKey> to,
+        FilterDescriptor<TKey>? filterParam = null
+    ) {
         if (sortedSet.Count == 0 || from.IsBounded && Comparer<TKey>.Default.Compare(from.Key, sortedSet.Max.Key) > 0)
             return OffsetList.Empty();
 
@@ -34,7 +37,7 @@ public class NonUniqueRedBlackTreeIndex<TKey> : OrderedIndex<TKey>
             : sortedSet;
 
         foreach ((TKey Key, int Offset) entry in view) {
-            if (filterCondition is { filter: true } filter && Comparer<TKey>.Default.Compare(entry.Key, filter.key) == 0) continue;
+            if (filterParam is { } filter && filter.MustExclude(entry.Key)) continue;
 
             if (from is { IsBounded: true, IsInclusive: false } && Comparer<TKey>.Default.Compare(entry.Key, from.Key) == 0) continue;
 

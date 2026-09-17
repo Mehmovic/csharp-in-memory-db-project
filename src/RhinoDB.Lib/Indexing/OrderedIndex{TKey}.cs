@@ -1,6 +1,6 @@
 namespace RhinoDB.Lib.Indexing;
 
-public abstract class OrderedIndex<TKey> where TKey : IComparable<TKey> {
+public abstract class OrderedIndex<TKey> where TKey : IComparable<TKey>, IEquatable<TKey> {
     // [from, to]
     public OffsetList Range(TKey from, TKey to)
         => Scan(IndexBound<TKey>.Inclusive(from), IndexBound<TKey>.Inclusive(to));
@@ -24,9 +24,16 @@ public abstract class OrderedIndex<TKey> where TKey : IComparable<TKey> {
     // Everything, in ascending key order.
     public OffsetList Iter()
         => Scan(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Unbounded);
-    
-    public OffsetList Filter(TKey key)
-        => Scan(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Unbounded, (true, key));
 
-    protected abstract OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to, (bool filter, TKey key)? filterCondition = null);
+    public OffsetList Filter(TKey key)
+        => Scan(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Unbounded, FilterDescriptor.Include(key));
+
+    public OffsetList Except(TKey key)
+        => Scan(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Unbounded, FilterDescriptor.Exclude(key));
+
+    protected abstract OffsetList Scan(
+        IndexBound<TKey> from,
+        IndexBound<TKey> to,
+        FilterDescriptor<TKey>? filter = null
+    );
 }

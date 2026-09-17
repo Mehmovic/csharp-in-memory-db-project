@@ -1124,22 +1124,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private string Camel(string name) => name.Length == 0 ? name : char.ToLowerInvariant(name[0]) + name.Substring(1);
     
-    // Those that have "Scan" method and inherit from OrderedIndex<TKey> and its children (Range, Gt, Gte, Lt, Lte, Iter)
-    static bool IsRangingIndex(IndexModel indexModel) {
+    // Those that have "Scan" method and inherit from OrderedIndex<TKey> and its children (Range, Gt, Gte, Lt, Lte, Iter, Filter)
+    static bool IsRangedIndex(IndexModel indexModel) {
         return indexModel.Kind is IndexKind.BTree or IndexKind.RedBlackTree;
     }
     
-    // Those that support OffsetList GetOffsets(TKey key), returning multiple indexes
-    static bool IsMultiOffsetReturnIndex(IndexModel indexModel) {
-        return (indexModel.Kind, indexModel.Uniqueness) switch {
-            (IndexKind.BTree, _) => true,
-            (IndexKind.RedBlackTree, _) => true,
-            (IndexKind.Hash, Uniqueness.NonUnique) => true,
-            _ => false
-        };
-    }
-    
-    static bool IsMultiOffsetReturnAndNotRangingIndex(IndexModel indexModel) {
+    // Those that only support Iter, Filter and not (Range, Gt, Gte, Lt, Lte)
+    static bool IsMultiReturnButNotRangedIndex(IndexModel indexModel) {
         return (indexModel.Kind, indexModel.Uniqueness) switch {
             (IndexKind.Hash, Uniqueness.NonUnique) => true,
             _ => false
