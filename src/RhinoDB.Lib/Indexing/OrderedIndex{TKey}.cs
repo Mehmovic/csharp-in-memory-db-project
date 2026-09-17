@@ -24,6 +24,9 @@ public abstract class OrderedIndex<TKey> where TKey : IComparable<TKey> {
     // Everything, in ascending key order.
     public OffsetList Iter()
         => Scan(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Unbounded);
+    
+    public OffsetList Filter(TKey key)
+        => Scan(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Unbounded, (true, key));
 
-    protected abstract OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to);
+    protected abstract OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to, (bool filter, TKey key)? filterCondition = null);
 }

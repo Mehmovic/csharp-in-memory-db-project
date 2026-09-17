@@ -1,5 +1,7 @@
 using System.Buffers;
 
+using RhinoDB.Core.Exceptions;
+
 namespace RhinoDB.Core;
 
 public ref struct OffsetListBuilder : IDisposable {
@@ -8,14 +10,13 @@ public ref struct OffsetListBuilder : IDisposable {
     private int count;
 
     private OffsetListBuilder(int initialCapacity) {
-        initialCapacity = int.Max(1, initialCapacity);
-        array = ArrayPool<int>.Shared.Rent(initialCapacity);
+        array = initialCapacity > 0 ? ArrayPool<int>.Shared.Rent(initialCapacity) : [];
         buffer = array;
         count = 0;
     }
 
     public Result Add(int offset) {
-        if (IsDisposed()) return Result.Error(DbError.OffsetWriterDisposed());
+        if (IsDisposed()) return Result.Error(DbError.OffsetListDisposed());
 
         if (count >= buffer.Length) {
             Grow();
@@ -24,15 +25,15 @@ public ref struct OffsetListBuilder : IDisposable {
         return Result.Ok();
     }
 
-    public StackResult<ReadOnlySpan<int>> Buffer() {
+    public StackResult<ReadOnlySpan<int>> BufferResult() {
         return IsDisposed()
-            ? StackResult.Error(DbError.OffsetWriterDisposed())
+            ? StackResult.Error(DbError.OffsetListDisposed())
             : StackResult<ReadOnlySpan<int>>.Ok(buffer[..count]);
     }
 
     public StackResult<OffsetList> Build() {
-        if (IsDisposed()) return StackResult.Error(DbError.OffsetWriterDisposed());
-        
+        if (IsDisposed()) return StackResult.Error(DbError.OffsetListDisposed());
+
         var frozen = new OffsetList(array, count);
         array = null!;
         buffer = null!;
@@ -42,16 +43,23 @@ public ref struct OffsetListBuilder : IDisposable {
 
     public void Dispose() {
         if (IsDisposed()) return;
-        ArrayPool<int>.Shared.Return(array);
+        if (array.Length > 0) {
+            ArrayPool<int>.Shared.Return(array);
+        }
         array = null!;
     }
 
     private bool IsDisposed() => array == null;
 
     private void Grow() {
-        var newArray = ArrayPool<int>.Shared.Rent(array.Length * 2);
-        buffer[..count].CopyTo(newArray);
-        ArrayPool<int>.Shared.Return(array);
+        var length = int.Max(1, array.Length);
+        var newArray = ArrayPool<int>.Shared.Rent(length * 2);
+
+        if (array.Length > 0) {
+            buffer[..count].CopyTo(newArray);
+            ArrayPool<int>.Shared.Return(array);
+        }
+
         array = newArray;
         buffer = array;
     }
@@ -60,8 +68,8 @@ public ref struct OffsetListBuilder : IDisposable {
         return new OffsetListBuilder(capacity);
     }
     
-    static public OffsetList CreateEmpty() {
-        return new OffsetList(ArrayPool<int>.Shared.Rent(1), 0);
+    static public OffsetList Empty() {
+        return OffsetList.Empty();
     }
 }
 
@@ -72,31 +80,36 @@ public ref struct OffsetList : IDisposable {
 
     internal OffsetList(int[] rentedArray, int count) {
         array = rentedArray;
-        buffer = rentedArray.AsSpan(0, int.Max(1, count));
+        buffer = rentedArray.AsSpan(0, count);
         Count = count;
     }
 
-    static public OffsetList Empty() {
-        return OffsetListBuilder.CreateEmpty();
-    }
+    static public OffsetList Empty() => new OffsetList([], 0);
 
     public bool IsEmpty() => Count == 0;
 
-    public StackResult<ReadOnlySpan<int>> Buffer() {
+    public StackResult<ReadOnlySpan<int>> BufferResult() {
         return IsDisposed()
-            ? StackResult.Error(DbError.OffsetWriterDisposed())
-            : StackResult<ReadOnlySpan<int>>.Ok(array.AsSpan(0, Count));
+            ? StackResult.Error(DbError.OffsetListDisposed())
+            : StackResult<ReadOnlySpan<int>>.Ok(buffer);
+    }
+
+    public ReadOnlySpan<int> Buffer() {
+        return IsDisposed() ? throw new OffsetListDisposedException() : buffer;
     }
 
     public void Dispose() {
         if (IsDisposed()) return;
-        ArrayPool<int>.Shared.Return(array!);
+        
+        if (array.Length > 0) {
+            ArrayPool<int>.Shared.Return(array);
+        }
+        
         array = null!;
         buffer = default;
     }
-    
-    public readonly Enumerator GetEnumerator() => new Enumerator(buffer[..Count], Count);
 
+    public readonly Enumerator GetEnumerator() => new Enumerator(buffer[..Count], Count);
     public ref struct Enumerator {
         private readonly ReadOnlySpan<int> span;
         private readonly int count;
@@ -111,7 +124,7 @@ public ref struct OffsetList : IDisposable {
         public bool MoveNext() {
             var next = index + 1;
             if (next >= count) return false;
-            
+
             index = next;
             return true;
         }

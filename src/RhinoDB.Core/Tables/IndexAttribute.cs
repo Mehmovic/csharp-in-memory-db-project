@@ -1,6 +1,6 @@
 namespace RhinoDB.Core.Tables;
 
-[AttributeUsage(AttributeTargets.Parameter)]
+[AttributeUsage(AttributeTargets.Parameter, AllowMultiple = true)]
 public sealed class IndexAttribute
 (
     IndexKind kind = IndexKind.BTree,

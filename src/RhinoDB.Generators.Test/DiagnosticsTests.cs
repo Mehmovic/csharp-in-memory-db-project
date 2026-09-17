@@ -181,4 +181,142 @@ public class DiagnosticsTests {
         var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
         Assert.That(ex!.Message, Does.Contain("RHINO011"));
     }
+
+    [Test]
+    public void TwoIndexesOnOneField_DefaultAccessorsCollide_ReportsRHINO012() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class SameFieldDb : DbContext<SameFieldDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(SameFieldDb))]
+            public readonly partial record struct Player(
+                [PrimaryKey] int Id,
+                [Index(IndexKind.Hash, Uniqueness.NonUnique)]
+                [Index(IndexKind.BTree, Uniqueness.NonUnique)]
+                int ClubId);
+            """;
+
+        // Both attributes default their Accessor to the field name, so the two
+        // indexes would silently collapse into one - a diagnostic, not a guess.
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO012"));
+    }
+
+    [Test]
+    public void TwoIndexesOnOneField_SameExplicitAccessor_ReportsRHINO012() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class SameAccessorDb : DbContext<SameAccessorDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(SameAccessorDb))]
+            public readonly partial record struct Player(
+                [PrimaryKey] int Id,
+                [Index(IndexKind.Hash, Uniqueness.NonUnique, Accessor = "ByClub")]
+                [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByClub")]
+                int ClubId);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO012"));
+    }
+
+    [Test]
+    public void IndexAccessorNamedLikeThePrimaryKeyAccessor_ReportsRHINO013() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class TakenNameDb : DbContext<TakenNameDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(TakenNameDb))]
+            public readonly partial record struct Player(
+                [PrimaryKey] int Id,
+                [Index(IndexKind.Hash, Uniqueness.NonUnique, Accessor = "Find")] int ClubId);
+            """;
+
+        // The primary key accessor defaults to "Find" - an index accessor of the
+        // same name would emit a second Find(int) on the ops class.
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO013"));
+    }
+
+    [Test]
+    public void IndexAccessorNamedLikeAnOpsMethod_ReportsRHINO013() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class OpsNameDb : DbContext<OpsNameDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(OpsNameDb))]
+            public readonly partial record struct Player(
+                [PrimaryKey] int Id,
+                [Index(IndexKind.Hash, Uniqueness.NonUnique, Accessor = "Delete")] int ClubId);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO013"));
+    }
+
+    [Test]
+    public void IndexAccessorsDifferingOnlyInFirstLetterCasing_ReportsRHINO014() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class CasingDb : DbContext<CasingDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(CasingDb))]
+            public readonly partial record struct Player(
+                [PrimaryKey] int Id,
+                [Index(IndexKind.Hash, Uniqueness.NonUnique, Accessor = "ByClub")] int ClubId,
+                [Index(IndexKind.Hash, Uniqueness.NonUnique, Accessor = "byClub")] int ShirtNumber);
+            """;
+
+        // Both camel-case to "byClub", so both would emit the field byClubIndex.
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO014"));
+    }
+
+    [Test]
+    public void IndexAccessorsDifferingBeyondTheFirstLetter_AreAccepted() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class DistinctDb : DbContext<DistinctDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(DistinctDb))]
+            public readonly partial record struct Player(
+                [PrimaryKey] int Id,
+                [Index(IndexKind.Hash, Uniqueness.NonUnique, Accessor = "ByClub")] int ClubId,
+                [Index(IndexKind.Hash, Uniqueness.NonUnique, Accessor = "ByShirt")] int ShirtNumber);
+            """;
+
+        // Contrast case: the reserved-name and casing checks must not reject
+        // ordinary, distinct accessor names.
+        Assert.DoesNotThrow(() => GeneratorTestHost.CompileAndLoad(source));
+    }
 }

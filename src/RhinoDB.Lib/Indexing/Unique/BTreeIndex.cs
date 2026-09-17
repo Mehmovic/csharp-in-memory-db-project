@@ -1,6 +1,8 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 
+using RhinoDB.Lib.Settings;
+
 namespace RhinoDB.Lib.Indexing;
 
 public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey> {
@@ -24,7 +26,7 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
         chunks = [new IndexChunk(chunkCapacity)];
         Count = 0;
     }
-    
+
     public Result<int> GetOffset(TKey key) {
         var chunkIdx = FindChunkContainingKey(key);
         if (chunkIdx < 0) return Result.Error(DbError.IndexKeyNotFound());
@@ -99,10 +101,10 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
         Insert(newKey, newOffset);
     }
 
-    protected override OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to) {
+    protected override OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to, (bool filter, TKey key)? filterCondition = null) {
         if (chunks.Count == 0 || Count == 0) return OffsetList.Empty();
 
-        var writer = OffsetListBuilder.Create(32);
+        using var offsetBuilder = OffsetListBuilder.Create(Constants.OffsetBuilderInitialCapacity);
         var chunkSpan = CollectionsMarshal.AsSpan(chunks);
         var startChunk = from.IsBounded ? FindFirstChunkWithMaxKeyAtLeast(from.Key) : 0;
 
@@ -122,16 +124,18 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
             }
 
             for (var i = internalIdx; i < chunk.Count; i++) {
+                if (filterCondition is { filter: true } filter && chunk.Keys[i].CompareTo(filter.key) == 0) continue;
+
                 if (to.IsBounded) {
                     var cmp = chunk.Keys[i].CompareTo(to.Key);
-                    if (cmp > 0 || (cmp == 0 && !to.IsInclusive)) return writer.Build().Unwrap();
+                    if (cmp > 0 || (cmp == 0 && !to.IsInclusive)) return offsetBuilder.Build().Unwrap();
                 }
 
-                writer.Add(chunk.Offsets[i]);
+                offsetBuilder.Add(chunk.Offsets[i]);
             }
         }
 
-        return writer.Build().Unwrap();
+        return offsetBuilder.Build().Unwrap();
     }
 
     private int FindFirstChunkWithMaxKeyAtLeast(TKey from) {

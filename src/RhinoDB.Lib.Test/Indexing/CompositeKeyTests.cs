@@ -1,4 +1,4 @@
-﻿namespace RhinoDB.Lib.Indexing.Test;
+namespace RhinoDB.Lib.Indexing.Test;
 
 // Composite keys aren't a distinct feature of any index type - they fall out of TKey
 // being generic and ValueTuple's built-in equality/comparison. These tests exist to
@@ -53,7 +53,7 @@ public class OrderedIndex_CompositeKeyTests {
 
     static private int[] RangeOf(RedBlackTreeIndex<(int X, int Y)> index, (int X, int Y) from, (int X, int Y) to) {
         using var writer = index.Range(from, to);
-        return writer.Buffer().Unwrap().ToArray();
+        return writer.Buffer().ToArray();
     }
 
     [Test]
@@ -96,41 +96,36 @@ public class OrderedIndex_CompositeKeyTests {
 public class NonUniqueHashSetIndex_CompositeKeyTests {
     static private NonUniqueHashIndex<(int X, int Y)> NewIndex() => new NonUniqueHashIndex<(int X, int Y)>();
 
+    static private int[] OffsetsOf(NonUniqueHashIndex<(int X, int Y)> index, (int X, int Y) key) {
+        using var list = index.GetOffsets(key);
+        return list.Buffer().ToArray();
+    }
+
     [Test]
     public void Insert_MultipleEntitiesAtSameCoordinate_GetOffsetsReturnsAllOfThem() {
-        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert((5, 10), 1);
         index.Insert((5, 10), 2);
-        index.GetOffsets((5, 10), offsets);
 
-        Assert.That(offsets, Is.EquivalentTo(new[] { 1, 2 }));
+        Assert.That(OffsetsOf(index, (5, 10)), Is.EquivalentTo(new[] { 1, 2 }));
     }
 
     [Test]
     public void GetOffsets_PartialMatchOnlyX_ReturnsEmpty() {
-        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert((5, 10), 1);
-        index.GetOffsets((5, 999), offsets);
 
-        Assert.That(offsets, Is.Empty);
+        Assert.That(OffsetsOf(index, (5, 999)), Is.Empty);
     }
 
     [Test]
     public void Insert_SameXDifferentY_TreatedAsDistinctKeys() {
-        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert((5, 10), 1);
         index.Insert((5, 20), 2);
 
-        index.GetOffsets((5, 10), offsets);
-        Assert.That(offsets, Is.EqualTo(new[] { 1 }));
-        
-        offsets.Clear();
-        index.GetOffsets((5, 20), offsets);
-
-        Assert.That(offsets, Is.EqualTo(new[] { 2 }));
+        Assert.That(OffsetsOf(index, (5, 10)), Is.EqualTo(new[] { 1 }));
+        Assert.That(OffsetsOf(index, (5, 20)), Is.EqualTo(new[] { 2 }));
     }
 }
 
@@ -139,12 +134,12 @@ public class NonUniqueOrderedIndex_CompositeKeyTests {
 
     static private int[] RangeOf(NonUniqueRedBlackTreeIndex<(int X, int Y)> index, (int X, int Y) from, (int X, int Y) to) {
         using var writer = index.Range(from, to);
-        return writer.Buffer().Unwrap().ToArray();
+        return writer.BufferResult().Unwrap().ToArray();
     }
 
     static private int[] OffsetsOf(NonUniqueRedBlackTreeIndex<(int X, int Y)> index, (int X, int Y) key) {
         using var writer = index.GetOffsets(key);
-        return writer.Buffer().Unwrap().ToArray();
+        return writer.BufferResult().Unwrap().ToArray();
     }
 
     [Test]

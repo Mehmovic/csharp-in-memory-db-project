@@ -25,7 +25,7 @@ public class OrderedIndexTests {
 
     static private int[] Read(OffsetList writer) {
         using var w = writer;
-        return w.Buffer().Unwrap().ToArray();
+        return w.Buffer().ToArray();
     }
 
     static private readonly Impl[] All = [

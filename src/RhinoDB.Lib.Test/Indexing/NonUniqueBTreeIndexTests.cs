@@ -5,13 +5,12 @@ public class NonUniqueBTreeIndexTests {
 
     static private int[] RangeOf(NonUniqueBTreeIndex<int> index, int from, int to) {
         using var writer = index.Range(from, to);
-        return writer.Buffer().Unwrap().ToArray();
+        return writer.Buffer().ToArray();
     }
 
     static private int[] OffsetsOf(NonUniqueBTreeIndex<int> index, int key) {
-        var offsets = new List<int>();
-        index.GetOffsets(key, offsets);
-        return offsets.ToArray();
+        using var list = index.GetOffsets(key);
+        return list.Buffer().ToArray();
     }
 
     [Test]

@@ -98,6 +98,31 @@ public sealed class TableGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
     );
+    static private readonly DiagnosticDescriptor DuplicateIndexAccessorOnFieldDiagnostic = new(
+        "RHINO012",
+        "Duplicate [Index] accessor on one field",
+        "{0}.{1} declares two or more [Index] attributes that resolve to the same Accessor '{2}' - each index on a field needs its own Accessor",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+    static private readonly DiagnosticDescriptor ReservedIndexAccessorDiagnostic = new(
+        "RHINO013",
+        "Index accessor collides with a generated member",
+        "Index '{0}' on '{1}' would generate a member with the same name as the generated ops API - '{0}' is taken by the primary key accessor or by Insert/Update/Delete/Iter/Evict, so give this index a different Accessor",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
+    static private readonly DiagnosticDescriptor IndexAccessorFieldNameCollisionDiagnostic = new(
+        "RHINO014",
+        "Index accessors collide on the generated field name",
+        "Index accessors '{0}' and '{1}' on '{2}' differ only in the casing of their first letter, so they would both generate the field name '{3}Index' - rename one Accessor",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
     static private readonly DiagnosticDescriptor DuplicateAccessorDiagnostic = new(
         "RHINO010",
         "Duplicate table Accessor within one database",
@@ -107,6 +132,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
+    static private readonly ImmutableHashSet<string> ReservedOpsMemberNames =
+        ImmutableHashSet.Create("Insert", "Update", "Delete", "Iter", "Evict");
+    
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var tableResults = context.SyntaxProvider
             .ForAttributeWithMetadataName(
@@ -206,9 +234,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
         var indexedParams = primaryCtor.Parameters
             .Select((p, declIndex) => (Param: p, DeclIndex: declIndex))
-            .Where(x => x.Param.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == IndexAttributeFullName))
-            .Select(x => {
-                    var indexAttribute = x.Param.GetAttributes().First(a => a.AttributeClass?.ToDisplayString() == IndexAttributeFullName);
+            .SelectMany(x => x.Param.GetAttributes()
+                .Where(a => a.AttributeClass?.ToDisplayString() == IndexAttributeFullName)
+                .Select(indexAttribute => {
                     var indexKind = (IndexKind)(int)indexAttribute.ConstructorArguments[0].Value!;
                     var uniqueness = indexAttribute.ConstructorArguments.Length > 1
                         ? (Uniqueness)(int)indexAttribute.ConstructorArguments[1].Value!
@@ -223,14 +251,29 @@ public sealed class TableGenerator : IIncrementalGenerator {
                         .DefaultIfEmpty(-1)
                         .First();
                     return (x.Param, x.DeclIndex, Kind: indexKind, Uniqueness: uniqueness, Accessor: accessor, Order: order, Attr: indexAttribute);
-                }
+                })
             )
             .ToImmutableArray();
 
+        foreach (var camelGroup in indexedParams.GroupBy(x => Camel(x.Accessor))) {
+            var distinctAccessors = camelGroup.Select(x => x.Accessor).Distinct().ToImmutableArray();
+            if (distinctAccessors.Length < 2) continue;
+            rowDiagnostics.Add(Diagnostic.Create(IndexAccessorFieldNameCollisionDiagnostic, Loc(camelGroup.First().Attr), distinctAccessors[0], distinctAccessors[1], rowType.Name, Camel(distinctAccessors[0])));
+        }
+        
         var indexes = indexedParams
             .GroupBy(x => x.Accessor)
             .Select(g => {
                     var group = g.ToImmutableArray();
+
+                    if (g.Key == primaryKeyAccessor || ReservedOpsMemberNames.Contains(g.Key)) {
+                        rowDiagnostics.Add(Diagnostic.Create(ReservedIndexAccessorDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name));
+                        return null;
+                    }
+                    if (group.Select(x => x.Param.Name).Distinct().Count() != group.Length) {
+                        rowDiagnostics.Add(Diagnostic.Create(DuplicateIndexAccessorOnFieldDiagnostic, Loc(group[0].Attr), rowType.Name, group[0].Param.Name, g.Key));
+                        return null;
+                    }
 
                     if (group.Length > 3) {
                         rowDiagnostics.Add(Diagnostic.Create(CompositeIndexTooManyFieldsDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name, group.Length));
@@ -439,14 +482,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"    private readonly AutoIncrementCounter {Camel(aif.FieldName)}Counter;");
         foreach (var idx in table.Indexes)
             sb.AppendLine($"    private readonly {ConcreteIndexType(idx)} {IndexFieldName(idx)};");
-        if (table.Indexes.Any(ShouldCreateOffsetBuffer))
-            sb.AppendLine("    private readonly List<int> offsetBuffer = [];");
-
-        return;
-        static bool ShouldCreateOffsetBuffer(IndexModel indexModel) {
-            return indexModel.Uniqueness != Uniqueness.Unique ||
-                   indexModel.Kind is IndexKind.BTree or IndexKind.RedBlackTree;
-        }
     }
 
     static private void EmitChangeTrackingFields(StringBuilder sb, string key, string row) {
@@ -543,9 +578,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine("                if (supersededByLater) continue;");
                 sb.AppendLine($"                if (c.Kind != ChangeKind.Delete && {rowKeyExpr}.Equals({keyExpr})) result.Add(c.Row);");
                 sb.AppendLine("            }");
-                sb.AppendLine("            offsetBuffer.Clear();");
-                sb.AppendLine($"            {IndexFieldName(idx)}.GetOffsets({keyExpr}, offsetBuffer);");
-                sb.AppendLine("            foreach (var offset in offsetBuffer) {");
+                sb.AppendLine("");
+                sb.AppendLine($"           using var offsetList = {IndexFieldName(idx)}.GetOffsets({keyExpr});");
+                sb.AppendLine("            foreach (var offset in offsetList.Buffer()) {");
                 sb.AppendLine("                var candidate = storage.Get(offset);");
                 sb.AppendLine($"                var candidateKey = candidate.{table.PrimaryKeyName};");
                 sb.AppendLine("                var touchedByBatch = false;");
@@ -554,10 +589,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine("            }");
                 sb.AppendLine("            return result;");
                 sb.AppendLine("        }");
-                sb.AppendLine("        offsetBuffer.Clear();");
-                sb.AppendLine($"        {IndexFieldName(idx)}.GetOffsets({keyExpr}, offsetBuffer);");
-                sb.AppendLine($"        var realResult = new List<{row}>(offsetBuffer.Count);");
-                sb.AppendLine("        foreach (var offset in offsetBuffer) realResult.Add(storage.Get(offset));");
+                sb.AppendLine("");
+                sb.AppendLine($"        using var outerOffsetList = {IndexFieldName(idx)}.GetOffsets({keyExpr});");
+                sb.AppendLine($"        var realResult = new List<{row}>(outerOffsetList.Count);");
+                sb.AppendLine("        foreach (var offset in outerOffsetList.Buffer()) realResult.Add(storage.Get(offset));");
                 sb.AppendLine("        return realResult;");
                 sb.AppendLine("    }");
             }
@@ -1088,6 +1123,28 @@ public sealed class TableGenerator : IIncrementalGenerator {
     }
 
     static private string Camel(string name) => name.Length == 0 ? name : char.ToLowerInvariant(name[0]) + name.Substring(1);
+    
+    // Those that have "Scan" method and inherit from OrderedIndex<TKey> and its children (Range, Gt, Gte, Lt, Lte, Iter)
+    static bool IsRangingIndex(IndexModel indexModel) {
+        return indexModel.Kind is IndexKind.BTree or IndexKind.RedBlackTree;
+    }
+    
+    // Those that support OffsetList GetOffsets(TKey key), returning multiple indexes
+    static bool IsMultiOffsetReturnIndex(IndexModel indexModel) {
+        return (indexModel.Kind, indexModel.Uniqueness) switch {
+            (IndexKind.BTree, _) => true,
+            (IndexKind.RedBlackTree, _) => true,
+            (IndexKind.Hash, Uniqueness.NonUnique) => true,
+            _ => false
+        };
+    }
+    
+    static bool IsMultiOffsetReturnAndNotRangingIndex(IndexModel indexModel) {
+        return (indexModel.Kind, indexModel.Uniqueness) switch {
+            (IndexKind.Hash, Uniqueness.NonUnique) => true,
+            _ => false
+        };
+    }
 
     private sealed class TableModel
     (

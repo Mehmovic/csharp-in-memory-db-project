@@ -7,7 +7,7 @@ public class RedBlackTreeIndexTests {
 
     static private int[] RangeOf(RedBlackTreeIndex<int> index, int from, int to) {
         using var writer = index.Range(from, to);
-        return writer.Buffer().Unwrap().ToArray();
+        return writer.Buffer().ToArray();
     }
 
     [Test]

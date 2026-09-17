@@ -3,8 +3,8 @@
 
 ### New Rules
 
-| Rule ID | Category | Severity | Notes |
-| ------- | -------- | -------- | ----- |
+| Rule ID  | Category           | Severity | Notes          |
+|----------|--------------------|----------|----------------|
 | RHINO001 | RhinoDB.Generators | Error    | TableGenerator |
 | RHINO002 | RhinoDB.Generators | Error    | TableGenerator |
 | RHINO003 | RhinoDB.Generators | Error    | TableGenerator |
@@ -15,3 +15,6 @@
 | RHINO009 | RhinoDB.Generators | Error    | TableGenerator |
 | RHINO010 | RhinoDB.Generators | Error    | TableGenerator |
 | RHINO011 | RhinoDB.Generators | Error    | TableGenerator |
+| RHINO012 | RhinoDB.Generators | Error    | TableGenerator |
+| RHINO013 | RhinoDB.Generators | Error    | TableGenerator |
+| RHINO014 | RhinoDB.Generators | Error    | TableGenerator |

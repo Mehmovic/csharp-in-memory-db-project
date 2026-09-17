@@ -5,12 +5,12 @@ public class NonUniqueRedBlackTreeIndexTests {
 
     static private int[] RangeOf(NonUniqueRedBlackTreeIndex<int> index, int from, int to) {
         using var writer = index.Range(from, to);
-        return writer.Buffer().Unwrap().ToArray();
+        return writer.Buffer().ToArray();
     }
 
     static private int[] OffsetsOf(NonUniqueRedBlackTreeIndex<int> index, int key) {
         using var writer = index.GetOffsets(key);
-        return writer.Buffer().Unwrap().ToArray();
+        return writer.Buffer().ToArray();
     }
 
     [Test]

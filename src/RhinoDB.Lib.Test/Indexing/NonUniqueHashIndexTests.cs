@@ -1,49 +1,45 @@
-namespace RhinoDB.Lib.Indexing.Test;
+﻿namespace RhinoDB.Lib.Indexing.Test;
 
 public class NonUniqueHashIndexTests {
     static private NonUniqueHashIndex<string> NewIndex() => new NonUniqueHashIndex<string>();
 
+    // GetOffsets returns a pooled, disposable OffsetList; materialize to a plain
+    // array so assertions stay readable and the rental goes back fast.
+    static private int[] OffsetsOf(NonUniqueHashIndex<string> index, string key) {
+        using var list = index.GetOffsets(key);
+        return list.Buffer().ToArray();
+    }
+
     [Test]
     public void GetOffsets_UnknownKey_ReturnsEmpty() {
-        var offsets = new List<int>();                
         var index = NewIndex();
-        index.GetOffsets("Red", offsets);
 
-        Assert.That(offsets, Is.Empty);
+        Assert.That(OffsetsOf(index, "Red"), Is.Empty);
     }
 
     [Test]
     public void Insert_ThenGetOffsets_ReturnsTheInsertedOffset() {
-        var offsets = new List<int>();
         var index = NewIndex();
 
         index.Insert("Red", 0);
 
-        index.GetOffsets("Red", offsets);
-        
-        Assert.That(offsets, Is.EqualTo(new[] { 0 }));
+        Assert.That(OffsetsOf(index, "Red"), Is.EqualTo(new[] { 0 }));
     }
 
     [Test]
     public void Insert_MultipleOffsetsSameKey_GetOffsetsReturnsAllOfThem() {
-        var offsets = new List<int>();
         var index = NewIndex();
 
         index.Insert("Red", 0);
         index.Insert("Red", 1);
         index.Insert("Blue", 2);
 
-        index.GetOffsets("Red", offsets);
-        Assert.That(offsets, Is.EquivalentTo(new[] { 0, 1 }));
-
-        offsets.Clear();
-        index.GetOffsets("Blue", offsets);
-        Assert.That(offsets, Is.EquivalentTo(new[] { 2 }));
+        Assert.That(OffsetsOf(index, "Red"), Is.EquivalentTo(new[] { 0, 1 }));
+        Assert.That(OffsetsOf(index, "Blue"), Is.EquivalentTo(new[] { 2 }));
     }
 
     [Test]
     public void Insert_SameOffsetTwiceUnderSameKey_IsIdempotent() {
-        var offsets = new List<int>();
         // Divergence from the List-backed NonUniqueHashIndex: a HashSet bucket
         // collapses a re-inserted offset instead of adding a duplicate entry.
         var index = NewIndex();
@@ -51,14 +47,11 @@ public class NonUniqueHashIndexTests {
         index.Insert("Red", 0);
         index.Insert("Red", 0);
 
-        index.GetOffsets("Red", offsets);
-        
-        Assert.That(offsets, Is.EqualTo(new[] { 0 }));
+        Assert.That(OffsetsOf(index, "Red"), Is.EqualTo(new[] { 0 }));
     }
 
     [Test]
     public void Delete_RemovesOnlyTheGivenOffset_OtherOffsetsWithSameKeyRemain() {
-        var offsets = new List<int>();        
         var index = NewIndex();
         index.Insert("Red", 0);
         index.Insert("Red", 1);
@@ -66,35 +59,27 @@ public class NonUniqueHashIndexTests {
 
         index.Delete("Red", 1);
 
-        index.GetOffsets("Red", offsets);
-        
-        Assert.That(offsets, Is.EquivalentTo(new[] { 0, 2 }));
+        Assert.That(OffsetsOf(index, "Red"), Is.EquivalentTo(new[] { 0, 2 }));
     }
 
     [Test]
     public void Delete_LastOffsetUnderAKey_KeyNoLongerAppearsInGetOffsets() {
-        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert("Red", 0);
 
         index.Delete("Red", 0);
 
-        index.GetOffsets("Red", offsets);
-
-        Assert.That(offsets, Is.Empty);
+        Assert.That(OffsetsOf(index, "Red"), Is.Empty);
     }
 
     [Test]
     public void Delete_ThenInsertAgainUnderSameKey_RecreatesTheBucket() {
-        var offsets = new List<int>();
         var index = NewIndex();
         index.Insert("Red", 0);
         index.Delete("Red", 0); // bucket is now removed entirely
 
         index.Insert("Red", 1);
 
-        index.GetOffsets("Red", offsets);
-        
-        Assert.That(offsets, Is.EqualTo(new[] { 1 }));
+        Assert.That(OffsetsOf(index, "Red"), Is.EqualTo(new[] { 1 }));
     }
 }

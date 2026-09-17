@@ -1,6 +1,8 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 
+using RhinoDB.Lib.Settings;
+
 namespace RhinoDB.Lib.Indexing;
 
 public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey> {
@@ -25,13 +27,14 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
         Count = 0;
     }
     
-    public void GetOffsets(TKey key, ICollection<int> into) {
-        if (chunks.Count == 0 || Count == 0) return;
+    public OffsetList GetOffsets(TKey key) {
+        if (chunks.Count == 0 || Count == 0) return OffsetList.Empty();
 
+        using var offsetBuilder = OffsetListBuilder.Create(Constants.OffsetBuilderInitialCapacity);
         var chunkSpan = CollectionsMarshal.AsSpan(chunks);
         for (var c = FindFirstChunkWithMaxKeyAtLeast(key); c < chunks.Count; c++) {
             ref readonly IndexChunk chunk = ref chunkSpan[c];
-            if (chunk.MinKey.CompareTo(key) > 0) return;
+            if (chunk.MinKey.CompareTo(key) > 0) return offsetBuilder.Build().Unwrap();
 
             var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, key);
             if (internalIdx < 0) continue;
@@ -40,9 +43,11 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
             }
 
             for (var i = internalIdx; i < chunk.Count && chunk.Keys[i].CompareTo(key) == 0; i++) {
-                into.Add(chunk.Offsets[i]);
+                offsetBuilder.Add(chunk.Offsets[i]);
             }
         }
+
+        return offsetBuilder.Build().Unwrap();
     }
 
     public void Insert(TKey key, int offset) {
@@ -120,11 +125,10 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
         }
     }
 
-    protected override OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to) {
-        if (chunks.Count == 0 || Count == 0)
-            return OffsetList.Empty();
+    protected override OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to, (bool filter, TKey key)? filterCondition = null) {
+        if (chunks.Count == 0 || Count == 0) return OffsetList.Empty();
 
-        var writer = OffsetListBuilder.Create(32);
+        using var offsetBuilder = OffsetListBuilder.Create(Constants.OffsetBuilderInitialCapacity);
         var chunkSpan = CollectionsMarshal.AsSpan(chunks);
         var startChunk = from.IsBounded ? FindFirstChunkWithMaxKeyAtLeast(from.Key) : 0;
 
@@ -150,16 +154,18 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
             }
 
             for (var i = internalIdx; i < chunk.Count; i++) {
+                if (filterCondition is { filter: true } filter && chunk.Keys[i].CompareTo(filter.key) == 0) continue;
+                
                 if (to.IsBounded) {
                     var cmp = chunk.Keys[i].CompareTo(to.Key);
-                    if (cmp > 0 || (cmp == 0 && !to.IsInclusive)) return writer.Build().Unwrap();
+                    if (cmp > 0 || (cmp == 0 && !to.IsInclusive)) return offsetBuilder.Build().Unwrap();
                 }
 
-                writer.Add(chunk.Offsets[i]);
+                offsetBuilder.Add(chunk.Offsets[i]);
             }
         }
 
-        return writer.Build().Unwrap();
+        return offsetBuilder.Build().Unwrap();
     }
 
     private int FindFirstChunkWithMaxKeyAtLeast(TKey from) {
