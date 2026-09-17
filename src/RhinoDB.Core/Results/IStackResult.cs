@@ -1,0 +1,7 @@
+namespace RhinoDB.Core;
+
+public interface IStackResult<out TSelf> where TSelf : struct, IStackResult<TSelf>, allows ref struct {
+    bool IsOk();
+    static abstract TSelf FromError(DbError error);
+    static abstract TSelf FromException(Exception ex);
+}

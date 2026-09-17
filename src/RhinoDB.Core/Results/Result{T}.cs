@@ -61,6 +61,11 @@ public readonly struct Result<T> : IResult<Result<T>> {
         result.IsOk()
             ? throw new InvalidOperationException("Cannot implicitly convert a successful Result to Result<T> - there is no value to carry.")
             : Error(result.GetError());
+    
+    static public implicit operator Result<T>(StackResult result) =>
+        result.IsOk()
+            ? throw new InvalidOperationException("Cannot implicitly convert a successful Result to Result<T> - there is no value to carry.")
+            : Error(result.GetError());
 
     static public implicit operator Result(Result<T> result) => result.Void();
 }
