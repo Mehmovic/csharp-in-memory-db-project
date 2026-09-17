@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueBTreeIndex<TKey> where TKey : IComparable<TKey> {
+public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey> {
     private struct IndexChunk(int capacity) {
         public readonly TKey[] Keys = new TKey[capacity];
         public readonly int[] Offsets = new int[capacity];
@@ -120,24 +120,46 @@ public class NonUniqueBTreeIndex<TKey> where TKey : IComparable<TKey> {
         }
     }
 
-    public void Range(TKey from, TKey to, ICollection<int> resultOffsets) {
-        if (chunks.Count == 0 || Count == 0) return;
+    protected override OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to) {
+        if (chunks.Count == 0 || Count == 0)
+            return OffsetList.Empty();
 
+        var writer = OffsetListBuilder.Create(32);
         var chunkSpan = CollectionsMarshal.AsSpan(chunks);
-        for (var c = FindFirstChunkWithMaxKeyAtLeast(from); c < chunks.Count; c++) {
+        var startChunk = from.IsBounded ? FindFirstChunkWithMaxKeyAtLeast(from.Key) : 0;
+
+        for (var c = startChunk; c < chunks.Count; c++) {
             ref readonly IndexChunk chunk = ref chunkSpan[c];
 
-            if (chunk.MinKey.CompareTo(to) > 0) break;
+            if (to.IsBounded) {
+                var minCmp = chunk.MinKey.CompareTo(to.Key);
+                if (minCmp > 0 || (minCmp == 0 && !to.IsInclusive)) break;
+            }
 
-            var internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, from);
-            if (internalIdx < 0) internalIdx = ~internalIdx;
-            else while (internalIdx > 0 && chunk.Keys[internalIdx - 1].CompareTo(from) == 0) internalIdx--;
+            var internalIdx = 0;
+            if (from.IsBounded) {
+                internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, from.Key);
+                if (internalIdx < 0) {
+                    internalIdx = ~internalIdx;
+                } else {
+                    while (internalIdx > 0 && chunk.Keys[internalIdx - 1].CompareTo(from.Key) == 0) internalIdx--;
+                    if (!from.IsInclusive) {
+                        while (internalIdx < chunk.Count && chunk.Keys[internalIdx].CompareTo(from.Key) == 0) internalIdx++;
+                    }
+                }
+            }
 
             for (var i = internalIdx; i < chunk.Count; i++) {
-                if (chunk.Keys[i].CompareTo(to) > 0) return;
-                resultOffsets.Add(chunk.Offsets[i]);
+                if (to.IsBounded) {
+                    var cmp = chunk.Keys[i].CompareTo(to.Key);
+                    if (cmp > 0 || (cmp == 0 && !to.IsInclusive)) return writer.Build().Unwrap();
+                }
+
+                writer.Add(chunk.Offsets[i]);
             }
         }
+
+        return writer.Build().Unwrap();
     }
 
     private int FindFirstChunkWithMaxKeyAtLeast(TKey from) {

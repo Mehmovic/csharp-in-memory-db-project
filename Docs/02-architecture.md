@@ -312,11 +312,17 @@ had absorbed `Table`'s old logic directly (merged, not composed) rather than
 being retired the same way, since Milestone 3 hadn't wired persistent-kind
 codegen up yet to inline into — it was eventually retired too, once that
 barrier was removed (see above). `IUniqueIndex<TKey>` and the concrete raw
-index types are untouched by any of this — `IUniqueIndex<TKey>` is still
-genuinely load-bearing on the primary-key slot (a runtime choice between
+index types were untouched by any of this — at the time `IUniqueIndex<TKey>` was
+still genuinely load-bearing on the primary-key slot (a runtime choice between
 `HashIndex`/`OrderedIndex`, same reason `Table` used to need it), and the
 raw index types are still constructed directly by both codegen and plenty
-of hand-written tests.
+of hand-written tests. **`IUniqueIndex<TKey>` itself removed 2026-09-17** — with
+`Table` retired it had no dispatch left to do: the generator owns concrete index
+types directly, the ordered indexes expose their range surface through the shared
+`OrderedIndex<TKey>` base (`Range`/`Gt`/`Gte`/`Lt`/`Lte`/`Iter`, all one-liners
+over a single `Scan(IndexBound<TKey>, IndexBound<TKey>)`), and `HashIndex` keeps
+only `GetOffset`/`Insert`/`Delete` — its `Range` was a never-called
+`NotSupportedException`.
 
 **`[Index]`'s `Accessor` and `Order` parameters, and composite indexes.**
 The generated accessor method is named for the field itself by default

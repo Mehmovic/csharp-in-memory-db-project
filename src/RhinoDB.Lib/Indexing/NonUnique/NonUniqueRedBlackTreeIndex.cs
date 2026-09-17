@@ -1,7 +1,7 @@
 namespace RhinoDB.Lib.Indexing;
 
-public class NonUniqueRedBlackTreeIndex<TKey>
-    where TKey : notnull {
+public class NonUniqueRedBlackTreeIndex<TKey> : OrderedIndex<TKey>
+    where TKey : IComparable<TKey> {
     private readonly SortedSet<(TKey Key, int Offset)> sortedSet = new SortedSet<(TKey Key, int Offset)>(
         Comparer<(TKey Key, int Offset)>.Create((a, b) => {
                 var cmp = Comparer<TKey>.Default.Compare(a.Key, b.Key);
@@ -10,7 +10,8 @@ public class NonUniqueRedBlackTreeIndex<TKey>
         )
     );
     
-    public void GetOffsets(TKey key, ICollection<int> into) => Range(key, key, into);
+    public OffsetList GetOffsets(TKey key)
+        => Scan(IndexBound<TKey>.Inclusive(key), IndexBound<TKey>.Inclusive(key));
 
     public void Insert(TKey key, int offset) {
         sortedSet.Add((key, offset));
@@ -20,10 +21,27 @@ public class NonUniqueRedBlackTreeIndex<TKey>
         sortedSet.Remove((key, offset));
     }
 
-    public void Range(TKey from, TKey to, ICollection<int> into) {
-        if (Comparer<TKey>.Default.Compare(from, to) > 0) return;
+    protected override OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to) {
+        if (sortedSet.Count == 0 || from.IsBounded && Comparer<TKey>.Default.Compare(from.Key, sortedSet.Max.Key) > 0)
+            return OffsetList.Empty();
 
-        foreach ((TKey Key, int Offset) entry in sortedSet.GetViewBetween((from, int.MinValue), (to, int.MaxValue)))
-            into.Add(entry.Offset);
+        var writer = OffsetListBuilder.Create(32);
+
+        var view = from.IsBounded
+            ? sortedSet.GetViewBetween((from.Key, int.MinValue), sortedSet.Max)
+            : sortedSet;
+
+        foreach ((TKey Key, int Offset) entry in view) {
+            if (from is { IsBounded: true, IsInclusive: false } && Comparer<TKey>.Default.Compare(entry.Key, from.Key) == 0) continue;
+
+            if (to.IsBounded) {
+                var cmp = Comparer<TKey>.Default.Compare(entry.Key, to.Key);
+                if (cmp > 0 || (cmp == 0 && !to.IsInclusive)) break;
+            }
+
+            writer.Add(entry.Offset);
+        }
+
+        return writer.Build().Unwrap();
     }
 }

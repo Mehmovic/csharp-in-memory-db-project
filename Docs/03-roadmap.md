@@ -38,8 +38,12 @@ with hysteresis. The physical foundation everything else sits on.
 
 Five index types, all key-to-offset direct (no indirection):
 
-- `HashIndex<TKey>` / `OrderedIndex<TKey>` — unique, implement `IUniqueIndex<TKey>`
-  (`GetOffset`/`Insert`/`Delete`/`Range`).
+- `HashIndex<TKey>` / `OrderedIndex<TKey>` — unique (`GetOffset`/`Insert`/`Delete`;
+  the ordered pair adds `Range`/`Gt`/`Gte`/`Lt`/`Lte`/`Iter` via the shared
+  `OrderedIndex<TKey>` base). **`IUniqueIndex<TKey>` retired 2026-09-17** — the
+  generator owns concrete index types, so nothing dispatched through the interface
+  any more; the never-called `NotSupportedException` `Range` on `HashIndex` went
+  with it.
 - `NonUniqueHashSetIndex<TKey>` / `NonUniqueOrderedIndex<TKey>` — non-unique,
   implement `INonUniqueHash<TKey>` (`Insert`/`Delete`/`GetOffsets`).
   **`NonUniqueHashIndex<TKey>` (the original `Dictionary<TKey,List<int>>`-backed,

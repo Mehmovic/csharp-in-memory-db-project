@@ -1,4 +1,5 @@
 using BenchmarkDotNet.Attributes;
+
 using RhinoDB.Lib.Indexing;
 
 namespace RhinoDB.Run.Server.Benchmark.Benchmarks;
@@ -15,7 +16,6 @@ public class IndexRangeBenchmarks {
 
     private BTreeIndex<long> bTree = null!;
     private RedBlackTreeIndex<long> redBlack = null!;
-    private List<int> buffer = null!;
     private long from;
 
     [Params(1, 100, 10_000)]
@@ -30,37 +30,31 @@ public class IndexRangeBenchmarks {
             redBlack.Insert(key, (int)key);
         }
 
-        buffer = [];
         // Center the query window so both indexes do the same amount of work.
         from = KeyCount / 2 - RangeWidth / 2;
 
         // Guard: a Range that returns the wrong window would time garbage instead
         // of failing, and this index is ~390 chunks deep at 100k keys - far beyond
         // what the unit tests exercise.
-        buffer.Clear();
-        bTree.Range(from, from + RangeWidth - 1, buffer);
-        if (buffer.Count != RangeWidth)
-            throw new InvalidOperationException($"LiteBTree_Range returned {buffer.Count} offsets, expected {RangeWidth}.");
+        using var bTreeResult = bTree.Range(from, from + RangeWidth - 1);
+        if (bTreeResult.Count != RangeWidth)
+            throw new InvalidOperationException($"LiteBTree_Range returned {bTreeResult.Count} offsets, expected {RangeWidth}.");
 
-        buffer.Clear();
-        redBlack.Range(from, from + RangeWidth - 1, buffer);
-        if (buffer.Count != RangeWidth)
-            throw new InvalidOperationException($"RedBlack_Range returned {buffer.Count} offsets, expected {RangeWidth}.");
 
-        buffer.Clear();
+        using var redBlackResult = redBlack.Range(from, from + RangeWidth - 1);
+        if (redBlackResult.Count != RangeWidth)
+            throw new InvalidOperationException($"RedBlack_Range returned {redBlackResult.Count} offsets, expected {RangeWidth}.");
     }
 
     [Benchmark(Baseline = true)]
     public int LiteBTree_Range() {
-        buffer.Clear();
-        bTree.Range(from, from + RangeWidth - 1, buffer);
-        return buffer.Count;
+        using var res = bTree.Range(from, from + RangeWidth - 1);
+        return res.Count;
     }
 
     [Benchmark]
     public int RedBlack_Range() {
-        buffer.Clear();
-        redBlack.Range(from, from + RangeWidth - 1, buffer);
-        return buffer.Count;
+        using var res = redBlack.Range(from, from + RangeWidth - 1);
+        return res.Count;
     }
 }

@@ -1,7 +1,7 @@
 namespace RhinoDB.Lib.Indexing;
 
-public class RedBlackTreeIndex<TKey> : IUniqueIndex<TKey>
-    where TKey : notnull {
+public class RedBlackTreeIndex<TKey> : OrderedIndex<TKey>
+    where TKey : IComparable<TKey> {
     private readonly SortedSet<(TKey Key, int Offset)> sortedSet =
         new SortedSet<(TKey Key, int Offset)>(
             Comparer<(TKey Key, int _)>.Create((a, b) => Comparer<TKey>.Default.Compare(a.Key, b.Key))
@@ -23,10 +23,26 @@ public class RedBlackTreeIndex<TKey> : IUniqueIndex<TKey>
         sortedSet.Remove((key, 0));
     }
 
-    public void Range(TKey from, TKey to, ICollection<int> into) {
-        if (Comparer<TKey>.Default.Compare(from, to) > 0) return;
+    protected override OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to) {
+        if (sortedSet.Count == 0 || from.IsBounded && Comparer<TKey>.Default.Compare(from.Key, sortedSet.Max.Key) > 0)
+            return OffsetList.Empty();
 
-        foreach ((TKey Key, int Offset) entry in sortedSet.GetViewBetween((from, 0), (to, 0)))
-            into.Add(entry.Offset);
+        var writer = OffsetListBuilder.Create(32);
+        var view = from.IsBounded
+            ? sortedSet.GetViewBetween((from.Key, 0), sortedSet.Max)
+            : sortedSet;
+
+        foreach ((TKey Key, int Offset) entry in view) {
+            if (from is { IsBounded: true, IsInclusive: false } && Comparer<TKey>.Default.Compare(entry.Key, from.Key) == 0) continue;
+
+            if (to.IsBounded) {
+                var cmp = Comparer<TKey>.Default.Compare(entry.Key, to.Key);
+                if (cmp > 0 || (cmp == 0 && !to.IsInclusive)) break;
+            }
+
+            writer.Add(entry.Offset);
+        }
+
+        return writer.Build().Unwrap();
     }
 }

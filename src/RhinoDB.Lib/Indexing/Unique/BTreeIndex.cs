@@ -99,19 +99,16 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
         Insert(newKey, newOffset);
     }
 
-    protected override int Scan(IndexBound<TKey> from, IndexBound<TKey> to, ICollection<int> into) {
-        if (chunks.Count == 0 || Count == 0) return 0;
+    protected override OffsetList Scan(IndexBound<TKey> from, IndexBound<TKey> to) {
+        if (chunks.Count == 0 || Count == 0) return OffsetList.Empty();
 
-        var added = 0;
+        var writer = OffsetListBuilder.Create(32);
         var chunkSpan = CollectionsMarshal.AsSpan(chunks);
-        // An open lower bound skips the chunk search entirely and starts at chunk 0.
         var startChunk = from.IsBounded ? FindFirstChunkWithMaxKeyAtLeast(from.Key) : 0;
 
         for (var c = startChunk; c < chunks.Count; c++) {
             ref readonly IndexChunk chunk = ref chunkSpan[c];
 
-            // Keys are unique, so a chunk whose smallest key is above to (or equal to an
-            // exclusive to) cannot contribute anything.
             if (to.IsBounded) {
                 var minCmp = chunk.MinKey.CompareTo(to.Key);
                 if (minCmp > 0 || (minCmp == 0 && !to.IsInclusive)) break;
@@ -121,23 +118,20 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
             if (from.IsBounded) {
                 internalIdx = Array.BinarySearch(chunk.Keys, 0, chunk.Count, from.Key);
                 if (internalIdx < 0) internalIdx = ~internalIdx;
-                // At most one entry can equal from, so an exclusive lower bound is that
-                // single entry skipped rather than a run walked.
                 else if (!from.IsInclusive) internalIdx++;
             }
 
             for (var i = internalIdx; i < chunk.Count; i++) {
                 if (to.IsBounded) {
                     var cmp = chunk.Keys[i].CompareTo(to.Key);
-                    if (cmp > 0 || (cmp == 0 && !to.IsInclusive)) return added;
+                    if (cmp > 0 || (cmp == 0 && !to.IsInclusive)) return writer.Build().Unwrap();
                 }
 
-                into.Add(chunk.Offsets[i]);
-                added++;
+                writer.Add(chunk.Offsets[i]);
             }
         }
 
-        return added;
+        return writer.Build().Unwrap();
     }
 
     private int FindFirstChunkWithMaxKeyAtLeast(TKey from) {
@@ -160,13 +154,8 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
     }
 
     private int FindTargetChunkForInsertion(TKey key) {
-        // Count == 0 is the only case where a chunk can be empty (Delete removes every
-        // emptied chunk), and the empty initial chunk keeps default! as its MaxKey -
-        // null for reference-type keys, so it must never be compared against.
         if (Count == 0) return 0;
 
-        // Ascending chunks (guaranteed by SplitAndInsert) let this reuse the binary
-        // search the read paths already use, instead of a linear scan per insert.
         var idx = FindFirstChunkWithMaxKeyAtLeast(key);
         return idx < chunks.Count ? idx : chunks.Count - 1;
     }
