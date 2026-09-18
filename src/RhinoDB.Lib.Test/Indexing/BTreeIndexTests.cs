@@ -191,6 +191,52 @@ public class BTreeIndexTests {
         Assert.That(RangeOf(index, 1, 3), Is.EqualTo(new[] { 100, 200, 300 }));
     }
 
+    // ---- Merge-on-underflow (chunks consolidate back together after delete-heavy churn) ----
+
+    [Test]
+    public void Delete_ScatteredAcrossManyChunks_LeavingThemUnderQuarterCapacity_MergesChunksBackTogether() {
+        var index = new BTreeIndex<int>(chunkSize: 16); // chunkCapacity 16, merge threshold 4
+        for (var key = 0; key < 1_000; key++) index.Insert(key, key);
+        var chunksBeforeChurn = index.ChunkCount;
+
+        // Keep only every 8th key - every chunk ends up far under quarter capacity.
+        for (var key = 0; key < 1_000; key++) {
+            if (key % 8 != 0) index.Delete(key);
+        }
+
+        Assert.That(index.ChunkCount, Is.LessThan(chunksBeforeChurn),
+            "Chunks must consolidate back together once they're sparsely populated, not stay fragmented forever.");
+        Assert.That(index.Count, Is.EqualTo(125), "Only the surviving (every-8th) keys should remain.");
+
+        for (var key = 0; key < 1_000; key += 8)
+            Assert.That(index.GetOffset(key).Unwrap(), Is.EqualTo(key), $"Key {key} must still be retrievable after merging.");
+        Assert.That(RangeOf(index, 0, 999), Is.EqualTo(Enumerable.Range(0, 125).Select(i => i * 8).ToArray()),
+            "A full range scan after merging must still return every surviving key, in order, with none lost or duplicated.");
+    }
+
+    [Test]
+    public void Delete_DownToASingleSurvivingChunk_LeavesExactlyOneChunk() {
+        var index = new BTreeIndex<int>(chunkSize: 16);
+        for (var key = 0; key < 500; key++) index.Insert(key, key);
+
+        for (var key = 1; key < 500; key++) index.Delete(key); // leave only key 0
+
+        Assert.That(index.ChunkCount, Is.EqualTo(1));
+        Assert.That(index.Count, Is.EqualTo(1));
+        Assert.That(index.GetOffset(0).Unwrap(), Is.EqualTo(0));
+    }
+
+    [Test]
+    public void Delete_EveryKey_LeavesOneEmptyChunkNotZero() {
+        var index = new BTreeIndex<int>(chunkSize: 16);
+        for (var key = 0; key < 500; key++) index.Insert(key, key);
+
+        for (var key = 0; key < 500; key++) index.Delete(key);
+
+        Assert.That(index.Count, Is.EqualTo(0));
+        Assert.That(index.ChunkCount, Is.EqualTo(1), "A drained index still needs one (empty) chunk to insert back into.");
+    }
+
     [Test]
     public void Range_AtScale_TensOfChunks_ReturnsTheExactWindow() {
         var index = NewIndex();

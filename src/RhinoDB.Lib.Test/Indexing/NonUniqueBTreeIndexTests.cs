@@ -131,6 +131,65 @@ public class NonUniqueBTreeIndexTests {
         Assert.That(RangeOf(index, 10, 60), Has.Length.EqualTo(6));
     }
 
+    // ---- Merge-on-underflow (chunks consolidate back together after delete-heavy churn) ----
+
+    [Test]
+    public void Delete_ScatteredAcrossManyChunks_LeavingThemUnderQuarterCapacity_MergesChunksBackTogether() {
+        var index = new NonUniqueBTreeIndex<int>(chunkSize: 16); // chunkCapacity 16, merge threshold 4
+        for (var key = 0; key < 1_000; key++) index.Insert(key, key);
+        var chunksBeforeChurn = index.ChunkCount;
+
+        // Keep only every 8th key - every chunk ends up far under quarter capacity.
+        for (var key = 0; key < 1_000; key++) {
+            if (key % 8 != 0) index.Delete(key, key);
+        }
+
+        Assert.That(index.ChunkCount, Is.LessThan(chunksBeforeChurn),
+            "Chunks must consolidate back together once they're sparsely populated, not stay fragmented forever.");
+        Assert.That(index.Count, Is.EqualTo(125), "Only the surviving (every-8th) keys should remain.");
+
+        Assert.That(RangeOf(index, 0, 999), Is.EqualTo(Enumerable.Range(0, 125).Select(i => i * 8).ToArray()),
+            "A full range scan after merging must still return every surviving key, in order, with none lost or duplicated.");
+    }
+
+    [Test]
+    public void Delete_DownToASingleSurvivingChunk_LeavesExactlyOneChunk() {
+        var index = new NonUniqueBTreeIndex<int>(chunkSize: 16);
+        for (var key = 0; key < 500; key++) index.Insert(key, key);
+
+        for (var key = 1; key < 500; key++) index.Delete(key, key); // leave only key 0
+
+        Assert.That(index.ChunkCount, Is.EqualTo(1));
+        Assert.That(index.Count, Is.EqualTo(1));
+        Assert.That(OffsetsOf(index, 0), Is.EqualTo(new[] { 0 }));
+    }
+
+    [Test]
+    public void Delete_EveryKey_LeavesOneEmptyChunkNotZero() {
+        var index = new NonUniqueBTreeIndex<int>(chunkSize: 16);
+        for (var key = 0; key < 500; key++) index.Insert(key, key);
+
+        for (var key = 0; key < 500; key++) index.Delete(key, key);
+
+        Assert.That(index.Count, Is.EqualTo(0));
+        Assert.That(index.ChunkCount, Is.EqualTo(1), "A drained index still needs one (empty) chunk to insert back into.");
+    }
+
+    [Test]
+    public void Delete_ScatteredAcrossManyChunksOfDuplicateKeys_MergesChunksBackTogether() {
+        var index = new NonUniqueBTreeIndex<int>(chunkSize: 16);
+        // One key, 1000 duplicate offsets - spans many chunks on its own.
+        for (var i = 0; i < 1_000; i++) index.Insert(7, i);
+        var chunksBeforeChurn = index.ChunkCount;
+
+        for (var i = 0; i < 1_000; i++) {
+            if (i % 8 != 0) index.Delete(7, i);
+        }
+
+        Assert.That(index.ChunkCount, Is.LessThan(chunksBeforeChurn));
+        Assert.That(OffsetsOf(index, 7), Is.EquivalentTo(Enumerable.Range(0, 125).Select(i => i * 8).ToArray()));
+    }
+
     // ---- Multi-chunk Range paths (the binary-search start) ----
 
     static private NonUniqueBTreeIndex<int> NewScrambledIndex(int count) {

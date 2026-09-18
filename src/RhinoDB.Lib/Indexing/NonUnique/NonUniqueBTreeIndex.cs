@@ -20,6 +20,7 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
     private readonly List<IndexChunk> chunks;
 
     public int Count { get; private set; }
+    internal int ChunkCount => chunks.Count;
 
     public NonUniqueBTreeIndex(int chunkSize = 256) {
         chunkCapacity = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(16, chunkSize));
@@ -118,10 +119,38 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
             chunk.Count--;
             Count--;
 
-            if (chunk.Count == 0 && chunks.Count > 1) {
-                chunks.RemoveAt(c);
-            }
+            MergeWithNeighborIfUnderfull(c);
             return;
+        }
+    }
+
+    private void MergeWithNeighborIfUnderfull(int chunkIdx) {
+        if (chunks.Count <= 1) return;
+
+        var chunkSpan = CollectionsMarshal.AsSpan(chunks);
+        if (chunkSpan[chunkIdx].Count >= chunkCapacity >> 2) return;
+
+        if (chunkIdx + 1 < chunks.Count) {
+            ref var chunk = ref chunkSpan[chunkIdx];
+            ref var next = ref chunkSpan[chunkIdx + 1];
+            if (chunk.Count + next.Count <= chunkCapacity) {
+                Array.Copy(next.Keys, 0, chunk.Keys, chunk.Count, next.Count);
+                Array.Copy(next.Offsets, 0, chunk.Offsets, chunk.Count, next.Count);
+                chunk.Count += next.Count;
+                chunks.RemoveAt(chunkIdx + 1);
+                return;
+            }
+        }
+
+        if (chunkIdx > 0) {
+            ref var prev = ref chunkSpan[chunkIdx - 1];
+            ref var chunk = ref chunkSpan[chunkIdx];
+            if (prev.Count + chunk.Count <= chunkCapacity) {
+                Array.Copy(chunk.Keys, 0, prev.Keys, prev.Count, chunk.Count);
+                Array.Copy(chunk.Offsets, 0, prev.Offsets, prev.Count, chunk.Count);
+                prev.Count += chunk.Count;
+                chunks.RemoveAt(chunkIdx);
+            }
         }
     }
 
