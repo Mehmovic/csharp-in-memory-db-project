@@ -124,7 +124,7 @@ public class BTreeIndex_CompositeStringKeyTests {
     static private BTreeIndex<(int ClubId, string Name)> NewIndex(int chunkSize = 256) => new(chunkSize);
 
     static private int[] RangeOf(BTreeIndex<(int ClubId, string Name)> index, (int, string) from, (int, string) to) {
-        using var list = index.Range(from, to);
+        using var list = index.GetOffsetsRange(from, to);
         return list.BufferResult().Unwrap().ToArray();
     }
 
@@ -201,10 +201,10 @@ public class BTreeIndex_CompositeStringKeyTests {
         index.Insert((1, "beta"), 11);
         index.Insert((2, "alpha"), 20);
 
-        using var greater = index.Gt((1, "alpha"));
-        using var atOrGreater = index.Gte((1, "alpha"));
-        using var less = index.Lt((2, "alpha"));
-        using var atOrLess = index.Lte((2, "alpha"));
+        using var greater = index.GetOffsetsGt((1, "alpha"));
+        using var atOrGreater = index.GetOffsetsGte((1, "alpha"));
+        using var less = index.GetOffsetsLt((2, "alpha"));
+        using var atOrLess = index.GetOffsetsLte((2, "alpha"));
 
         Assert.That(greater.BufferResult().Unwrap().ToArray(), Is.EqualTo(new[] { 11, 20 }));
         Assert.That(atOrGreater.BufferResult().Unwrap().ToArray(), Is.EqualTo(new[] { 10, 11, 20 }));
@@ -219,7 +219,7 @@ public class BTreeIndex_CompositeStringKeyTests {
         index.Insert((1, "beta"), 11);
         index.Insert((1, "alpha"), 10);
 
-        using var all = index.Iter();
+        using var all = index.GetOffsetsIter();
         Assert.That(all.BufferResult().Unwrap().ToArray(), Is.EqualTo(new[] { 10, 11, 20 }));
     }
 
@@ -276,7 +276,7 @@ public class NonUniqueBTreeIndex_CompositeStringKeyTests {
             index.Insert((7, "same"), i);
         index.Insert((9, "later"), 999);
 
-        using var above = index.Gt((7, "same"));
+        using var above = index.GetOffsetsGt((7, "same"));
         Assert.That(above.BufferResult().Unwrap().ToArray(), Is.EqualTo(new[] { 999 }));
     }
 
@@ -287,7 +287,7 @@ public class NonUniqueBTreeIndex_CompositeStringKeyTests {
         for (var i = 0; i < 40; i++)
             index.Insert((7, "same"), i);
 
-        using var below = index.Lt((7, "same"));
+        using var below = index.GetOffsetsLt((7, "same"));
         Assert.That(below.BufferResult().Unwrap().ToArray(), Is.EqualTo(new[] { 111 }));
     }
 
@@ -309,7 +309,7 @@ public class RedBlackTreeIndex_CompositeStringKeyTests {
     static private RedBlackTreeIndex<(int ClubId, string Name)> NewIndex() => new();
 
     static private int[] RangeOf(RedBlackTreeIndex<(int ClubId, string Name)> index, (int, string) from, (int, string) to) {
-        using var list = index.Range(from, to);
+        using var list = index.GetOffsetsRange(from, to);
         return list.BufferResult().Unwrap().ToArray();
     }
 
@@ -341,10 +341,10 @@ public class RedBlackTreeIndex_CompositeStringKeyTests {
         index.Insert((1, "alpha"), 10);
         index.Insert((2, "alpha"), 20);
 
-        using var clubOne = index.Gte((1, ""));
+        using var clubOne = index.GetOffsetsGte((1, ""));
         Assert.That(clubOne.BufferResult().Unwrap().ToArray(), Is.EqualTo(new[] { 10, 20 }));
 
-        using var clubTwo = index.Gte((2, ""));
+        using var clubTwo = index.GetOffsetsGte((2, ""));
         Assert.That(clubTwo.BufferResult().Unwrap().ToArray(), Is.EqualTo(new[] { 20 }));
     }
 
@@ -356,7 +356,7 @@ public class RedBlackTreeIndex_CompositeStringKeyTests {
         index.Insert((1, "alpha"), 10);
         index.Insert((2, "alpha"), 20);
 
-        using var all = index.Iter();
+        using var all = index.GetOffsetsIter();
         Assert.That(all.BufferResult().Unwrap().ToArray(), Is.EqualTo(new[] { 10, 11, 20, 30 }));
     }
 
@@ -393,10 +393,10 @@ public class NonUniqueRedBlackTreeIndex_CompositeStringKeyTests {
         index.Insert((5, "alice"), 2);
         index.Insert((5, "bob"), 3);
 
-        using var atOrAbove = index.Gte((5, "alice"));
+        using var atOrAbove = index.GetOffsetsGte((5, "alice"));
         Assert.That(atOrAbove.BufferResult().Unwrap().ToArray(), Is.EquivalentTo(new[] { 1, 2, 3 }));
 
-        using var atOrBelow = index.Lte((5, "alice"));
+        using var atOrBelow = index.GetOffsetsLte((5, "alice"));
         Assert.That(atOrBelow.BufferResult().Unwrap().ToArray(), Is.EquivalentTo(new[] { 1, 2 }));
     }
 
@@ -408,7 +408,7 @@ public class NonUniqueRedBlackTreeIndex_CompositeStringKeyTests {
         index.Insert((1, "beta"), 12);
         index.Insert((2, "alpha"), 20);
 
-        using var clubOne = index.Range((1, "a"), (1, "z"));
+        using var clubOne = index.GetOffsetsRange((1, "a"), (1, "z"));
         Assert.That(clubOne.BufferResult().Unwrap().ToArray(), Is.EquivalentTo(new[] { 10, 11, 12 }));
     }
 }

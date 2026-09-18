@@ -6,7 +6,7 @@ public class BTreeIndexTests {
     static private BTreeIndex<int> NewIndex() => new BTreeIndex<int>();
 
     static private int[] RangeOf(BTreeIndex<int> index, int from, int to) {
-        using var writer = index.Range(from, to);
+        using var writer = index.GetOffsetsRange(from, to);
         return writer.Buffer().ToArray();
     }
 

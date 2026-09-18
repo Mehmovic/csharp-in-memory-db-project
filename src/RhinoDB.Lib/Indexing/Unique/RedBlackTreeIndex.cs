@@ -24,7 +24,7 @@ public class RedBlackTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparab
         sortedSet.Remove((key, 0));
     }
 
-    protected override OffsetList Scan(
+    protected override OffsetList ScanOffsets(
         IndexBound<TKey> from,
         IndexBound<TKey> to,
         FilterDescriptor<TKey>? filterParam = null

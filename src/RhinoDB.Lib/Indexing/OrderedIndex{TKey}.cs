@@ -2,36 +2,33 @@ namespace RhinoDB.Lib.Indexing;
 
 public abstract class OrderedIndex<TKey> where TKey : IComparable<TKey>, IEquatable<TKey> {
     // [from, to]
-    public OffsetList Range(TKey from, TKey to)
-        => Scan(IndexBound<TKey>.Inclusive(from), IndexBound<TKey>.Inclusive(to));
+    public OffsetList GetOffsetsRange(TKey from, TKey to)
+        => ScanOffsets(IndexBound<TKey>.Inclusive(from), IndexBound<TKey>.Inclusive(to));
 
     // (from, ...)
-    public OffsetList Gt(TKey from)
-        => Scan(IndexBound<TKey>.Exclusive(from), IndexBound<TKey>.Unbounded);
+    public OffsetList GetOffsetsGt(TKey from)
+        => ScanOffsets(IndexBound<TKey>.Exclusive(from), IndexBound<TKey>.Unbounded);
 
     // [from, ...)
-    public OffsetList Gte(TKey from)
-        => Scan(IndexBound<TKey>.Inclusive(from), IndexBound<TKey>.Unbounded);
+    public OffsetList GetOffsetsGte(TKey from)
+        => ScanOffsets(IndexBound<TKey>.Inclusive(from), IndexBound<TKey>.Unbounded);
 
     // (..., to)
-    public OffsetList Lt(TKey to)
-        => Scan(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Exclusive(to));
+    public OffsetList GetOffsetsLt(TKey to)
+        => ScanOffsets(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Exclusive(to));
 
     // (..., to]
-    public OffsetList Lte(TKey to)
-        => Scan(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Inclusive(to));
+    public OffsetList GetOffsetsLte(TKey to)
+        => ScanOffsets(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Inclusive(to));
 
     // Everything, in ascending key order.
-    public OffsetList Iter()
-        => Scan(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Unbounded);
+    public OffsetList GetOffsetsIter()
+        => ScanOffsets(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Unbounded);
 
-    public OffsetList Filter(TKey key)
-        => Scan(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Unbounded, FilterDescriptor.Include(key));
+    public OffsetList GetOffsetsExcept(TKey key)
+        => ScanOffsets(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Unbounded, FilterDescriptor.Exclude(key));
 
-    public OffsetList Except(TKey key)
-        => Scan(IndexBound<TKey>.Unbounded, IndexBound<TKey>.Unbounded, FilterDescriptor.Exclude(key));
-
-    protected abstract OffsetList Scan(
+    protected abstract OffsetList ScanOffsets(
         IndexBound<TKey> from,
         IndexBound<TKey> to,
         FilterDescriptor<TKey>? filter = null

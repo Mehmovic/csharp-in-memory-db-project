@@ -12,7 +12,7 @@ public class NonUniqueRedBlackTreeIndex<TKey> : OrderedIndex<TKey> where TKey : 
     );
 
     public OffsetList GetOffsets(TKey key)
-        => Scan(IndexBound<TKey>.Inclusive(key), IndexBound<TKey>.Inclusive(key));
+        => ScanOffsets(IndexBound<TKey>.Inclusive(key), IndexBound<TKey>.Inclusive(key));
 
     public void Insert(TKey key, int offset) {
         sortedSet.Add((key, offset));
@@ -22,7 +22,7 @@ public class NonUniqueRedBlackTreeIndex<TKey> : OrderedIndex<TKey> where TKey : 
         sortedSet.Remove((key, offset));
     }
 
-    protected override OffsetList Scan(
+    protected override OffsetList ScanOffsets(
         IndexBound<TKey> from,
         IndexBound<TKey> to,
         FilterDescriptor<TKey>? filterParam = null

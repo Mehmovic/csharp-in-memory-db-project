@@ -4,7 +4,7 @@ public class NonUniqueBTreeIndexTests {
     static private NonUniqueBTreeIndex<int> NewIndex() => new NonUniqueBTreeIndex<int>();
 
     static private int[] RangeOf(NonUniqueBTreeIndex<int> index, int from, int to) {
-        using var writer = index.Range(from, to);
+        using var writer = index.GetOffsetsRange(from, to);
         return writer.Buffer().ToArray();
     }
 

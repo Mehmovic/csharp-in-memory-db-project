@@ -21,17 +21,13 @@ public class HashIndex<TKey> where TKey : IEquatable<TKey> {
         hashMap.Remove(key);
     }
     
-    public OffsetList Iter() => Scan();
+    public OffsetList GetOffsetsIter() => ScanOffsets();
 
-    public OffsetList Filter(TKey key) {
-        return Scan(FilterDescriptor.Include(key));
+    public OffsetList GetOffsetsExcept(TKey key) {
+        return ScanOffsets(FilterDescriptor.Exclude(key));
     }
 
-    public OffsetList Except(TKey key) {
-        return Scan(FilterDescriptor.Exclude(key));
-    }
-
-    private OffsetList Scan(FilterDescriptor<TKey>? filterParam = null) {
+    private OffsetList ScanOffsets(FilterDescriptor<TKey>? filterParam = null) {
         if (hashMap.Count == 0) return OffsetList.Empty();
 
         using var offsetBuilder = OffsetListBuilder.Create(Constants.OffsetBuilderInitialCapacity);

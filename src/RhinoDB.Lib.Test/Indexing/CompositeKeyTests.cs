@@ -52,7 +52,7 @@ public class OrderedIndex_CompositeKeyTests {
     static private RedBlackTreeIndex<(int X, int Y)> NewIndex() => new RedBlackTreeIndex<(int X, int Y)>();
 
     static private int[] RangeOf(RedBlackTreeIndex<(int X, int Y)> index, (int X, int Y) from, (int X, int Y) to) {
-        using var writer = index.Range(from, to);
+        using var writer = index.GetOffsetsRange(from, to);
         return writer.Buffer().ToArray();
     }
 
@@ -133,7 +133,7 @@ public class NonUniqueOrderedIndex_CompositeKeyTests {
     static private NonUniqueRedBlackTreeIndex<(int X, int Y)> NewIndex() => new NonUniqueRedBlackTreeIndex<(int X, int Y)>();
 
     static private int[] RangeOf(NonUniqueRedBlackTreeIndex<(int X, int Y)> index, (int X, int Y) from, (int X, int Y) to) {
-        using var writer = index.Range(from, to);
+        using var writer = index.GetOffsetsRange(from, to);
         return writer.BufferResult().Unwrap().ToArray();
     }
 

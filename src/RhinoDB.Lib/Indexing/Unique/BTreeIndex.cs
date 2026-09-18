@@ -101,7 +101,7 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
         Insert(newKey, newOffset);
     }
 
-    protected override OffsetList Scan(
+    protected override OffsetList ScanOffsets(
         IndexBound<TKey> from,
         IndexBound<TKey> to,
         FilterDescriptor<TKey>? filterParam = null
