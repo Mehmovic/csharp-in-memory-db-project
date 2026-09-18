@@ -846,6 +846,67 @@ should be a named, understood property when choosing `Optimistic` vs.
 tick-position update losing at most one in-flight write on a crash is fine;
 "player spent 500 gold" is not, and belongs on `Confirmed`.
 
+**Built 2026-09-18: opt-in genesis replay, alongside (not replacing) the
+"reopen the environment" recovery model above.** That opening claim — no
+second recovery mechanism, a fresh process starts every table empty and
+reloads from libmdbx — still describes the *default* startup path
+unchanged. Genesis replay is a deliberately separate, explicitly-requested
+alternative: reconstruct a table's full history from the very first
+operation, in memory, for debugging/inspection, never touching cold storage
+or the live WAL. Two things had to exist first: `WriteAheadLog.Truncate()`
+(see `Docs/05-wal-design.md` Phase 3) destroys everything it wipes at every
+checkpoint, so *some* form of archive-before-truncate is required just to
+have history older than "since the last checkpoint" to replay at all; and a
+way to replay a decoded change back into memory without the normal
+`Apply()` path's `cold.Stage(...)` call, since that call is exactly what
+must never happen during replay.
+
+- **`WalArchive` (`RhinoDB.Lib.Durability`) is the always-on half** — not
+  gated behind anything, since there's no way to opt into history later that
+  wasn't preserved at the time. `CheckpointEngine.RunCheckpoint` now takes
+  the full pre-collapse `DecodedWalEntry[]` it's about to fold into libmdbx
+  and, right before the existing `wal.Truncate()` call, re-encodes them
+  (same `WalFileHeaderCodec`/`WalRecordCodec` framing `wal.dat` itself
+  uses) into a new sequentially-numbered segment file under
+  `wal-archive/`. An archive-write failure doesn't fail the checkpoint or
+  block the truncate — archiving is a side-channel for replay, not part of
+  what "checkpoint succeeded" means for the live game — but it's surfaced
+  in the returned `Result` rather than silently swallowed. A crash between
+  the libmdbx commit and the archive write produces a harmless duplicate
+  segment on the next checkpoint (never a gap, since the ordering — commit,
+  *then* archive, *then* truncate — never changes), which the reader below
+  tolerates directly rather than the write side trying to be perfectly
+  atomic about it.
+- **Pruning is manual and file-granular, on purpose.** Segments are just
+  files (`00000001.wal`, `00000002.wal`, ...); deleting the oldest ones by
+  hand to reclaim disk reduces how far back "genesis" reaches without
+  needing a dedicated API — the reader establishes its starting point from
+  whichever segment is oldest still present, no special-casing required. A
+  gap from deleting a segment out of the *middle* of the chain is a
+  different story and is rejected outright (`ErrorKind.WalArchiveGap`), not
+  silently reconstructed as a wrong intermediate state.
+- **`WalArchive.ReadHistory` never opens `wal.dat` itself.** That file is
+  held with `FileShare.None` for the entire lifetime of whichever
+  `ColdStore` owns it, so a second reader in the same process would be a
+  guaranteed sharing violation — the exact failure mode hit and fixed while
+  building this. Instead, `ColdStore.PendingWalTail` exposes the tail that
+  instance already decoded at `Open()` time (the same data
+  `CompleteRecoveryAsync()` would otherwise fold into libmdbx), and the
+  generated `LoadFromGenesis` takes the caller's already-open `ColdStore`
+  rather than a raw path so it can read that instead of the file.
+- **Per-table `ReplayApply` mirrors `Instant`-kind `Apply()`'s Insert/
+  Update/Delete bookkeeping exactly, minus `cold.Stage(...)`, one change at
+  a time rather than a staged batch** — replay is inherently step-by-step
+  (that's what makes it useful for debugging "how did we get here," not
+  just a slower way to reach today's state), so there's no batching to
+  mirror from the `Persistent`-kind side either. The generated
+  `{Db}Loader.LoadFromGenesis(db, cold, upToLsn:, onEntryApplied:)` is the
+  explicit opt-in — a distinct method rather than a flag on `LoadAsync`,
+  much harder to reach by accident — that walks `WalArchive.ReadHistory`'s
+  merged, gap-checked entries in order, optionally stopping at a given LSN
+  or invoking a callback per entry so a caller can freeze/inspect the
+  reconstructed state at any point in history, not only the end.
+
 ## Inter-Database Communication (IDC) (designed, not yet built)
 
 **Renamed 2026-09-13 from "Change propagation"** — that name conflated two

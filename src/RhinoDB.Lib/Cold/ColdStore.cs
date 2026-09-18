@@ -21,7 +21,6 @@ public sealed class ColdStore : IDisposable {
     private readonly Dictionary<uint, EvictionDropRegistration> evictionDrops = [];
     private readonly List<EvictionCandidate> drainedEvictions = [];
     private readonly List<EvictionCandidate> appliedEvictions = [];
-    private DecodedWalEntry[] pendingRecoveryEntries;
     private long nextLsn;
     private DbError? durabilityFailure;
 
@@ -29,20 +28,37 @@ public sealed class ColdStore : IDisposable {
     internal DbError DurabilityFailureError => durabilityFailure!.Value;
     internal void PoisonDurability(DbError error) => durabilityFailure ??= error;
     public bool IsDurabilityPoisoned => durabilityFailure is not null;
-    
+
     public bool IsScopeActive { get; private set; }
 
-    private ColdStore(MdbxEnvironment env, WriteAheadLog wal, DecodedWalEntry[] pendingRecoveryEntries, long nextLsn, long evictionBatchThresholdBytes) {
+    public string DirectoryPath { get; }
+
+    public DecodedWalEntry[] PendingWalTail { get; private set; }
+
+    private ColdStore(
+        MdbxEnvironment env,
+        WriteAheadLog wal,
+        string directoryPath,
+        string archiveDirectory,
+        DecodedWalEntry[] pendingRecoveryEntries,
+        long nextLsn,
+        long evictionBatchThresholdBytes
+    ) {
         this.env = env;
         this.TestOnlyWal = wal;
-        this.pendingRecoveryEntries = pendingRecoveryEntries;
+        DirectoryPath = directoryPath;
+        this.PendingWalTail = pendingRecoveryEntries;
         this.nextLsn = nextLsn;
-        checkpoint = new CheckpointEngine(env, wal);
+        checkpoint = new CheckpointEngine(env, wal, archiveDirectory);
         evictionBatch = new EvictionBatch(evictionBatchThresholdBytes);
     }
 
     static public Result<ColdStore> Open(
-        string path, nint sizeUpperBytes = -1, nint sizeNowBytes = -1, long evictionBatchThresholdBytes = EvictionBatch.DefaultSizeThresholdBytes) {
+        string path,
+        nint sizeUpperBytes = -1,
+        nint sizeNowBytes = -1,
+        long evictionBatchThresholdBytes = EvictionBatch.DefaultSizeThresholdBytes
+    ) {
         var isFreshDirectory = !Directory.Exists(path) || !Directory.EnumerateFileSystemEntries(path).Any();
 
         var rcCreate = MdbxEnvironment.Create(out var env);
@@ -63,20 +79,27 @@ public sealed class ColdStore : IDisposable {
         }
 
         var walPath = Path.Combine(path, WalFileName);
+        var archiveDirectory = Path.Combine(path, WalArchive.ArchiveDirectoryName);
         WriteAheadLog wal;
         var tailEntries = Array.Empty<DecodedWalEntry>();
 
         if (File.Exists(walPath)) {
             var openResult = WriteAheadLog.Open(walPath);
-            if (openResult.IsError()) { env.Dispose(); return Result<ColdStore>.Error(openResult.GetError()); }
+            if (openResult.IsError()) {
+                env.Dispose();
+                return Result<ColdStore>.Error(openResult.GetError());
+            }
             (wal, tailEntries) = openResult.Unwrap();
         } else {
             var createResult = WriteAheadLog.Create(walPath, Guid.NewGuid());
-            if (createResult.IsError()) { env.Dispose(); return Result<ColdStore>.Error(createResult.GetError()); }
+            if (createResult.IsError()) {
+                env.Dispose();
+                return Result<ColdStore>.Error(createResult.GetError());
+            }
             wal = createResult.Unwrap();
         }
 
-        var checkpointEngine = new CheckpointEngine(env, wal);
+        var checkpointEngine = new CheckpointEngine(env, wal, archiveDirectory);
         var checkpointedLsnResult = checkpointEngine.ReadCheckpointedLsn();
         if (checkpointedLsnResult.IsError()) {
             wal.Dispose();
@@ -89,15 +112,25 @@ public sealed class ColdStore : IDisposable {
         var maxTailLsn = operationEntries.Length > 0 ? operationEntries.Max(e => e.Lsn) : checkpointedLsn;
         var pendingRecovery = operationEntries.Where(e => e.Lsn > checkpointedLsn).ToArray();
 
-        return Result<ColdStore>.Ok(new ColdStore(env, wal, pendingRecovery, Math.Max(checkpointedLsn, maxTailLsn), evictionBatchThresholdBytes));
+        return Result<ColdStore>.Ok(
+            new ColdStore(
+                env,
+                wal,
+                path,
+                archiveDirectory,
+                pendingRecovery,
+                Math.Max(checkpointedLsn, maxTailLsn),
+                evictionBatchThresholdBytes
+            )
+        );
     }
 
     public Result CompleteRecovery() =>
         CompleteRecoveryAsync().GetAwaiter().GetResult();
-    
+
     public Task<Result> CompleteRecoveryAsync() {
-        var entries = pendingRecoveryEntries;
-        pendingRecoveryEntries = [];
+        var entries = PendingWalTail;
+        PendingWalTail = [];
         if (entries.Length == 0) return Task.FromResult(Result.Ok());
 
         var latest = new Dictionary<(uint TableId, byte[] Key), WalChange>(WalKeyComparer.Instance);
@@ -110,7 +143,7 @@ public sealed class ColdStore : IDisposable {
         var deletedKeys = latest.Values.Where(c => c.Kind == ChangeKind.Delete)
             .Select(c => (c.TableId, c.Key)).ToArray();
 
-        return checkpoint.RunCheckpoint(nextLsn, tableDbisById, residentRows, deletedKeys);
+        return checkpoint.RunCheckpoint(nextLsn, tableDbisById, residentRows, deletedKeys, entries);
     }
 
     internal void BeginScope() {
@@ -123,11 +156,15 @@ public sealed class ColdStore : IDisposable {
         evictionBatch.DrainStaged(into: drainedEvictions);
         if (drainedEvictions.Count == 0) return;
 
-        var appliedResult = EvictionBatchApplier.Apply(env, tableDbisById, drainedEvictions,
+        var appliedResult = EvictionBatchApplier.Apply(
+            env,
+            tableDbisById,
+            drainedEvictions,
             (tableId, key) => evictionDrops.TryGetValue(tableId, out var registration)
                 ? registration.TryGetCurrentRow(key)
                 : null,
-            appliedInto: appliedEvictions);
+            appliedInto: appliedEvictions
+        );
         if (appliedResult.IsError()) return;
 
         var applied = appliedResult.Unwrap();
@@ -152,7 +189,10 @@ public sealed class ColdStore : IDisposable {
 
     internal Task<DbError?> EndScope(bool commit, PropagationMode mode) {
         IsScopeActive = false;
-        if (!commit || currentOperationChanges.Count == 0) { currentOperationChanges.Clear(); return Task.FromResult<DbError?>(null); }
+        if (!commit || currentOperationChanges.Count == 0) {
+            currentOperationChanges.Clear();
+            return Task.FromResult<DbError?>(null);
+        }
 
         var lsn = ++nextLsn;
         var changes = currentOperationChanges.ToArray();

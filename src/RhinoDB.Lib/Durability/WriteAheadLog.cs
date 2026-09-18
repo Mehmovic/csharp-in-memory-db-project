@@ -17,9 +17,11 @@ public sealed class WriteAheadLog : IDisposable {
     private bool disposed;
 
     internal Action? TestOnlyBeforeFlush { get; set; }
+    public Guid DatabaseId { get; }
 
-    private WriteAheadLog(FileStream fileStream, long sizeThresholdBytes, TimeSpan periodicFlushInterval) {
+    private WriteAheadLog(FileStream fileStream, Guid databaseId, long sizeThresholdBytes, TimeSpan periodicFlushInterval) {
         this.fileStream = fileStream;
+        DatabaseId = databaseId;
         this.sizeThresholdBytes = sizeThresholdBytes;
         periodicFlushTimer = new Timer(_ => TriggerPeriodicFlushIfPending(), null, periodicFlushInterval, periodicFlushInterval);
     }
@@ -45,7 +47,7 @@ public sealed class WriteAheadLog : IDisposable {
             return Result<WriteAheadLog>.Error(DbError.WalDirectorySyncFailed());
         }
 
-        return Result<WriteAheadLog>.Ok(new WriteAheadLog(fileStream, sizeThresholdBytes, periodicFlushInterval));
+        return Result<WriteAheadLog>.Ok(new WriteAheadLog(fileStream, databaseId, sizeThresholdBytes, periodicFlushInterval));
     }
 
     static public Result<(WriteAheadLog Wal, DecodedWalEntry[] Entries)> Open(
@@ -61,7 +63,7 @@ public sealed class WriteAheadLog : IDisposable {
 
         var headerBytes = new byte[WalFileHeaderCodec.Size];
         var headerRead = fileStream.Read(headerBytes, 0, headerBytes.Length);
-        if (headerRead < headerBytes.Length || !WalFileHeaderCodec.TryDecode(headerBytes, out _)) {
+        if (headerRead < headerBytes.Length || !WalFileHeaderCodec.TryDecode(headerBytes, out var header)) {
             fileStream.Dispose();
             return Result<(WriteAheadLog, DecodedWalEntry[])>.Error(DbError.WalCorrupted());
         }
@@ -80,7 +82,7 @@ public sealed class WriteAheadLog : IDisposable {
         fileStream.Seek(0, SeekOrigin.End);
 
         return Result<(WriteAheadLog, DecodedWalEntry[])>.Ok(
-            (new WriteAheadLog(fileStream, sizeThresholdBytes, periodicFlushInterval), scan.Entries.ToArray()));
+            (new WriteAheadLog(fileStream, header.DatabaseId, sizeThresholdBytes, periodicFlushInterval), scan.Entries.ToArray()));
     }
 
     internal Task<DbError?> AppendConfirmed(long lsn, WalEntryKind kind, WalChange[] changes) {

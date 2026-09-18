@@ -3,7 +3,7 @@ using RhinoDB.Native;
 
 namespace RhinoDB.Lib.Durability;
 
-public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal) {
+public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, string archiveDirectory) {
     private const string MetadataDbiName = "__rhinodb_checkpoint__";
     private const uint CreateDbi = 0x40000;
     private const int MdbxResultTrue = -1;
@@ -28,7 +28,8 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal) {
         long boundaryLsn,
         IReadOnlyDictionary<uint, uint> tableDbis,
         IEnumerable<CheckpointRow> residentRows,
-        IEnumerable<(uint TableId, byte[] Key)> deletedSinceLastCheckpoint
+        IEnumerable<(uint TableId, byte[] Key)> deletedSinceLastCheckpoint,
+        DecodedWalEntry[] entries
     ) {
         var rcTxn = env.BeginTxn(0, out var txn);
         if (rcTxn != 0 || txn is null) return Result.Error(MdbxErrorMapper.Map(rcTxn));
@@ -62,8 +63,12 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal) {
         var syncRc = env.Sync(force: true, nonblock: false);
         if (syncRc != 0 && syncRc != MdbxResultTrue) return Result.Error(MdbxErrorMapper.Map(syncRc));
 
+        var archiveError = WalArchive.WriteSegment(archiveDirectory, wal.DatabaseId, entries);
+
         var truncateError = await wal.Truncate();
-        return truncateError is { } err ? Result.Error(err) : Result.Ok();
+        if (truncateError is { } err) return Result.Error(err);
+
+        return archiveError is { } archiveErr ? Result.Error(archiveErr) : Result.Ok();
 
         static Result UnknownTableIdResult(uint tableId)
             => Result.Error(DbError.SystemFailure(new Exception($"Unknown tableId {tableId} in the RunCheckpoint()")));

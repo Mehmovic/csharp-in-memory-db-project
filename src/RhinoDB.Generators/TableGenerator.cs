@@ -852,6 +852,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitDiscardMethod(sb);
         EmitPersistentApply(sb, table);
         EmitBulkLoadMethods(sb, table);
+        EmitReplayApply(sb, table);
         if (table.Evictable) EmitStorageAccessor(sb, table, opsName);
 
         sb.AppendLine("}");
@@ -912,6 +913,69 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitDeleteCompactionPass(sb, table);
         sb.AppendLine("        changes.Clear();");
         sb.AppendLine("        Dirty = false;");
+        sb.AppendLine("    }");
+    }
+
+    static private void EmitReplayApply(StringBuilder sb, TableModel table) {
+        var row = table.RowTypeFullName;
+        var key = table.PrimaryKeyTypeFullName;
+
+        sb.AppendLine();
+        sb.AppendLine("    internal void ReplayApply(ChangeKind kind, byte[] keyBytes, byte[]? rowBytes) {");
+        sb.AppendLine("        switch (kind) {");
+        sb.AppendLine("            case ChangeKind.Insert: {");
+        sb.AppendLine($"                var row = MemoryPackSerializer.Deserialize<{row}>(rowBytes)!;");
+        sb.AppendLine($"                var pk = row.{table.PrimaryKeyName};");
+        sb.AppendLine("                if (primaryIndex.GetOffset(pk).IsOk()) break;");
+        sb.AppendLine("                var offset = storage.Insert(row);");
+        sb.AppendLine("                primaryIndex.Insert(pk, offset);");
+        foreach (var idx in table.Indexes)
+            sb.AppendLine($"                {IndexFieldName(idx)}.Insert({KeyExpr("row", idx)}, offset);");
+        sb.AppendLine("                break;");
+        sb.AppendLine("            }");
+        sb.AppendLine("            case ChangeKind.Update: {");
+        sb.AppendLine($"                var key = MemoryPackSerializer.Deserialize<{key}>(keyBytes)!;");
+        sb.AppendLine($"                var row = MemoryPackSerializer.Deserialize<{row}>(rowBytes)!;");
+        sb.AppendLine("                var offsetResult = primaryIndex.GetOffset(key);");
+        sb.AppendLine("                if (offsetResult.IsError()) break;");
+        sb.AppendLine("                var offset = offsetResult.Unwrap();");
+        sb.AppendLine("                var oldRow = storage.Get(offset);");
+        sb.AppendLine("                storage.Set(offset, row);");
+        foreach (var idx in table.Indexes) {
+            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
+            sb.AppendLine($"                if (!{KeyExpr("oldRow", idx)}.Equals({KeyExpr("row", idx)})) {{");
+            sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
+            sb.AppendLine($"                    {IndexFieldName(idx)}.Insert({KeyExpr("row", idx)}, offset);");
+            sb.AppendLine("                }");
+        }
+        sb.AppendLine("                break;");
+        sb.AppendLine("            }");
+        sb.AppendLine("            default: {");
+        sb.AppendLine($"                var key = MemoryPackSerializer.Deserialize<{key}>(keyBytes)!;");
+        sb.AppendLine("                var offsetResult = primaryIndex.GetOffset(key);");
+        sb.AppendLine("                if (offsetResult.IsError()) break;");
+        sb.AppendLine("                var offset = offsetResult.Unwrap();");
+        sb.AppendLine("                var oldRow = storage.Get(offset);");
+        sb.AppendLine("                var lastOffset = storage.LastOffset;");
+        sb.AppendLine("                var swapped = storage.Delete(offset);");
+        sb.AppendLine("                primaryIndex.Delete(key);");
+        foreach (var idx in table.Indexes) {
+            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
+            sb.AppendLine($"                {IndexFieldName(idx)}.Delete({deleteArgs});");
+        }
+        sb.AppendLine("                if (swapped is { } swappedRow) {");
+        sb.AppendLine($"                    var swappedPk = swappedRow.{table.PrimaryKeyName};");
+        sb.AppendLine("                    primaryIndex.Delete(swappedPk);");
+        sb.AppendLine("                    primaryIndex.Insert(swappedPk, offset);");
+        foreach (var idx in table.Indexes) {
+            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("swappedRow", idx) : $"{KeyExpr("swappedRow", idx)}, lastOffset";
+            sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
+            sb.AppendLine($"                    {IndexFieldName(idx)}.Insert({KeyExpr("swappedRow", idx)}, offset);");
+        }
+        sb.AppendLine("                }");
+        sb.AppendLine("                break;");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
         sb.AppendLine("    }");
     }
 
@@ -1004,10 +1068,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("// <auto-generated>");
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
+        sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using RhinoDB.Core;");
         sb.AppendLine("using RhinoDB.Lib.Cold;");
+        sb.AppendLine("using RhinoDB.Lib.Durability;");
         sb.AppendLine("using RhinoDB.Lib.Execution;");
         sb.AppendLine("using RhinoDB.Lib.Indexing;");
         sb.AppendLine("using RhinoDB.Lib.Storage;");
@@ -1109,6 +1175,17 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    protected override {txName} CreateTransaction() => cachedTransaction;");
 
         if (persistentTables.Length > 0) sb.AppendLine($"    internal {txName} CreateLoaderTransaction() => CreateTransaction();");
+
+        if (persistentTables.Length > 0) {
+            sb.AppendLine();
+            sb.AppendLine("    internal void ReplayChange(WalChange change) {");
+            sb.AppendLine("        switch (change.TableId) {");
+            foreach (var table in persistentTables)
+                sb.AppendLine($"            case {ComputeTableId(table.Accessor)}u: {Camel(table.Accessor)}Ops.ReplayApply(change.Kind, change.Key, change.Row); break;");
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
+        }
+
         sb.AppendLine("}");
 
         if (persistentTables.Length > 0) EmitLoader(sb, database, persistentTables);
@@ -1128,6 +1205,20 @@ public sealed class TableGenerator : IIncrementalGenerator {
         foreach (var table in nonEvictable)
             sb.AppendLine($"        tasks.Add(Task.Run(() => tx.{table.Accessor}.BulkLoadFromCold()));");
         sb.AppendLine("        return Task.WhenAll(tasks);");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+
+        sb.AppendLine($"    public virtual Result LoadFromGenesis({database.SimpleName} db, ColdStore cold, long? upToLsn = null, Action<DecodedWalEntry>? onEntryApplied = null) {{");
+        sb.AppendLine("        var historyResult = WalArchive.ReadHistory(cold.DirectoryPath, cold.PendingWalTail);");
+        sb.AppendLine("        if (historyResult.IsError()) return historyResult.Void();");
+        sb.AppendLine();
+        sb.AppendLine("        foreach (var entry in historyResult.Unwrap()) {");
+        sb.AppendLine("            if (upToLsn is { } stop && entry.Lsn > stop) break;");
+        sb.AppendLine("            foreach (var change in entry.Changes) db.ReplayChange(change);");
+        sb.AppendLine("            onEntryApplied?.Invoke(entry);");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        sb.AppendLine("        return Result.Ok();");
         sb.AppendLine("    }");
         sb.AppendLine("}");
     }
