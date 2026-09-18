@@ -3,7 +3,7 @@
 Status: design agreed 2026-09-14. To build when the first breaking schema change
 is actually needed - nothing in `src/` implements any of this yet. Recorded now
 because it constrains one decision that is cheap today and expensive later
-(section 11).
+(section 12).
 
 ## 1. Why this is needed at all: nothing on disk is self-describing
 
@@ -77,7 +77,7 @@ open:
                                      G_binary                       [atomic]
                                   d. continue normal startup.
   4. G_db above G_binary        - REFUSE (downgrades unsupported - decided).
-  5. no migration step exists   - REFUSE (the generator diagnostic of section 6,
+  5. no migration step exists   - REFUSE (the generator diagnostic of section 7,
                                   mirrored at runtime).
 ```
 
@@ -100,9 +100,50 @@ mechanisms - the migration artifact is *a reader for generation G, a transform,
 and the current writer*, consumed by both. Note also that a clean shutdown does
 **not** empty the WAL today (`ColdStore.Dispose` does not truncate; only a
 checkpoint does), so the pending-tail case is the *normal* upgrade path, not the
-exception.
+exception. Section 5 adds a third consumer of this same artifact.
 
-## 5. Schema-change taxonomy and migration consequence
+## 5. Genesis replay across generations (added 2026-09-18)
+
+Archived WAL segments (`WalArchive`, `Docs/02-architecture.md`'s "Restart &
+recovery" section) are older history than anything the open-time protocol
+above ever has to reconcile - they can span many past generations over a
+long-running database's life, not just G-1. The same principle from section 4
+extends to them directly: reading an archived segment's bytes needs **the
+generation-G reader**, the same artifact the migration step and the live-tail
+drain already require. Genesis replay is a third consumer of it, not a new
+mechanism.
+
+**Decided: don't rewrite archived segments forward at migration time - tag
+and decode lazily instead.** The obvious alternative (rewriting every
+retained archive segment to the new generation whenever a migration runs) is
+strictly worse here: cost compounds at every migration (a generation-1
+segment gets rewritten at the generation-2 migration, then again at
+generation-3, and so on), paid on the migration's hot path where a
+full-database rewrite (section 9) is already the expensive part. Tagging
+each segment with the generation it was written under and decoding it on
+demand instead pushes that cost to replay time - rare, debug-only, exactly
+where paying it is acceptable.
+
+- Each archive segment reuses `WalFileHeaderCodec`'s header today; the
+  generation field section 12 requires still applies here once added - every
+  segment gets stamped at write time (`WalArchive.WriteSegment`), immutably,
+  forever. Segments are never rewritten after that.
+- `LoadFromGenesis` becomes generation-aware: walking segments oldest to
+  newest, it reaches for that segment's own generation's reader + transform
+  whenever it's older than `G_binary`, decodes into current-shape rows, and
+  only then hands them to the same `ReplayApply` every other generation uses.
+- **This deliberately does not go through the open-time protocol's "`G_wal
+  != G_db` - REFUSE" rule (section 3).** That refusal exists to stop the
+  *live* recovery path from ever silently misinterpreting bytes it's about
+  to fold into libmdbx - it is not a statement that older-generation bytes
+  are unreadable in general. Genesis replay is the one path in the system
+  explicitly designed to read multiple past generations on purpose; it is
+  exempt by design, not by oversight.
+- **This is not free forever.** Every past generation's reader/transform pair
+  has to stay in the binary indefinitely for genesis replay to still reach
+  that far back. See section 11's open item on a retention line.
+
+## 6. Schema-change taxonomy and migration consequence
 
 | Change | Consequence |
 |---|---|
@@ -117,7 +158,7 @@ exception.
 auto-increment counters are recomputed from the rows (counters as max+1), which
 also means a migration never has to understand their old encodings.
 
-## 6. The generator's role (future work)
+## 7. The generator's role (future work)
 
 Emit the descriptor; diff `N-1` against `N` at build time; emit `G_binary`; and
 report a new diagnostic (an `RHINO012`-class rule, alongside `RHINO011` and its
@@ -125,7 +166,7 @@ tableId-collision check) when an incompatible descriptor diff has no registered
 migration step. That is what turns "someone forgot to write the migration" from
 a production data-loss incident into a build error.
 
-## 7. Atomicity and the crash matrix
+## 8. Atomicity and the crash matrix
 
 - crash during the drain - WAL intact, retry.
 - crash during the backup - backup incomplete, retry.
@@ -136,7 +177,7 @@ a production data-loss incident into a build error.
 No partially-migrated state is reachable, which is exactly why the migration is
 one transaction rather than a resumable script.
 
-## 8. Scale note (deliberately deferred)
+## 9. Scale note (deliberately deferred)
 
 A full-database rewrite in one transaction is O(dataset) at every breaking
 upgrade - fine at league scale, potentially minutes at 50M-row scale. Because
@@ -146,7 +187,7 @@ mandatory and leaves the database legitimately mixed-generation for a while - a
 different, more complex design. Not built until a measured startup time demands
 it. Same evidence gate as UDP, ART and the algebraic client codec.
 
-## 9. How migrations must be tested
+## 10. How migrations must be tested
 
 Frozen fixtures from the **previous released build** - bytes produced by the old
 code, checked in (or produced by a retained old codec inside the test project).
@@ -155,7 +196,7 @@ codec makes the test circular and it passes even when the migration is wrong.
 Assertions: values preserved, indexes and counters rebuilt, generation bumped,
 re-running is a no-op, unknown-or-newer generation refuses.
 
-## 10. Open items (proposed defaults, to confirm when built)
+## 11. Open items (proposed defaults, to confirm when built)
 
 - **Additive changes do not bump the generation.** Adding a table (a new sub-db,
   no existing layout touched) is safe without a migration; anything that changes
@@ -163,16 +204,24 @@ re-running is a no-op, unknown-or-newer generation refuses.
 - **Orphan sub-dbs** on table removal: kept for one generation, then dropped.
   - proposed.
 - **Downgrades**: explicitly unsupported; refuse to open. - decided.
+- **Reader retention for genesis replay** (section 5): no default yet - either
+  keep every past generation's reader/transform indefinitely (genesis always
+  reaches all the way back), or state a retention line (e.g. "genesis reaches
+  back N generations") and prune archive segments older than that together
+  with dropping the reader that decodes them. - open, to decide once the
+  first breaking migration and a long-lived archive history actually coexist.
 
-## 11. Pre-release gate (the one time-sensitive item)
+## 12. Pre-release gate (the one time-sensitive item)
 
 If the WAL header ever needs a schema-generation field, add it **while
 `formatVersion` can still be bumped** (currently `1`). After the first release,
 `formatVersion 1` exists in the wild and "field absent means generation 1"
 becomes a permanent legacy special case. Recorded here as "decide before the
-first release", not as a today-task.
+first release", not as a today-task. Archived WAL segments (`WalArchive`,
+added 2026-09-18) reuse this exact header format, so this same field covers
+both the live WAL and every archived segment - one decision, not two.
 
-## 12. Relationship to the WAL design and today's code
+## 13. Relationship to the WAL design and today's code
 
 - `05-wal-design.md` owns durability, the drain barrier and the checkpoint
   protocol this doc depends on: `RunCheckpoint` is where the drain and the WAL
@@ -185,5 +234,10 @@ first release", not as a today-task.
   (`SchemaGenerationMismatch`) rather than overloading one message.
 - The same refusal must guard all three truncate/drain sites: the `RunCheckpoint`
   truncate, the migration drain, and - once the generation exists - every open.
+- `WalArchive` (added 2026-09-18) reads WAL-shaped bytes too, but is a
+  deliberate exception to that refusal, not a fourth site it needs to guard:
+  genesis replay is designed to read every past generation it can, via the
+  generation-G reader (section 5), rather than refuse on a generation
+  mismatch.
 - Client-side consequences are nil: see section 3's restart-equivalence note and
   [Networking](04-networking.md)'s Stage 8 boundary.
