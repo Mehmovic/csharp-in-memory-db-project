@@ -91,6 +91,21 @@ static internal class GeneratorTestHost {
         return asTask.Invoke(raw, null)!;
     }
 
+    // QueryResultSet<TRow,TMutator>/QuerySingle<TRow,TMutator> are ref structs (inherited from
+    // OffsetList), so their instances can never cross a `dynamic` call boundary - the DLR needs to
+    // box the result to `object` to complete the call site, and a ref struct cannot be boxed at all
+    // (confirmed empirically: InvalidProgramException at DynamicMethod.CreateDelegate). Same
+    // restriction applies to plain reflection: MethodInfo.Invoke refuses any method whose parameter
+    // or return type is ByRefLike. So any code touching Find/Iter/Except/Range's result must be real,
+    // statically-compiled C# living inside the dynamically-compiled Source string itself (its
+    // signature must avoid ref structs, even though its body is free to use them) - this helper
+    // reflectively invokes such a method by name, staying entirely within reflection-safe types.
+    static public object? InvokeHelper(Assembly asm, string typeName, string methodName, params object?[] args) {
+        var type = asm.GetType(typeName) ?? throw new InvalidOperationException($"Type '{typeName}' not found.");
+        var method = type.GetMethod(methodName) ?? throw new InvalidOperationException($"Method '{methodName}' not found on '{typeName}'.");
+        return method.Invoke(null, args);
+    }
+
     static private ImmutableArray<MetadataReference> BuildReferences() {
         var trustedPlatformAssemblies = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator);
         var references = trustedPlatformAssemblies.Select(path => (MetadataReference)MetadataReference.CreateFromFile(path)).ToList();

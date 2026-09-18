@@ -116,9 +116,23 @@ codebase entirely.** `Instant`-kind tables, secondary indexes (all 4
 `IndexKind` × `Uniqueness` combinations) on both `Instant`- and
 `Persistent`-kind tables, real pre-apply cross-table validation,
 `Persistent`-kind tables with `.Storage` (Load/Evict/Peek, both secondary-
-index-aware), and the secondary-index read-your-own-writes overlay (also
-Persistent-kind-aware). This section describes the target shape; where
-something is still a stub, it says so explicitly.
+index-aware). This section describes the target shape; where something is
+still a stub, it says so explicitly.
+
+**Superseded 2026-09-18: the read-your-own-writes overlay (Milestone 4, and
+the equivalent scan inside the primary-key accessor) was removed entirely.**
+`Get`/`Find`/every `Idx.{Index}.Find`/`Iter`/`Except`/`Range` now read
+committed storage/indexes only — nothing scans uncommitted `changes` — "it
+will be the user's duty to handle it," to avoid paying that scan on every
+read. A staged `Insert`/`Update`/`Delete` is invisible to reads until
+`Apply()` actually runs, from a later operation. Every mention of the overlay
+below (the Milestone 4 status line, "Reads stay direct, and see the same
+operation's own not-yet-applied writes," the "Real as of Milestone 4"
+paragraph) describes the design as it stood before this date — kept as
+history of how Milestone 4 worked, not current behavior. Secondary-index
+accessors also changed shape entirely in the same change: no more flat
+`Ops.{AccessorName}(...)` methods — see the `[Index]`'s `Accessor`/`Order`
+paragraph below, which has its own inline correction.
 
 **`Persistent`-kind tables own their physical storage directly now, just
 like `Instant`-kind ones.** This used to be the one real asymmetry between
@@ -129,8 +143,12 @@ because those cold-storage primitives were `internal` to `RhinoDB.Lib` and
 generated code, living in the consuming assembly, couldn't reach them.
 That's no longer true: `ColdStore` now exposes a narrow public surface
 purpose-built for generated code to drive directly —
-`OpenTable<TKey,TRow>(name)`, `Put`/`Get`/`Delete`/`Peek<TKey,TRow>
-(ColdTable<TKey,TRow>, ...)`, and a public `IsScopeActive` getter — and
+`OpenTable<TKey,TRow>(name)`, `Stage`/`Peek<TKey,TRow>(ColdTable<TKey,TRow>,
+...)`, the explicit startup-recovery entry point `CompleteRecovery()`, and a
+public `IsScopeActive` getter (superseded 2026-09-14: `Put`/`Get`/`Delete`
+retired along with the synchronous libmdbx write path when the WAL replaced
+it — writes now go through `Stage` + the WAL's group-commit machinery, not a
+direct mdbx call; see `Docs/05-wal-design.md`) — and
 `ColdTable<TKey,TRow>` itself is a public opaque handle type. Notably,
 `RhinoDB.Native.Transaction` and `ColdStore`'s own txn-lifecycle machinery
 (`EnsureWriteTxn`/`BeginScope`/`EndScope`) stay entirely `internal` —
@@ -142,8 +160,12 @@ index accessors are now **identical in shape** to an `Instant`-kind one
 (same `storage`/`primaryIndex` fields, same memory-only read logic — see
 decision 1 below) — `isPersistent` only changes two things: two extra fields
 (`coldTable`, `cold`) and their constructor wiring, and `Apply()`'s
-Insert/Update/Delete cases doing one extra `cold.Put`/`cold.Delete` call
-after the same in-memory mutation `Instant` kind does. A cold-write failure
+Insert/Update/Delete cases doing one extra `cold.Stage(...)` call (superseded
+2026-09-14: was a direct synchronous `cold.Put`/`cold.Delete` before the WAL
+replaced libmdbx as the write-durability mechanism — `Stage` only appends to
+an in-memory per-operation list, the actual write happens later through the
+WAL's group-commit; see `Docs/05-wal-design.md`) after the same in-memory
+mutation `Instant` kind does. A cold-write failure
 does **not** roll back the already-applied in-memory mutation — a
 pre-existing, documented limitation carried over unchanged from
 `PersistentTable`, not introduced by this retirement. The generated `{Db}`
@@ -233,15 +255,20 @@ whole operation has already returned success, at which point `Transaction
 same ambient write-txn machinery cold storage already uses (see Cold storage
 below — unchanged by any of this).
 
-**Reads stay direct, and see the same operation's own not-yet-applied
-writes.** An `Ops.Get` scans its own staged changes most-recent-first before
-falling through to real storage (`primaryIndex`/`storage`, direct fields
-either way now) — a `Delete` entry
-means "not found," an `Insert`/`Update` entry returns that staged row
-directly. This is why a staged `Change`'s key has to be final the moment it's
-staged, not resolved later at apply time (see `AutoIncrement` below) — the
-overlay has no way to tell two zero-keyed inserts apart within one operation
-otherwise.
+**Reads stay direct, and — as of 2026-09-18 — never see the same operation's
+own not-yet-applied writes.** An `Ops.Get`/`Find`/`Idx.{Index}.Find` goes
+straight to real storage (`primaryIndex`/`storage`, direct fields either way
+now) — no scan of staged `changes` at all. A row staged this operation (via
+`Insert`/`Update`/`Delete`) is invisible to reads until `Apply()` actually
+runs, from a later operation; the caller is responsible for tracking its own
+staged-but-unapplied state if it needs to. (Before this date, `Ops.Get`
+scanned its own staged changes most-recent-first as a read-your-own-writes
+overlay — removed to avoid paying that scan on every read; see the
+Transactions section's superseded-overlay note above.) A staged `Change`'s
+key still has to be final the moment it's staged, not resolved later at apply
+time (see `AutoIncrement` below) — `Apply()`'s in-order replay is what
+resolves two zero-keyed inserts in one operation to distinct values, not an
+overlay.
 
 **Two-phase apply gives free atomicity, no rollback machinery.** `Transaction
 .Apply()` checks every dirty table's `Validate()` first — nothing mutates
@@ -286,6 +313,26 @@ itself is about to overwrite or remove. No new allocation: the scan is
 `Span`-based over the existing `changes` list, same as the rest of this
 section.
 
+**Superseded 2026-09-18: this whole overlay-aware secondary-index read
+mechanism was removed** (kept above as history of what Milestone 4 built, not
+current behavior — see the Transactions section's status note). Secondary
+indexes also changed access shape entirely in the same change: no more flat
+`Ops.{AccessorName}(...)` methods returning `Result<TRow>`/`List<TRow>` —
+every table's `Ops` now exposes one `Idx` property (`{Db}{Table}IndexCollection`)
+with one property per index (`Idx.{AccessorName}`, a generated
+`{Db}{Table}{AccessorName}IndexOps`), each with `Find`/`Iter`/`Except` (and,
+for `BTree`-kind indexes, `Range`/`Gt`/`Gte`/`Lt`/`Lte`) returning pooled,
+ref-struct `QueryResultSet<TRow,TMutator>` (NonUnique) or
+`QuerySingle<TRow,TMutator>` (Unique) from `RhinoDB.Lib.Tables` — `.Get()` to
+materialize, `.Count` directly on the Set without materializing, `.Update`/
+`.Delete` to mutate the matched row(s) without a separate `Find`-then-stage
+round trip. `TMutator` is a small per-table generated struct implementing
+`IRowMutator<TRow>` (`Update`/`Delete`/`WithSamePrimaryKey`), used as a
+`where TMutator : struct, IRowMutator<TRow>` generic constraint rather than a
+delegate field — the JIT devirtualizes the calls per closed generic
+instantiation, so wiring a query result to a table's mutation methods costs
+no heap allocation.
+
 **`Table<TKey,TRow>` — the generic, interface/delegate-driven engine both
 hand-written code and codegen used to share — is gone from the codebase
 entirely, not just unused by codegen.** It, `ISecondaryIndex<TRow>`,
@@ -325,10 +372,12 @@ only `GetOffset`/`Insert`/`Delete` — its `Range` was a never-called
 `NotSupportedException`.
 
 **`[Index]`'s `Accessor` and `Order` parameters, and composite indexes.**
-The generated accessor method is named for the field itself by default
-(`[Index(IndexKind.Hash, Uniqueness.Unique)] string ShortCode` → a method
-literally named `ShortCode(string value)` on the `Ops` class — no `By`
-prefix). Setting `Accessor` explicitly overrides that name — and setting the
+The generated `Idx` property is named for the field itself by default
+(`[Index(IndexKind.Hash, Uniqueness.Unique)] string ShortCode` → accessed as
+`Idx.ShortCode.Find(string value)` — no `By` prefix; superseded 2026-09-18,
+was a flat `ShortCode(string value)` method directly on the `Ops` class
+before the `Idx`-based redesign above). Setting `Accessor` explicitly
+overrides that name — and setting the
 *same* `Accessor` value on 2-3 fields builds one **composite** index over
 all of them, keyed by a named `ValueTuple` (the same composite-key mechanism
 `CompositeKeyTests.cs` already proved for hand-written indexes). Field order

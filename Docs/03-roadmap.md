@@ -140,16 +140,15 @@ batched schema migration — versioning tracked as generated code, not runtime t
 Real: native libmdbx binding, `ColdStore`/`ColdTable`, the async-durability-sync
 design, the table generator's `TableKind.Persistent` support (`.Storage.Load/
 Evict/Peek` wired through, cross-kind atomicity with `Instant` tables in one
-`Transaction.Apply()`, Milestone 3), the secondary-index read-your-own-writes
-overlay on `Instant`-kind tables (Milestone 4, `By{Field}`-style accessors see
-this operation's own staged-but-unapplied writes, gated on `Dirty` so the
-no-staged-writes case costs nothing extra), secondary indexes on `Persistent`-
+`Transaction.Apply()`, Milestone 3), secondary indexes on `Persistent`-
 kind tables too (2026-09-12, the old `RHINO006` restriction lifted), and — also
 2026-09-12 — `PersistentTable<TKey,TRow>` retired from the codebase entirely,
 on your explicit direction ("now let us go toward removing the Persistent
 table and put the logic into the generator totally"): `ColdStore` gained a
-narrow public surface (`OpenTable`/`Put`/`Get`/`Delete`/`Peek`/`IsScopeActive`)
-generated code drives directly, so a `Persistent`-kind `Ops` class's fields/
+narrow public surface (`OpenTable`/`Stage`/`Peek`/`CompleteRecovery`/
+`IsScopeActive`, superseded 2026-09-14 when the WAL replaced libmdbx's
+synchronous write path — see `Docs/05-wal-design.md`) generated code drives
+directly, so a `Persistent`-kind `Ops` class's fields/
 constructor/reads are now identical in shape to an `Instant`-kind one (same
 `storage`/`primaryIndex` fields) — `isPersistent` only adds a `coldTable`/`cold`
 pair and one extra cold write-through call per `Apply()` case. Same "hand-prove

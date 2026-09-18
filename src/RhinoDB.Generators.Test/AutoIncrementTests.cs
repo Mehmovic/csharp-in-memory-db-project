@@ -35,17 +35,19 @@ public class AutoIncrementTests {
         var (db, txType, asm) = NewDb();
         var gadget = NewGadget(asm, 0, "Widget A");
 
+        var insertResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Gadget.Insert((dynamic)gadget); return Result.Ok(); },
+            PropagationMode.Optimistic);
+
         var assignedId = -1;
-        var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Gadget.Insert((dynamic)gadget);
-                var found = dtx.Gadget.Find(1);
-                assignedId = found.IsOk() ? 1 : -1;
+                assignedId = dtx.Gadget.Find(1).IsOk() ? 1 : -1;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
-        Assert.That(result.IsOk(), Is.True);
+        Assert.That(insertResult.IsOk(), Is.True);
         Assert.That(assignedId, Is.EqualTo(1));
     }
 
@@ -55,12 +57,18 @@ public class AutoIncrementTests {
         var first = NewGadget(asm, 0, "First");
         var second = NewGadget(asm, 0, "Second");
 
-        var foundBoth = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Gadget.Insert((dynamic)first);
                 dtx.Gadget.Insert((dynamic)second);
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        var foundBoth = false;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
                 foundBoth = dtx.Gadget.Find(1).IsOk() && dtx.Gadget.Find(2).IsOk();
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -73,14 +81,14 @@ public class AutoIncrementTests {
         var (db, txType, asm) = NewDb();
         var gadget = NewGadget(asm, 42, "Explicit");
 
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Gadget.Insert((dynamic)gadget); return Result.Ok(); },
+            PropagationMode.Optimistic);
+
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                dtx.Gadget.Insert((dynamic)gadget);
-                found = dtx.Gadget.Find(42).IsOk();
-                return Result.Ok();
-            }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { found = ((dynamic)tx).Gadget.Find(42).IsOk(); return Result.Ok(); },
+            PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
     }
@@ -136,12 +144,18 @@ public class AutoIncrementTests {
         var rowA = Activator.CreateInstance(widgetType, 0, 999L, "A")!;
         var rowB = Activator.CreateInstance(widgetType, 0, 0L, "B")!;
 
-        long sequenceOfB = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Widget.Insert((dynamic)rowA);
                 dtx.Widget.Insert((dynamic)rowB);
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        long sequenceOfB = -1;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
                 var found = dtx.Widget.Find(2);
                 sequenceOfB = found.IsOk() ? (long)found.Unwrap().Sequence : -1;
                 return Result.Ok();
@@ -163,6 +177,13 @@ public class AutoIncrementTests {
 
             [Table(TableKind.Instant, typeof(TicketDb))]
             public readonly partial record struct Ticket([PrimaryKey] int Id, [Index(IndexKind.Hash, Uniqueness.Unique)][AutoIncrement] int Code, string Name);
+
+            // QuerySingle is a ref struct and can never cross a dynamic call boundary (see
+            // GeneratorTestHost.InvokeHelper) - this helper does the Idx.Code.Find(...) touching
+            // as real static-typed C#, exposing only a reflection-safe (non-ref-struct) signature.
+            public static class TestHelpers {
+                public static bool CodeIsOk(TicketDbTicketOps ticket, int code) => ticket.Idx.Code.Find(code).Get().IsOk();
+            }
             """;
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var dbType = asm.GetType("TestNs.TicketDb")!;
@@ -181,16 +202,15 @@ public class AutoIncrementTests {
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
-        // Code() is a secondary-index accessor - not overlay-aware (that's
-        // Milestone 4), so it only sees rows after Apply() has physically
-        // run, i.e. from a later operation, not the one that staged the insert.
+        // Idx.Code.Find is index-backed only, never overlay-aware, so it only
+        // sees rows after Apply() has physically run, i.e. from a later
+        // operation, not the one that staged the insert.
         var foundBothByCode = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                var byCode1 = dtx.Ticket.Code(1);
-                var byCode2 = dtx.Ticket.Code(2);
-                foundBothByCode = byCode1.IsOk() && byCode2.IsOk();
+                var byCode1 = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CodeIsOk", ((dynamic)tx).Ticket, 1)!;
+                var byCode2 = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CodeIsOk", ((dynamic)tx).Ticket, 2)!;
+                foundBothByCode = byCode1 && byCode2;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -219,15 +239,14 @@ public class AutoIncrementTests {
 
         var negative = Activator.CreateInstance(itemType, -5, "Negative")!;
 
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Item.Insert((dynamic)negative); return Result.Ok(); },
+            PropagationMode.Optimistic);
+
         var assignedPositive = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                dtx.Item.Insert((dynamic)negative);
-                var found = dtx.Item.Find(1);
-                assignedPositive = found.IsOk();
-                return Result.Ok();
-            }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { assignedPositive = ((dynamic)tx).Item.Find(1).IsOk(); return Result.Ok(); },
+            PropagationMode.Optimistic);
 
         Assert.That(assignedPositive, Is.True);
     }

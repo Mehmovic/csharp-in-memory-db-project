@@ -31,6 +31,16 @@ public class MultipleIndexesPerFieldTests {
             [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByShirtLoose")]
             int ShirtNumber,
             string Name);
+
+        // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
+        // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching
+        // as real static-typed C#, exposing only reflection-safe (non-ref-struct) signatures.
+        public static class TestHelpers {
+            public static int ByClubCount(LeagueDbPlayerOps player, int clubId) { using var r = player.Idx.ByClub.Find(clubId); return r.Count; }
+            public static int ByClubOrderedCount(LeagueDbPlayerOps player, int clubId) { using var r = player.Idx.ByClubOrdered.Find(clubId); return r.Count; }
+            public static bool ByShirtIsOk(LeagueDbPlayerOps player, int shirtNumber) => player.Idx.ByShirt.Find(shirtNumber).Get().IsOk();
+            public static int ByShirtLooseCount(LeagueDbPlayerOps player, int shirtNumber) { using var r = player.Idx.ByShirtLoose.Find(shirtNumber); return r.Count; }
+        }
         """;
 
     static private (object Db, Type TxType, Assembly Assembly) NewDb() {
@@ -65,10 +75,10 @@ public class MultipleIndexesPerFieldTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                byClub = dtx.Player.ByClub(1).Count;
-                byClubOrdered = dtx.Player.ByClubOrdered(1).Count;
-                byShirtResolves = dtx.Player.ByShirt(7).IsOk();
-                byShirtLoose = dtx.Player.ByShirtLoose(7).Count;
+                byClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Player, 1)!;
+                byClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Player, 1)!;
+                byShirtResolves = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtIsOk", (object)dtx.Player, 7)!;
+                byShirtLoose = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtLooseCount", (object)dtx.Player, 7)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -96,10 +106,10 @@ public class MultipleIndexesPerFieldTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                oldClub = dtx.Player.ByClub(1).Count;
-                oldClubOrdered = dtx.Player.ByClubOrdered(1).Count;
-                newClub = dtx.Player.ByClub(2).Count;
-                newClubOrdered = dtx.Player.ByClubOrdered(2).Count;
+                oldClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Player, 1)!;
+                oldClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Player, 1)!;
+                newClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Player, 2)!;
+                newClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Player, 2)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -131,10 +141,10 @@ public class MultipleIndexesPerFieldTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                byClub = dtx.Player.ByClub(1).Count;
-                byClubOrdered = dtx.Player.ByClubOrdered(1).Count;
-                byShirtResolves = dtx.Player.ByShirt(7).IsOk();
-                byShirtLoose = dtx.Player.ByShirtLoose(7).Count;
+                byClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Player, 1)!;
+                byClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Player, 1)!;
+                byShirtResolves = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtIsOk", (object)dtx.Player, 7)!;
+                byShirtLoose = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtLooseCount", (object)dtx.Player, 7)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

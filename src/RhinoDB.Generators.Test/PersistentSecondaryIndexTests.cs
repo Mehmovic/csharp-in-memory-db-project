@@ -31,6 +31,18 @@ public class PersistentSecondaryIndexTests {
             [Index(IndexKind.Hash, Uniqueness.Unique)] int AccountNumber,
             [Index(IndexKind.Hash, Uniqueness.NonUnique)] int OwnerId,
             decimal Balance);
+
+        // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
+        // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching
+        // as real static-typed C#, exposing only reflection-safe (non-ref-struct) signatures.
+        public static class TestHelpers {
+            public static bool AccountNumberIsOk(BankDbAccountOps account, int accountNumber) =>
+                account.Idx.AccountNumber.Find(accountNumber).Get().IsOk();
+            public static int OwnerIdCount(BankDbAccountOps account, int ownerId) {
+                using var r = account.Idx.OwnerId.Find(ownerId);
+                return r.Count;
+            }
+        }
         """;
 
     [SetUp]
@@ -68,8 +80,10 @@ public class PersistentSecondaryIndexTests {
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Account.AccountNumber(1001).IsOk(); return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountNumberIsOk", ((dynamic)tx).Account, 1001)!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
     }
@@ -106,8 +120,10 @@ public class PersistentSecondaryIndexTests {
 
         var count = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { count = ((dynamic)tx).Account.OwnerId(10).Count; return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                count = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "OwnerIdCount", ((dynamic)tx).Account, 10)!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(count, Is.EqualTo(2));
     }
@@ -127,9 +143,8 @@ public class PersistentSecondaryIndexTests {
         bool oldFound = true, newFound = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                oldFound = dtx.Account.AccountNumber(1001).IsOk();
-                newFound = dtx.Account.AccountNumber(2002).IsOk();
+                oldFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountNumberIsOk", ((dynamic)tx).Account, 1001)!;
+                newFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountNumberIsOk", ((dynamic)tx).Account, 2002)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -159,8 +174,10 @@ public class PersistentSecondaryIndexTests {
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Account.AccountNumber(2002).IsOk(); return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountNumberIsOk", ((dynamic)tx).Account, 2002)!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(found, Is.True, "The swap-relocated row's unique-index entry must still resolve at its new offset.");
     }
@@ -195,8 +212,10 @@ public class PersistentSecondaryIndexTests {
 
         var foundAfterEvict = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { foundAfterEvict = ((dynamic)tx).Account.AccountNumber(1001).IsOk(); return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                foundAfterEvict = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountNumberIsOk", ((dynamic)tx).Account, 1001)!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
         Assert.That(foundAfterEvict, Is.False, "Evicting the row must also remove its now-stale secondary-index entry.");
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
@@ -205,8 +224,10 @@ public class PersistentSecondaryIndexTests {
 
         var foundAfterLoad = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { foundAfterLoad = ((dynamic)tx).Account.AccountNumber(1001).IsOk(); return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                foundAfterLoad = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountNumberIsOk", ((dynamic)tx).Account, 1001)!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
         Assert.That(foundAfterLoad, Is.True, "Loading the row back must re-register its secondary-index entry exactly once.");
     }
 
@@ -260,8 +281,10 @@ public class PersistentSecondaryIndexTests {
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.AccountNumber(1001).IsOk(); return Result.Ok(); },
-            PropagationMode.Optimistic);
+            reopenedDb, txType, (ctx, tx) => {
+                found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountNumberIsOk", ((dynamic)tx).Account, 1001)!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
     }

@@ -46,8 +46,8 @@ a `List<Change<TKey,TRow>>` indexer returns a struct element by value, so
 `changes[i]` repeated per field examined (or a plain `foreach`) silently copies
 the whole row on every access. The generated table code binds `ref readonly var
 c = ref span[i]` via `CollectionsMarshal.AsSpan(changes)` instead — one binding,
-zero copies, whether it's the read-your-own-writes overlay scan or the apply-time
-replay. See Architecture — Transactions for the one real compiler gotcha this
+zero copies, for `Apply()`'s in-order replay of every staged change. See
+Architecture — Transactions for the one real compiler gotcha this
 surfaced (a `foreach (ref readonly ...)` form that doesn't compile in this
 project's pinned Roslyn version, where the equivalent indexed `for` loop does).
 

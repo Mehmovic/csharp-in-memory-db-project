@@ -503,18 +503,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         foreach (var idx in table.Indexes) sb.AppendLine($"        this.{IndexFieldName(idx)} = {IndexFieldName(idx)};");
     }
 
-    static private void EmitGetMethod(StringBuilder sb, TableModel table) {
+    static private void EmitFindMethod(StringBuilder sb, TableModel table) {
         var row = table.RowTypeFullName;
         var key = table.PrimaryKeyTypeFullName;
         sb.AppendLine($"    public Result<{row}> {table.PrimaryKeyAccessor}({key} id) {{");
-        sb.AppendLine("        var span = CollectionsMarshal.AsSpan(changes);");
-        sb.AppendLine("        for (var i = span.Length - 1; i >= 0; i--) {");
-        sb.AppendLine("            ref readonly var c = ref span[i];");
-        sb.AppendLine("            if (!c.Key.Equals(id)) continue;");
-        sb.AppendLine($"            return c.Kind == ChangeKind.Delete");
-        sb.AppendLine($"                ? Result<{row}>.Error(DbError.IndexKeyNotFound())");
-        sb.AppendLine($"                : Result<{row}>.Ok(c.Row);");
-        sb.AppendLine("        }");
         sb.AppendLine("        var offsetResult = primaryIndex.GetOffset(id);");
         sb.AppendLine("        if (offsetResult.IsError()) return offsetResult.Void();");
         sb.AppendLine("        return storage.Get(offsetResult.Unwrap());");
@@ -529,71 +521,90 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine();
     }
 
-    static private void EmitSecondaryIndexAccessors(StringBuilder sb, TableModel table) {
+    static private string RowMutatorName(TableModel table, string ownerSimpleName) => $"{ownerSimpleName}{table.Accessor}RowMutator";
+    static private string IndexCollectionName(TableModel table, string ownerSimpleName) => $"{ownerSimpleName}{table.Accessor}IndexCollection";
+    static private string IndexAccessorClassName(TableModel table, IndexModel idx, string ownerSimpleName) =>
+        $"{ownerSimpleName}{table.Accessor}{idx.AccessorName}IndexOps";
+
+    static private void EmitIndexWiringFields(StringBuilder sb, TableModel table, string ownerSimpleName) {
+        if (table.Indexes.Length == 0) return;
+        sb.AppendLine($"    private readonly {RowMutatorName(table, ownerSimpleName)} rowMutator;");
+        sb.AppendLine($"    public {IndexCollectionName(table, ownerSimpleName)} Idx {{ get; }}");
+    }
+
+    static private void EmitIndexWiringConstruction(StringBuilder sb, TableModel table, string ownerSimpleName) {
+        if (table.Indexes.Length == 0) return;
+        sb.AppendLine($"        rowMutator = new {RowMutatorName(table, ownerSimpleName)}(this);");
+        sb.Append($"        Idx = new {IndexCollectionName(table, ownerSimpleName)}(storage, rowMutator");
+        foreach (var idx in table.Indexes) sb.Append($", {IndexFieldName(idx)}");
+        sb.AppendLine(");");
+    }
+
+    static private void EmitIndexWiringTypes(StringBuilder sb, TableModel table, string ownerSimpleName) {
+        if (table.Indexes.Length == 0) return;
+
+        var opsName = $"{ownerSimpleName}{table.Accessor}Ops";
         var row = table.RowTypeFullName;
+        var mutatorName = RowMutatorName(table, ownerSimpleName);
+        var collectionName = IndexCollectionName(table, ownerSimpleName);
+
+        sb.AppendLine();
+        sb.AppendLine($"public readonly struct {mutatorName} : IRowMutator<{row}> {{");
+        sb.AppendLine($"    private readonly {opsName} table;");
+        sb.AppendLine($"    public {mutatorName}({opsName} table) {{ this.table = table; }}");
+        sb.AppendLine($"    public void Update({row} original, {row} newRow) => table.Update(original.{table.PrimaryKeyName}, newRow);");
+        sb.AppendLine($"    public void Delete({row} row) => table.Delete(row.{table.PrimaryKeyName});");
+        sb.AppendLine($"    public {row} WithSamePrimaryKey({row} original, {row} newRow) => newRow with {{ {table.PrimaryKeyName} = original.{table.PrimaryKeyName} }};");
+        sb.AppendLine("}");
+
         foreach (var idx in table.Indexes) {
+            var className = IndexAccessorClassName(table, idx, ownerSimpleName);
+            var indexType = ConcreteIndexType(idx);
+            var keyType = KeyType(idx);
             var parameters = string.Join(", ", idx.Fields.Select(f => $"{f.FieldTypeFullName} {Camel(f.FieldName)}"));
             var keyExpr = idx.Fields.Length == 1
                 ? Camel(idx.Fields[0].FieldName)
                 : $"({string.Join(", ", idx.Fields.Select(f => Camel(f.FieldName)))})";
-            var rowKeyExpr = KeyExpr("c.Row", idx);
-            if (idx.Uniqueness == Uniqueness.Unique) {
-                sb.AppendLine($"    public Result<{row}> {idx.AccessorName}({parameters}) {{");
-                sb.AppendLine("        if (Dirty) {");
-                sb.AppendLine("            var span = CollectionsMarshal.AsSpan(changes);");
-                sb.AppendLine("            for (var i = span.Length - 1; i >= 0; i--) {");
-                sb.AppendLine("                ref readonly var c = ref span[i];");
-                sb.AppendLine("                var supersededByLater = false;");
-                sb.AppendLine("                for (var j = span.Length - 1; j > i; j--) { if (span[j].Key.Equals(c.Key)) { supersededByLater = true; break; } }");
-                sb.AppendLine("                if (supersededByLater) continue;");
-                sb.AppendLine($"                if (c.Kind != ChangeKind.Delete && {rowKeyExpr}.Equals({keyExpr})) return Result<{row}>.Ok(c.Row);");
-                sb.AppendLine("            }");
-                sb.AppendLine($"            var overlayOffsetResult = {IndexFieldName(idx)}.GetOffset({keyExpr});");
-                sb.AppendLine("            if (overlayOffsetResult.IsError()) return overlayOffsetResult.Void();");
-                sb.AppendLine("            var overlayCandidate = storage.Get(overlayOffsetResult.Unwrap());");
-                sb.AppendLine($"            var overlayCandidateKey = overlayCandidate.{table.PrimaryKeyName};");
-                sb.AppendLine("            for (var i = 0; i < span.Length; i++) {");
-                sb.AppendLine("                if (span[i].Key.Equals(overlayCandidateKey))");
-                sb.AppendLine($"                    return Result<{row}>.Error(DbError.IndexKeyNotFound());");
-                sb.AppendLine("            }");
-                sb.AppendLine("            return overlayCandidate;");
-                sb.AppendLine("        }");
-                sb.AppendLine($"        var offsetResult = {IndexFieldName(idx)}.GetOffset({keyExpr});");
-                sb.AppendLine("        if (offsetResult.IsError()) return offsetResult.Void();");
-                sb.AppendLine("        return storage.Get(offsetResult.Unwrap());");
-                sb.AppendLine("    }");
-            } else {
-                sb.AppendLine($"    public List<{row}> {idx.AccessorName}({parameters}) {{");
-                sb.AppendLine("        if (Dirty) {");
-                sb.AppendLine($"            var result = new List<{row}>();");
-                sb.AppendLine("            var span = CollectionsMarshal.AsSpan(changes);");
-                sb.AppendLine("            for (var i = span.Length - 1; i >= 0; i--) {");
-                sb.AppendLine("                ref readonly var c = ref span[i];");
-                sb.AppendLine("                var supersededByLater = false;");
-                sb.AppendLine("                for (var j = span.Length - 1; j > i; j--) { if (span[j].Key.Equals(c.Key)) { supersededByLater = true; break; } }");
-                sb.AppendLine("                if (supersededByLater) continue;");
-                sb.AppendLine($"                if (c.Kind != ChangeKind.Delete && {rowKeyExpr}.Equals({keyExpr})) result.Add(c.Row);");
-                sb.AppendLine("            }");
-                sb.AppendLine("");
-                sb.AppendLine($"           using var offsetList = {IndexFieldName(idx)}.GetOffsets({keyExpr});");
-                sb.AppendLine("            foreach (var offset in offsetList.Buffer()) {");
-                sb.AppendLine("                var candidate = storage.Get(offset);");
-                sb.AppendLine($"                var candidateKey = candidate.{table.PrimaryKeyName};");
-                sb.AppendLine("                var touchedByBatch = false;");
-                sb.AppendLine("                for (var i = 0; i < span.Length; i++) { if (span[i].Key.Equals(candidateKey)) { touchedByBatch = true; break; } }");
-                sb.AppendLine("                if (!touchedByBatch) result.Add(candidate);");
-                sb.AppendLine("            }");
-                sb.AppendLine("            return result;");
-                sb.AppendLine("        }");
-                sb.AppendLine("");
-                sb.AppendLine($"        using var outerOffsetList = {IndexFieldName(idx)}.GetOffsets({keyExpr});");
-                sb.AppendLine($"        var realResult = new List<{row}>(outerOffsetList.Count);");
-                sb.AppendLine("        foreach (var offset in outerOffsetList.Buffer()) realResult.Add(storage.Get(offset));");
-                sb.AppendLine("        return realResult;");
-                sb.AppendLine("    }");
+
+            sb.AppendLine();
+            sb.AppendLine($"public sealed class {className} {{");
+            sb.AppendLine($"    private readonly DenseArray<{row}> storage;");
+            sb.AppendLine($"    private {mutatorName} rowMutator;");
+            sb.AppendLine($"    private readonly {indexType} idx;");
+            sb.AppendLine();
+            sb.AppendLine($"    public {className}(DenseArray<{row}> storage, {mutatorName} rowMutator, {indexType} idx) {{");
+            sb.AppendLine("        this.storage = storage;");
+            sb.AppendLine("        this.rowMutator = rowMutator;");
+            sb.AppendLine("        this.idx = idx;");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine(idx.Uniqueness == Uniqueness.Unique
+                ? $"    public QuerySingle<{row}, {mutatorName}> Find({parameters}) => new(storage, idx.GetOffset({keyExpr}), ref rowMutator);"
+                : $"    public QueryResultSet<{row}, {mutatorName}> Find({parameters}) => new(storage, idx.GetOffsets({keyExpr}), ref rowMutator);");
+            sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Iter() => new(storage, idx.GetOffsetsIter(), ref rowMutator);");
+            sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Except({parameters}) => new(storage, idx.GetOffsetsExcept({keyExpr}), ref rowMutator);");
+            if (IsRangedIndex(idx)) {
+                sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Range({keyType} from, {keyType} to) => new(storage, idx.GetOffsetsRange(from, to), ref rowMutator);");
+                sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Gt({keyType} value) => new(storage, idx.GetOffsetsGt(value), ref rowMutator);");
+                sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Gte({keyType} value) => new(storage, idx.GetOffsetsGte(value), ref rowMutator);");
+                sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Lt({keyType} value) => new(storage, idx.GetOffsetsLt(value), ref rowMutator);");
+                sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Lte({keyType} value) => new(storage, idx.GetOffsetsLte(value), ref rowMutator);");
             }
+            sb.AppendLine("}");
         }
-        if (table.Indexes.Length > 0) sb.AppendLine();
+
+        sb.AppendLine();
+        sb.AppendLine($"public sealed class {collectionName} {{");
+        foreach (var idx in table.Indexes)
+            sb.AppendLine($"    public {IndexAccessorClassName(table, idx, ownerSimpleName)} {idx.AccessorName} {{ get; }}");
+        sb.AppendLine();
+        sb.Append($"    public {collectionName}(DenseArray<{row}> storage, {mutatorName} rowMutator");
+        foreach (var idx in table.Indexes) sb.Append($", {ConcreteIndexType(idx)} {IndexFieldName(idx)}");
+        sb.AppendLine(") {");
+        foreach (var idx in table.Indexes)
+            sb.AppendLine($"        {idx.AccessorName} = new {IndexAccessorClassName(table, idx, ownerSimpleName)}(storage, rowMutator, {IndexFieldName(idx)});");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
     }
 
     static private void EmitStagingMethods(StringBuilder sb, TableModel table) {
@@ -613,9 +624,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        Dirty = true; ");
         sb.AppendLine("    }");
         sb.AppendLine($"    public void Delete({key} id) {{");
-        sb.AppendLine($"        var current = {table.PrimaryKeyAccessor}(id);");
-        sb.AppendLine("        if (!current.IsOk()) return;");
-        sb.AppendLine("        changes.Add(new(ChangeKind.Delete, id, current.Unwrap()));");
+        sb.AppendLine("        changes.Add(new(ChangeKind.Delete, id, default));");
         sb.AppendLine("        Dirty = true;");
         sb.AppendLine("    }");
         sb.AppendLine();
@@ -706,6 +715,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"public sealed class {opsName} {{");
         EmitStorageAndIndexFields(sb, table, primaryIndexType);
         EmitChangeTrackingFields(sb, key, row);
+        EmitIndexWiringFields(sb, table, ownerSimpleName);
 
         sb.AppendLine($"    public {opsName}");
         sb.AppendLine("    (");
@@ -716,18 +726,19 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        this.storage = storage;");
         sb.AppendLine("        this.primaryIndex = primaryIndex;");
         AppendAutoIncrementAndIndexAssignments(sb, table);
+        EmitIndexWiringConstruction(sb, table, ownerSimpleName);
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        EmitGetMethod(sb, table);
+        EmitFindMethod(sb, table);
         EmitIterMethod(sb, table);
-        EmitSecondaryIndexAccessors(sb, table);
         EmitStagingMethods(sb, table);
         EmitValidateMethod(sb, table);
         EmitDiscardMethod(sb);
         EmitInstantApply(sb, table);
 
         sb.AppendLine("}");
+        EmitIndexWiringTypes(sb, table, ownerSimpleName);
         return sb.ToString();
     }
 
@@ -763,11 +774,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    var offsetResult = primaryIndex.GetOffset(c.Key);");
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
+        sb.AppendLine("                    var oldRow = storage.Get(offset);");
         sb.AppendLine("                    var lastOffset = storage.LastOffset;");
         sb.AppendLine("                    var swapped = storage.Delete(offset);");
         sb.AppendLine("                    primaryIndex.Delete(c.Key);");
         foreach (var idx in table.Indexes) {
-            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("c.Row", idx) : $"{KeyExpr("c.Row", idx)}, offset";
+            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
             sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
         }
         sb.AppendLine("                    if (swapped is { } swappedRow) {");
@@ -805,6 +817,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    private readonly ColdStore cold;");
         EmitChangeTrackingFields(sb, key, row);
         EmitEvictableField(sb, table);
+        EmitIndexWiringFields(sb, table, ownerSimpleName);
 
         sb.AppendLine($"    public {opsName}");
         sb.AppendLine("    (");
@@ -819,13 +832,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        this.coldTable = coldTable;");
         sb.AppendLine("        this.cold = cold;");
         AppendAutoIncrementAndIndexAssignments(sb, table);
+        EmitIndexWiringConstruction(sb, table, ownerSimpleName);
         if (table.Evictable) sb.AppendLine("        cold.RegisterEvictionDrop(TableId, TryGetCurrentRowBytesForEviction, EvictDrop);");
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        EmitGetMethod(sb, table);
+        EmitFindMethod(sb, table);
         EmitIterMethod(sb, table);
-        EmitSecondaryIndexAccessors(sb, table);
         EmitStagingMethods(sb, table);
         EmitValidateMethod(sb, table);
         EmitDiscardMethod(sb);
@@ -834,6 +847,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         if (table.Evictable) EmitStorageAccessor(sb, table, opsName);
 
         sb.AppendLine("}");
+        EmitIndexWiringTypes(sb, table, ownerSimpleName);
         return sb.ToString();
     }
 
@@ -874,11 +888,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    var offsetResult = primaryIndex.GetOffset(c.Key);");
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
+        sb.AppendLine("                    var oldRow = storage.Get(offset);");
         sb.AppendLine("                    var lastOffset = storage.LastOffset;");
         sb.AppendLine("                    var swapped = storage.Delete(offset);");
         sb.AppendLine("                    primaryIndex.Delete(c.Key);");
         foreach (var idx in table.Indexes) {
-            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("c.Row", idx) : $"{KeyExpr("c.Row", idx)}, offset";
+            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
             sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
         }
         sb.AppendLine("                    if (swapped is { } swappedRow) {");

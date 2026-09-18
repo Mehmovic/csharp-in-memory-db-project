@@ -3,14 +3,15 @@ using RhinoDB.Lib.Execution;
 
 namespace RhinoDB.Test.Generators;
 
-// Milestone 4: secondary-index accessors become overlay-aware - they now see
-// this operation's own staged-but-not-yet-applied writes, the same
-// read-your-own-writes guarantee the primary Get() accessor already had.
-// Before this milestone, every test below that reads a secondary index in
-// the SAME operation that staged the write would have failed (or, worse,
-// returned a stale real-storage hit) - see Milestone2Tests.cs's
-// UniqueSecondaryIndex_ShortCode_FindsTheInsertedRow, which used two
-// separate operations specifically to route around this gap.
+// Milestone 4 originally proved secondary-index accessors were overlay-aware
+// (saw this operation's own staged-but-not-yet-applied writes). That overlay
+// was deliberately removed in the QueryResultSet/QuerySingle redesign (2026-09-18)
+// - no scanning uncommitted `changes` before hitting an index, anywhere, "it will
+// be the user's duty to handle it," to avoid paying that check on every search.
+// This file now proves the opposite contract: a secondary-index Find/Iter during
+// the same operation that staged the write does NOT see it - only a later
+// operation, after Apply() has actually run, does. (The primary-key accessor's
+// equivalent contract is proven in StagingSemanticsTests.cs.)
 public class Milestone4Tests {
     private const string Source = """
         using RhinoDB.Core.Tables;
@@ -32,6 +33,14 @@ public class Milestone4Tests {
             [PrimaryKey] int Id,
             string Name,
             [Index(IndexKind.Hash, Uniqueness.NonUnique)] int ClubId);
+
+        // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
+        // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching
+        // as real static-typed C#, exposing only reflection-safe (non-ref-struct) signatures.
+        public static class TestHelpers {
+            public static bool ShortCodeIsOk(LeagueDbClubOps club, string code) => club.Idx.ShortCode.Find(code).Get().IsOk();
+            public static int ClubIdCount(LeagueDbPlayerOps player, int clubId) { using var r = player.Idx.ClubId.Find(clubId); return r.Count; }
+        }
         """;
 
     static private (object Db, Type TxType, System.Reflection.Assembly Assembly) NewDb() {
@@ -52,113 +61,56 @@ public class Milestone4Tests {
         return Activator.CreateInstance(t, id, name, clubId)!;
     }
 
-    // ---- Unique index overlay ----
-
     [Test]
-    public async Task UniqueIndex_InsertThenReadByIndexInTheSameOperation_FindsTheStagedRow() {
+    public async Task UniqueIndex_InsertThenReadByIndexInTheSameOperation_DoesNotSeeTheStagedRow() {
         var (db, txType, asm) = NewDb();
 
-        var found = false;
+        var foundWithinSameOperation = true;
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS"));
-                found = dtx.Club.ShortCode("ARS").IsOk();
+                foundWithinSameOperation = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", (object)dtx.Club, "ARS")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
         Assert.That(result.IsOk(), Is.True);
-        Assert.That(found, Is.True);
-    }
+        Assert.That(foundWithinSameOperation, Is.False);
 
-    [Test]
-    public async Task UniqueIndex_UpdateChangingTheIndexedField_MakesTheOldValueUnresolvableInTheSameOperation() {
-        var (db, txType, asm) = NewDb();
-
-        await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
-            PropagationMode.Optimistic);
-
-        bool oldFound = true, newFound = false;
+        var foundInALaterOperation = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                dtx.Club.Update(1, (dynamic)NewClub(asm, 1, "Arsenal", "GUN"));
-                // The real index still says "ARS" -> offset 0, but this
-                // operation's own staged Update means that's now stale -
-                // must not be trusted just because Apply() hasn't run yet.
-                oldFound = dtx.Club.ShortCode("ARS").IsOk();
-                newFound = dtx.Club.ShortCode("GUN").IsOk();
+                foundInALaterOperation = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", ((dynamic)tx).Club, "ARS")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
-        Assert.That(oldFound, Is.False, "A real-storage hit whose row was touched by this batch must not be trusted once stale.");
-        Assert.That(newFound, Is.True, "The new value must be visible via the overlay before Apply() has run.");
+        Assert.That(foundInALaterOperation, Is.True, "Once Apply() has actually run, a later operation's Find does see it.");
     }
 
     [Test]
-    public async Task UniqueIndex_DeleteInTheSameOperation_MakesTheRowUnresolvableByIndex() {
+    public async Task NonUniqueIndex_InsertTwoMatchingRowsThenReadInTheSameOperation_DoesNotSeeEither() {
         var (db, txType, asm) = NewDb();
 
-        await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
-            PropagationMode.Optimistic);
-
-        var found = true;
-        await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                dtx.Club.Delete(1);
-                found = dtx.Club.ShortCode("ARS").IsOk();
-                return Result.Ok();
-            }, PropagationMode.Optimistic);
-
-        Assert.That(found, Is.False);
-    }
-
-    // ---- Non-unique index overlay ----
-
-    [Test]
-    public async Task NonUniqueIndex_InsertTwoMatchingRowsThenReadInTheSameOperation_FindsBoth() {
-        var (db, txType, asm) = NewDb();
-
-        var count = -1;
+        var countWithinSameOperation = -1;
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
                 dtx.Player.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
-                count = dtx.Player.ClubId(10).Count;
+                countWithinSameOperation = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubIdCount", (object)dtx.Player, 10)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
         Assert.That(result.IsOk(), Is.True);
-        Assert.That(count, Is.EqualTo(2));
-    }
+        Assert.That(countWithinSameOperation, Is.EqualTo(0));
 
-    [Test]
-    public async Task NonUniqueIndex_UpdatingOneRowAwayFromTheGroup_ExcludesItButKeepsTheOthers() {
-        var (db, txType, asm) = NewDb();
-
+        var countInALaterOperation = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
+                countInALaterOperation = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubIdCount", ((dynamic)tx).Player, 10)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
-        int oldGroupCount = -1, newGroupCount = -1;
-        await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                dtx.Player.Update(1, (dynamic)NewPlayer(asm, 1, "Alice", 99));
-                oldGroupCount = dtx.Player.ClubId(10).Count;
-                newGroupCount = dtx.Player.ClubId(99).Count;
-                return Result.Ok();
-            }, PropagationMode.Optimistic);
-
-        Assert.That(oldGroupCount, Is.EqualTo(1), "Only Bob should remain in club 10 - Alice's real-storage entry is stale within this batch.");
-        Assert.That(newGroupCount, Is.EqualTo(1), "Alice's updated row must be visible via the overlay before Apply() has run.");
+        Assert.That(countInALaterOperation, Is.EqualTo(2), "Once Apply() has actually run, a later operation's Find does see both.");
     }
 }

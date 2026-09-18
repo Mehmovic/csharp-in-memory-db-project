@@ -37,14 +37,14 @@ public class AccessorOverrideTests {
     public async Task TableAccessor_RenamesTheTransactionProperty() {
         var (db, txType, asm) = NewDb();
 
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Teams.Insert((dynamic)NewClub(asm, 1, "Arsenal")); return Result.Ok(); },
+            PropagationMode.Optimistic);
+
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                dtx.Teams.Insert((dynamic)NewClub(asm, 1, "Arsenal"));
-                found = dtx.Teams.ById(1).IsOk();
-                return Result.Ok();
-            }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { found = ((dynamic)tx).Teams.ById(1).IsOk(); return Result.Ok(); },
+            PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
     }

@@ -31,6 +31,18 @@ public class CompositeStringIndexTests {
             [PrimaryKey] int Id,
             [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByClubAndRole", Order = 0)] int ClubId,
             [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByClubAndRole", Order = 1)] string Role);
+
+        // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
+        // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching
+        // as real static-typed C#, exposing only reflection-safe (non-ref-struct) signatures.
+        public static class TestHelpers {
+            public static bool ByClubAndNameIsOk(LeagueDbPlayerOps player, int clubId, string name) =>
+                player.Idx.ByClubAndName.Find(clubId, name).Get().IsOk();
+            public static int ByClubAndRoleCount(LeagueDbSquadSlotOps slot, int clubId, string role) {
+                using var r = slot.Idx.ByClubAndRole.Find(clubId, role);
+                return r.Count;
+            }
+        }
         """;
 
     static private (object Db, Type TxType, Assembly Assembly) NewDb() {
@@ -70,11 +82,11 @@ public class CompositeStringIndexTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                aliceInTen = dtx.Player.ByClubAndName(10, "alice").IsOk();
-                aliceInTwenty = dtx.Player.ByClubAndName(20, "alice").IsOk();
+                aliceInTen = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Player, 10, "alice")!;
+                aliceInTwenty = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Player, 20, "alice")!;
                 // Same club, name that was never inserted - the composite key must
                 // not degrade into a club-only match.
-                partialMatch = dtx.Player.ByClubAndName(10, "carol").IsOk();
+                partialMatch = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Player, 10, "carol")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -130,8 +142,8 @@ public class CompositeStringIndexTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                oldPair = dtx.Player.ByClubAndName(10, "alice").IsOk();
-                newPair = dtx.Player.ByClubAndName(10, "alicia").IsOk();
+                oldPair = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Player, 10, "alice")!;
+                newPair = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Player, 10, "alicia")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -152,8 +164,10 @@ public class CompositeStringIndexTests {
 
         var found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Player.ByClubAndName(10, "alice").IsOk(); return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", ((dynamic)tx).Player, 10, "alice")!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(found, Is.False);
     }
@@ -179,10 +193,10 @@ public class CompositeStringIndexTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                gkInTen = dtx.SquadSlot.ByClubAndRole(10, "gk").Count;
-                cbInTen = dtx.SquadSlot.ByClubAndRole(10, "cb").Count;
-                gkInTwenty = dtx.SquadSlot.ByClubAndRole(20, "gk").Count;
-                unmatched = dtx.SquadSlot.ByClubAndRole(10, "st").Count;
+                gkInTen = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.SquadSlot, 10, "gk")!;
+                cbInTen = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.SquadSlot, 10, "cb")!;
+                gkInTwenty = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.SquadSlot, 20, "gk")!;
+                unmatched = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.SquadSlot, 10, "st")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -212,8 +226,10 @@ public class CompositeStringIndexTests {
         // its composite entry must still resolve at the new offset.
         var relocated = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { relocated = ((dynamic)tx).SquadSlot.ByClubAndRole(20, "cb").Count; return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                relocated = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", ((dynamic)tx).SquadSlot, 20, "cb")!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(relocated, Is.EqualTo(1));
     }

@@ -29,14 +29,14 @@ public class PrimaryKeyKindTests {
         var db = Activator.CreateInstance(dbType)!;
         var ranking = Activator.CreateInstance(rankingType, 7, "Top")!;
 
-        var found = false;
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                dtx.Ranking.Insert((dynamic)ranking);
-                found = dtx.Ranking.Find(7).IsOk();
-                return Result.Ok();
-            }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { ((dynamic)tx).Ranking.Insert((dynamic)ranking); return Result.Ok(); },
+            PropagationMode.Optimistic);
+
+        var found = false;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { found = ((dynamic)tx).Ranking.Find(7).IsOk(); return Result.Ok(); },
+            PropagationMode.Optimistic);
 
         Assert.That(result.IsOk(), Is.True);
         Assert.That(found, Is.True);

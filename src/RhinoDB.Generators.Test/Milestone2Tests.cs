@@ -35,6 +35,15 @@ public class Milestone2Tests {
             [PrimaryKey] int Id,
             [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "HomeAway", Order = 1)] int HomeClubId,
             [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "HomeAway", Order = 0)] int AwayClubId);
+
+        // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
+        // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching
+        // as real static-typed C#, exposing only reflection-safe (non-ref-struct) signatures.
+        public static class TestHelpers {
+            public static bool ShortCodeIsOk(ShopDbClubOps club, string code) => club.Idx.ShortCode.Find(code).Get().IsOk();
+            public static int ClubIdCount(ShopDbPlayerOps player, int clubId) { using var r = player.Idx.ClubId.Find(clubId); return r.Count; }
+            public static bool HomeAwayIsOk(ShopDbFixtureOps fixture, int awayClubId, int homeClubId) => fixture.Idx.HomeAway.Find(awayClubId, homeClubId).Get().IsOk();
+        }
         """;
 
     static private (object Db, Type TxType, System.Reflection.Assembly Assembly) NewDb() {
@@ -76,8 +85,10 @@ public class Milestone2Tests {
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Club.ShortCode("ARS").IsOk(); return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", ((dynamic)tx).Club, "ARS")!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
     }
@@ -115,6 +126,43 @@ public class Milestone2Tests {
         Assert.That(result.IsOk(), Is.True);
     }
 
+    [Test]
+    public async Task UniqueSecondaryIndex_UpdateThenDelete_SameOperation_RemovesTheCurrentEntryNotAStaleOne() {
+        // The case the Delete/Apply restructuring (2026-09-18) exists to keep correct: Delete's
+        // Apply-case fetches oldRow fresh from storage (like Update already did), not from a
+        // staging-time snapshot. Within one operation, Apply() processes Update before Delete
+        // (declaration order) - by the time Delete's case runs, storage already reflects "GUN"
+        // (Update's own apply already ran). A staging-time snapshot would still say "ARS", which
+        // Update's apply-case already removed from the index moments earlier - cleaning up the
+        // wrong (already-gone) value would leave "GUN" dangling in the index after the row itself
+        // is deleted from storage/primaryIndex.
+        var (db, txType, asm) = NewDb();
+
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS")); return Result.Ok(); },
+            PropagationMode.Optimistic);
+
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                dtx.Club.Update(1, (dynamic)NewClub(asm, 1, "Arsenal", "GUN"));
+                dtx.Club.Delete(1);
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        bool rowFound = true, gunResolvesInIndex = true;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                dynamic dtx = tx;
+                rowFound = dtx.Club.Find(1).IsOk();
+                gunResolvesInIndex = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", (object)dtx.Club, "GUN")!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(rowFound, Is.False, "The row must be genuinely deleted.");
+        Assert.That(gunResolvesInIndex, Is.False, "GUN must not be left dangling in the index after the row is deleted.");
+    }
+
     // ---- Non-unique secondary index ----
 
     [Test]
@@ -132,8 +180,10 @@ public class Milestone2Tests {
 
         var team10Count = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { team10Count = ((dynamic)tx).Player.ClubId(10).Count; return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                team10Count = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubIdCount", ((dynamic)tx).Player, 10)!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(team10Count, Is.EqualTo(2));
     }
@@ -226,8 +276,10 @@ public class Milestone2Tests {
         // inserted and come back NotFound.
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Fixture.HomeAway(20, 10).IsOk(); return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "HomeAwayIsOk", ((dynamic)tx).Fixture, 20, 10)!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
     }
@@ -286,8 +338,10 @@ public class Milestone2Tests {
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Fixture.HomeAway(40, 30).IsOk(); return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "HomeAwayIsOk", ((dynamic)tx).Fixture, 40, 30)!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(found, Is.True, "The swap-relocated row's composite index entry must still resolve at its new offset.");
     }

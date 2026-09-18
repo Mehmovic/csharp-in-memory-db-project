@@ -71,14 +71,14 @@ public class Milestone3Tests {
         using var cold = ColdStore.Open(dir).Unwrap();
         var (db, txType, asm) = NewDb(cold);
 
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
+            PropagationMode.Optimistic);
+
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                dtx.Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m));
-                found = dtx.Account.Find(1).IsOk();
-                return Result.Ok();
-            }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Find(1).IsOk(); return Result.Ok(); },
+            PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
     }

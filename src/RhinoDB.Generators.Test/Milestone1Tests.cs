@@ -98,13 +98,15 @@ public class Milestone1Tests {
     }
 
     [Test]
-    public async Task InsertThenGet_WithinTheSameOperation_SeesTheStagedRow() {
-        // Read-your-own-writes: a Find inside the same operation as a not-yet-
-        // applied Insert must see it via the staged-changes overlay.
+    public async Task InsertThenGet_WithinTheSameOperation_DoesNotSeeTheStagedRow() {
+        // Read-your-own-writes was deliberately removed: Find never scans
+        // uncommitted changes, so a not-yet-applied Insert is invisible to a
+        // Find in the same operation - it only becomes visible once Apply()
+        // has actually run, from a later operation.
         var (db, txType, asm) = NewDb();
         var widget = NewWidget(asm, 1, "Ada", 10);
 
-        var foundWithinSameOperation = false;
+        var foundWithinSameOperation = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
@@ -113,6 +115,6 @@ public class Milestone1Tests {
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
-        Assert.That(foundWithinSameOperation, Is.True);
+        Assert.That(foundWithinSameOperation, Is.False);
     }
 }

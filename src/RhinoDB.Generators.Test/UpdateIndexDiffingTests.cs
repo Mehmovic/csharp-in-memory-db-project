@@ -37,6 +37,14 @@ public class UpdateIndexDiffingTests {
             [PrimaryKey] int Id,
             string Name,
             [Index(IndexKind.Hash, Uniqueness.NonUnique)] int ClubId);
+
+        // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
+        // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching
+        // as real static-typed C#, exposing only reflection-safe (non-ref-struct) signatures.
+        public static class TestHelpers {
+            public static bool ShortCodeIsOk(LeagueDbClubOps club, string code) => club.Idx.ShortCode.Find(code).Get().IsOk();
+            public static int ClubIdCount(LeagueDbPlayerOps player, int clubId) { using var r = player.Idx.ClubId.Find(clubId); return r.Count; }
+        }
         """;
 
     static private (object Db, Type TxType, System.Reflection.Assembly Assembly) NewDb() {
@@ -73,8 +81,10 @@ public class UpdateIndexDiffingTests {
         // needing a redundant Delete+Insert to keep it correct.
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Club.ShortCode("ARS").IsOk(); return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", ((dynamic)tx).Club, "ARS")!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
     }
@@ -101,9 +111,8 @@ public class UpdateIndexDiffingTests {
         bool arsFound = false, gunFound = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                arsFound = dtx.Club.ShortCode("ARS").IsOk();
-                gunFound = dtx.Club.ShortCode("GUN").IsOk();
+                arsFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", ((dynamic)tx).Club, "ARS")!;
+                gunFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", ((dynamic)tx).Club, "GUN")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -128,8 +137,10 @@ public class UpdateIndexDiffingTests {
 
         var count = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { count = ((dynamic)tx).Player.ClubId(10).Count; return Result.Ok(); },
-            PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => {
+                count = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubIdCount", ((dynamic)tx).Player, 10)!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
 
         Assert.That(count, Is.EqualTo(2), "Both players must still resolve under club 10 after an unrelated-field update.");
     }
@@ -151,9 +162,8 @@ public class UpdateIndexDiffingTests {
         int club10Count = -1, club20Count = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                club10Count = dtx.Player.ClubId(10).Count;
-                club20Count = dtx.Player.ClubId(20).Count;
+                club10Count = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubIdCount", ((dynamic)tx).Player, 10)!;
+                club20Count = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubIdCount", ((dynamic)tx).Player, 20)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
