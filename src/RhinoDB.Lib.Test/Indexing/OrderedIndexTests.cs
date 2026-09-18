@@ -48,27 +48,7 @@ public class OrderedIndexTests {
             Lte = (Func<NonUniqueBTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsLte(k))),
             Iter = (Func<NonUniqueBTreeIndex<int>, int[]>)((i) => Read(i.GetOffsetsIter())),
             Range = (Func<NonUniqueBTreeIndex<int>, int, int, int[]>)((i, f, t) => Read(i.GetOffsetsRange(f, t))),
-        },
-        new() {
-            Name = "RedBlackTreeIndex", AllowsDuplicateKeys = false,
-            Create = (Func<RedBlackTreeIndex<int>>)(() => new RedBlackTreeIndex<int>()),
-            Gt = (Func<RedBlackTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsGt(k))),
-            Gte = (Func<RedBlackTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsGte(k))),
-            Lt = (Func<RedBlackTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsLt(k))),
-            Lte = (Func<RedBlackTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsLte(k))),
-            Iter = (Func<RedBlackTreeIndex<int>, int[]>)((i) => Read(i.GetOffsetsIter())),
-            Range = (Func<RedBlackTreeIndex<int>, int, int, int[]>)((i, f, t) => Read(i.GetOffsetsRange(f, t))),
-        },
-        new() {
-            Name = "NonUniqueRedBlackTreeIndex", AllowsDuplicateKeys = true,
-            Create = (Func<NonUniqueRedBlackTreeIndex<int>>)(() => new NonUniqueRedBlackTreeIndex<int>()),
-            Gt = (Func<NonUniqueRedBlackTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsGt(k))),
-            Gte = (Func<NonUniqueRedBlackTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsGte(k))),
-            Lt = (Func<NonUniqueRedBlackTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsLt(k))),
-            Lte = (Func<NonUniqueRedBlackTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsLte(k))),
-            Iter = (Func<NonUniqueRedBlackTreeIndex<int>, int[]>)((i) => Read(i.GetOffsetsIter())),
-            Range = (Func<NonUniqueRedBlackTreeIndex<int>, int, int, int[]>)((i, f, t) => Read(i.GetOffsetsRange(f, t))),
-        },
+        }
     ];
 
     static private readonly Impl[] NonUniqueOnly = [.. All.Where(i => i.AllowsDuplicateKeys)];

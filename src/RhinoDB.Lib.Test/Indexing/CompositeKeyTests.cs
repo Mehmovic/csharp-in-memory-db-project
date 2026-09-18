@@ -49,9 +49,9 @@ public class HashIndex_CompositeKeyTests {
 }
 
 public class OrderedIndex_CompositeKeyTests {
-    static private RedBlackTreeIndex<(int X, int Y)> NewIndex() => new RedBlackTreeIndex<(int X, int Y)>();
+    static private BTreeIndex<(int X, int Y)> NewIndex() => new BTreeIndex<(int X, int Y)>();
 
-    static private int[] RangeOf(RedBlackTreeIndex<(int X, int Y)> index, (int X, int Y) from, (int X, int Y) to) {
+    static private int[] RangeOf(BTreeIndex<(int X, int Y)> index, (int X, int Y) from, (int X, int Y) to) {
         using var writer = index.GetOffsetsRange(from, to);
         return writer.Buffer().ToArray();
     }
@@ -130,14 +130,14 @@ public class NonUniqueHashSetIndex_CompositeKeyTests {
 }
 
 public class NonUniqueOrderedIndex_CompositeKeyTests {
-    static private NonUniqueRedBlackTreeIndex<(int X, int Y)> NewIndex() => new NonUniqueRedBlackTreeIndex<(int X, int Y)>();
+    static private NonUniqueBTreeIndex<(int X, int Y)> NewIndex() => new NonUniqueBTreeIndex<(int X, int Y)>();
 
-    static private int[] RangeOf(NonUniqueRedBlackTreeIndex<(int X, int Y)> index, (int X, int Y) from, (int X, int Y) to) {
+    static private int[] RangeOf(NonUniqueBTreeIndex<(int X, int Y)> index, (int X, int Y) from, (int X, int Y) to) {
         using var writer = index.GetOffsetsRange(from, to);
         return writer.BufferResult().Unwrap().ToArray();
     }
 
-    static private int[] OffsetsOf(NonUniqueRedBlackTreeIndex<(int X, int Y)> index, (int X, int Y) key) {
+    static private int[] OffsetsOf(NonUniqueBTreeIndex<(int X, int Y)> index, (int X, int Y) key) {
         using var writer = index.GetOffsets(key);
         return writer.BufferResult().Unwrap().ToArray();
     }

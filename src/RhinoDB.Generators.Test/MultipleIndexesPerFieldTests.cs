@@ -25,7 +25,7 @@ public class MultipleIndexesPerFieldTests {
         public readonly partial record struct Player(
             [PrimaryKey] int Id,
             [Index(IndexKind.Hash, Uniqueness.NonUnique, Accessor = "ByClub")]
-            [Index(IndexKind.RedBlackTree, Uniqueness.NonUnique, Accessor = "ByClubOrdered")]
+            [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByClubOrdered")]
             int ClubId,
             [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "ByShirt")]
             [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByShirtLoose")]

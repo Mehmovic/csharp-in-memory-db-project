@@ -412,7 +412,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         return table.PrimaryKeyKind switch {
             IndexKind.Hash => $"HashIndex<{keyType}>",
             IndexKind.BTree => $"BTreeIndex<{keyType}>",
-            IndexKind.RedBlackTree =>$"RedBlackTreeIndex<{keyType}>",
             _ => throw new Exception("Invalid index kind")
         };
     }
@@ -426,9 +425,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
             (IndexKind.BTree, Uniqueness.Unique) => $"BTreeIndex<{keyType}>",
             (IndexKind.BTree, Uniqueness.NonUnique) => $"NonUniqueBTreeIndex<{keyType}>",
 
-            (IndexKind.RedBlackTree, Uniqueness.Unique) => $"RedBlackTreeIndex<{keyType}>",
-            (IndexKind.RedBlackTree, Uniqueness.NonUnique) => $"NonUniqueRedBlackTreeIndex<{keyType}>",
-            
             _ => throw new Exception("Invalid index kind or uniqueness") 
         };
     }
@@ -1126,7 +1122,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
     
     // Those that have "Scan" method and inherit from OrderedIndex<TKey> and its children (Range, Gt, Gte, Lt, Lte, Iter, Filter)
     static bool IsRangedIndex(IndexModel indexModel) {
-        return indexModel.Kind is IndexKind.BTree or IndexKind.RedBlackTree;
+        return indexModel.Kind is IndexKind.BTree;
     }
     
     // Those that only support Iter, Filter and not (Range, Gt, Gte, Lt, Lte)
@@ -1195,6 +1191,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
     }
 
     private enum TableKind { Instant, Persistent }
-    private enum IndexKind { Hash, BTree, RedBlackTree  }
+    private enum IndexKind { Hash, BTree  }
     private enum Uniqueness { Unique, NonUnique }
 }
