@@ -7,12 +7,12 @@ namespace RhinoDB.Lib.Tables;
 public ref struct QueryResultSet<TRow, TMutator>
 (
     DenseArray<TRow> storage,
-    OffsetList offsets,
+    ArrayPoolContainer<int> offsets,
     ref TMutator mutator
 ) : IDisposable
     where TRow : struct
     where TMutator : struct, IRowMutator<TRow> {
-    private OffsetList offsets = offsets;
+    private ArrayPoolContainer<int> offsets = offsets;
     private readonly ref TMutator mutator = ref mutator;
     private TRow[] buffer = offsets.Count > 0 ? ArrayPool<TRow>.Shared.Rent(offsets.Count) : [];
 

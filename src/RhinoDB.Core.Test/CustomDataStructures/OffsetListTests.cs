@@ -8,7 +8,7 @@ public class OffsetListTests
     [Test]
     public void Add_ThenBuild_WriterHoldsEveryOffsetInOrder()
     {
-        using var builder = OffsetListBuilder.Create();
+        using var builder = ArrayPoolContainerBuilder<int>.Create();
         for (var i = 0; i < 5; i++)
         {
             Assert.That(builder.Add(i * 10).IsOk(), Is.True);
@@ -24,7 +24,7 @@ public class OffsetListTests
     [Test]
     public void Add_PastInitialCapacity_GrowsWithoutLosingOffsets()
     {
-        using var builder = OffsetListBuilder.Create(capacity: 4);
+        using var builder = ArrayPoolContainerBuilder<int>.Create(capacity: 4);
         for (var i = 0; i < 10_000; i++)
         {
             Assert.That(builder.Add(i).IsOk(), Is.True);
@@ -39,7 +39,7 @@ public class OffsetListTests
     [Test]
     public void Add_AfterBuild_Fails()
     {
-        using var builder = OffsetListBuilder.Create();
+        using var builder = ArrayPoolContainerBuilder<int>.Create();
         Assert.That(builder.Add(1).IsOk(), Is.True);
 
         using var writer = builder.Build().Unwrap();
@@ -50,7 +50,7 @@ public class OffsetListTests
     [Test]
     public void Buffer_AfterBuild_Fails()
     {
-        using var builder = OffsetListBuilder.Create();
+        using var builder = ArrayPoolContainerBuilder<int>.Create();
         using var writer = builder.Build().Unwrap();
 
         Assert.That(builder.BufferResult().IsError(), Is.True);
@@ -59,7 +59,7 @@ public class OffsetListTests
     [Test]
     public void Build_Twice_Fails()
     {
-        using var builder = OffsetListBuilder.Create();
+        using var builder = ArrayPoolContainerBuilder<int>.Create();
         using var writer = builder.Build().Unwrap();
 
         Assert.That(builder.Build().IsError(), Is.True);
@@ -68,7 +68,7 @@ public class OffsetListTests
     [Test]
     public void BuilderDispose_AfterBuild_IsANoOp_AndWriterStaysUsable()
     {
-        var builder = OffsetListBuilder.Create();
+        var builder = ArrayPoolContainerBuilder<int>.Create();
         Assert.That(builder.Add(7).IsOk(), Is.True);
 
         using var writer = builder.Build().Unwrap();
@@ -81,7 +81,7 @@ public class OffsetListTests
     [Test]
     public void BuilderDispose_Twice_IsSafe()
     {
-        var builder = OffsetListBuilder.Create();
+        var builder = ArrayPoolContainerBuilder<int>.Create();
         builder.Dispose();
         builder.Dispose(); // guarded - the array is returned to the pool exactly once
 
@@ -92,7 +92,7 @@ public class OffsetListTests
     [Test]
     public void WriterDispose_ReleasesTheArray()
     {
-        using var builder = OffsetListBuilder.Create();
+        using var builder = ArrayPoolContainerBuilder<int>.Create();
         Assert.That(builder.Add(3).IsOk(), Is.True);
 
         var writer = builder.Build().Unwrap();
@@ -106,7 +106,7 @@ public class OffsetListTests
     [Test]
     public void EmptyWriter_HoldsNoOffsets_AndIsDisposable()
     {
-        using var writer = OffsetList.Empty();
+        using var writer = ArrayPoolContainer<int>.Empty();
 
         Assert.That(writer.Count, Is.EqualTo(0));
         Assert.That(writer.IsEmpty(), Is.True);

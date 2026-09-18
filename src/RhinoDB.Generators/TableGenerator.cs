@@ -744,6 +744,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private void EmitInstantApply(StringBuilder sb, TableModel table) {
         sb.AppendLine("    internal void Apply() {");
+        sb.AppendLine("        using var deleteOffsetsBuilder = ArrayPoolContainerBuilder<int>.Create(changes.Count);");
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
         sb.AppendLine("            switch (c.Kind) {");
         sb.AppendLine("                case ChangeKind.Insert: {");
@@ -775,30 +776,37 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
-        sb.AppendLine("                    var lastOffset = storage.LastOffset;");
-        sb.AppendLine("                    var swapped = storage.Delete(offset);");
         sb.AppendLine("                    primaryIndex.Delete(c.Key);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
             sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
         }
-        sb.AppendLine("                    if (swapped is { } swappedRow) {");
-        sb.AppendLine($"                        var swappedPk = swappedRow.{table.PrimaryKeyName};");
-        sb.AppendLine("                        primaryIndex.Delete(swappedPk);");
-        sb.AppendLine("                        primaryIndex.Insert(swappedPk, offset);");
-        foreach (var idx in table.Indexes) {
-            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("swappedRow", idx) : $"{KeyExpr("swappedRow", idx)}, lastOffset";
-            sb.AppendLine($"                        {IndexFieldName(idx)}.Delete({deleteArgs});");
-            sb.AppendLine($"                        {IndexFieldName(idx)}.Insert({KeyExpr("swappedRow", idx)}, offset);");
-        }
-        sb.AppendLine("                    }");
+        sb.AppendLine("                    deleteOffsetsBuilder.Add(offset);");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine("        }");
+        EmitDeleteCompactionPass(sb, table);
         sb.AppendLine("        changes.Clear();");
         sb.AppendLine("        Dirty = false;");
         sb.AppendLine("    }");
+    }
+
+    static private void EmitDeleteCompactionPass(StringBuilder sb, TableModel table) {
+        sb.AppendLine("        using var deleteOffsets = deleteOffsetsBuilder.Build().Unwrap();");
+        sb.AppendLine("        if (deleteOffsets.Count > 0) {");
+        sb.AppendLine("            using var relocations = storage.DeleteMany(deleteOffsets.Buffer());");
+        sb.AppendLine("            foreach (var relocation in relocations) {");
+        sb.AppendLine($"                var relocatedPk = relocation.Row.{table.PrimaryKeyName};");
+        sb.AppendLine("                primaryIndex.Delete(relocatedPk);");
+        sb.AppendLine("                primaryIndex.Insert(relocatedPk, relocation.NewOffset);");
+        foreach (var idx in table.Indexes) {
+            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("relocation.Row", idx) : $"{KeyExpr("relocation.Row", idx)}, relocation.OldOffset";
+            sb.AppendLine($"                {IndexFieldName(idx)}.Delete({deleteArgs});");
+            sb.AppendLine($"                {IndexFieldName(idx)}.Insert({KeyExpr("relocation.Row", idx)}, relocation.NewOffset);");
+        }
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
     }
 
     static private string EmitPersistentOpsClass(TableModel table, string ownerSimpleName) {
@@ -853,6 +861,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private void EmitPersistentApply(StringBuilder sb, TableModel table) {
         sb.AppendLine("    internal void Apply() {");
+        sb.AppendLine("        using var deleteOffsetsBuilder = ArrayPoolContainerBuilder<int>.Create(changes.Count);");
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
         sb.AppendLine("            switch (c.Kind) {");
         sb.AppendLine("                case ChangeKind.Insert: {");
@@ -889,28 +898,18 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
-        sb.AppendLine("                    var lastOffset = storage.LastOffset;");
-        sb.AppendLine("                    var swapped = storage.Delete(offset);");
         sb.AppendLine("                    primaryIndex.Delete(c.Key);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
             sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
         }
-        sb.AppendLine("                    if (swapped is { } swappedRow) {");
-        sb.AppendLine($"                        var swappedPk = swappedRow.{table.PrimaryKeyName};");
-        sb.AppendLine("                        primaryIndex.Delete(swappedPk);");
-        sb.AppendLine("                        primaryIndex.Insert(swappedPk, offset);");
-        foreach (var idx in table.Indexes) {
-            var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("swappedRow", idx) : $"{KeyExpr("swappedRow", idx)}, lastOffset";
-            sb.AppendLine($"                        {IndexFieldName(idx)}.Delete({deleteArgs});");
-            sb.AppendLine($"                        {IndexFieldName(idx)}.Insert({KeyExpr("swappedRow", idx)}, offset);");
-        }
-        sb.AppendLine("                    }");
+        sb.AppendLine("                    deleteOffsetsBuilder.Add(offset);");
         sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Delete, MemoryPackSerializer.Serialize(c.Key), null);");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine("        }");
+        EmitDeleteCompactionPass(sb, table);
         sb.AppendLine("        changes.Clear();");
         sb.AppendLine("        Dirty = false;");
         sb.AppendLine("    }");

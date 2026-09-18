@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Numerics;
 
 namespace RhinoDB.Lib.Storage;
@@ -72,6 +73,54 @@ public class DenseArray<T>
         return lastItem;
     }
 
+    public ArrayPoolContainer<DenseArrayRelocation<T>> DeleteMany(ReadOnlySpan<int> offsets) {
+        if (offsets.Length == 0) return ArrayPoolContainer<DenseArrayRelocation<T>>.Empty();
+
+        var targetsArray = ArrayPool<int>.Shared.Rent(offsets.Length);
+        try {
+            var targets = targetsArray.AsSpan(0, offsets.Length);
+            offsets.CopyTo(targets);
+            targets.Sort();
+
+            var newCount = Count - targets.Length;
+            var lo = 0;
+            var hi = targets.Length - 1;
+            var src = Count - 1;
+
+            using var relocationBuilder = ArrayPoolContainerBuilder<DenseArrayRelocation<T>>.Create(targets.Length);
+
+            while (lo < targets.Length && targets[lo] < newCount) {
+                while (src >= newCount && hi >= 0 && src == targets[hi]) {
+                    hi -= 1;
+                    src -= 1;
+                }
+
+                var moved = Get(src);
+                Set(targets[lo], moved);
+                relocationBuilder.Add(new DenseArrayRelocation<T>(moved, src, targets[lo]));
+                lo += 1;
+                src -= 1;
+            }
+
+            Count = newCount;
+            TrimChunksTo(newCount);
+
+            return relocationBuilder.Build().Unwrap();
+        } finally {
+            ArrayPool<int>.Shared.Return(targetsArray);
+        }
+    }
+
+    private void TrimChunksTo(int newCount) {
+        var requiredChunks = newCount == 0 ? 1 : ((newCount - 1) >> chunkShift) + 1;
+        if (requiredChunks < chunkCount) {
+            values.RemoveRange(requiredChunks, chunkCount - requiredChunks);
+            chunkCount = requiredChunks;
+        }
+
+        currentChunk = chunkCount - 1;
+    }
+
     private void MoveChunkCursorIfApplicable(int lastIndexInChunk) {
         if (lastIndexInChunk == 0 && currentChunk > 0) {
             currentChunk -= 1;
@@ -85,3 +134,5 @@ public class DenseArray<T>
         }
     }
 }
+
+public readonly record struct DenseArrayRelocation<T>(T Row, int OldOffset, int NewOffset) where T : struct;

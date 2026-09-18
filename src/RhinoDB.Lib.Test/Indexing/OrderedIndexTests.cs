@@ -23,7 +23,7 @@ public class OrderedIndexTests {
         public required dynamic Range { get; init; }
     }
 
-    static private int[] Read(OffsetList writer) {
+    static private int[] Read(ArrayPoolContainer<int> writer) {
         using var w = writer;
         return w.Buffer().ToArray();
     }
