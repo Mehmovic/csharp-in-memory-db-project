@@ -6,7 +6,7 @@ rushed, but not directionless either. Each stage has a concrete definition of do
 below is fixed: each stage genuinely needs the ones above it to exist first.
 
 ```
-storage → indexes → transactions → libmdbx (cold storage) → IDC → networking
+storage → indexes → transactions → libmdbx (cold storage) → WAL durability → IDC → networking
 ```
 
 **Build order revised 2026-09-13, diverging from stage numbering.** The
@@ -28,6 +28,16 @@ a minimal real game before investing further in the harder, still-fully-
 unbuilt distributed-systems work (IDC, then cross-machine IDC, then a custom
 UDP transport) — that work is valuable for *scaling* a shipped game, not a
 prerequisite for a first one.
+
+**Revised again, 2026-09-14 (superseding the paragraph above on one point):**
+WAL-based write durability (**Stage 5.5** below) turned out not to belong in
+the Backlog after all — its last phase (a ring buffer) is a real dependency
+of Stage 8's reconnect/catch-up story, not an independent, deferrable
+improvement (`Docs/05-wal-design.md` Phase 4: "Stage 8's subscription engine
+gets its diff source from the same ring"). Actual order became Stages 1-5
+(done) → **Stage 5.5, WAL durability** (in progress) → Stage 7+8 → poc game
+→ Stage 6, not Stages 1-5 → Stage 7+8 directly as the paragraph above still
+describes.
 
 ## Stage 1 — Storage engine ✅ done
 
@@ -641,6 +651,85 @@ covering the benchmark's temp directory made no meaningful difference
 normal run-to-run variance). The root cause of the fresh-page-write cost is
 still open.
 
+## Stage 5.5 — WAL-based write durability ⏳ in progress (ring buffer + re-benchmark left)
+
+**Sequencing correction**: the Backlog entry below originally describing
+this work as "sequenced after Stage 7+8 (networking)... not before" no
+longer reflects what actually happened — decided in principle 2026-09-14,
+building started immediately after and finished ahead of Stage 7+8, because
+this stage's last phase (a ring buffer) is a real dependency of Stage 8's
+reconnect/catch-up story, not an independent, deferrable improvement. See
+the "Revised again, 2026-09-14" note at the top of this doc. Full design:
+`Docs/05-wal-design.md`.
+
+Real: WAL record format + append-only writer (Phase 1), the group-commit
+engine (`WriteAheadLog`, `Confirmed`/`Optimistic` propagation, Phase 2), and
+checkpointing (`CheckpointEngine`, WAL↔libmdbx integration, eviction
+write-through, Phase 3). `ColdStore` now drives all of this directly
+(`Stage`/`CompleteRecovery`/`IsScopeActive`), replacing the direct
+synchronous libmdbx write path Stage 5 originally built (superseded
+2026-09-14 — see that stage's own text above, kept as history, not deleted).
+
+2026-09-18: **Archived WAL history + opt-in genesis replay** — not part of
+this stage's original phase list, added once it became clear `WriteAheadLog.
+Truncate()` at every checkpoint destroys anything it wipes, so history older
+than "since the last checkpoint" would otherwise be unrecoverable forever.
+`WalArchive` copies each checkpoint's about-to-be-truncated entries into a
+permanent, sequentially-numbered segment before the truncate runs — always
+on, not opt-in, since there's no way to recover history later that wasn't
+preserved at the time. A generated `{Db}Loader.LoadFromGenesis(db, cold,
+upToLsn:, onEntryApplied:)` replays that archived history plus the live WAL
+tail directly into memory, entirely bypassing libmdbx and the live WAL — a
+debug/inspection tool, not a new default startup path; still requires an
+explicit caller (see the 2026-09-19 host entry below for what that caller
+actually looks like). A real bug caught only by the first end-to-end test
+exercising it, not by design review: the original design re-opened `wal.dat`
+directly for the live tail, a guaranteed sharing violation against the
+`FileShare.None` handle the owning `ColdStore` already holds — fixed by
+`ColdStore` exposing `PendingWalTail`/`DirectoryPath` (what it already
+decoded at `Open()` time) instead of `WalArchive` ever touching that file
+itself. Full design, including how this interacts with the not-yet-built
+schema-migration work: `Docs/06-schema-migration.md` section 5 ("Genesis
+replay across generations") — archived segments are tagged with the
+generation they were written under and decoded lazily at replay time via
+whichever generation's reader/transform applies, rather than rewritten
+forward at every migration.
+
+2026-09-19: **`RhinoHostBuilder`/`RhinoHost`** — the runnable-host layer
+this project's original "library, not a service" decision always implied
+would eventually need to exist (see
+[Architecture — Hosting](02-architecture.md#hosting): "console app first,"
+and [Architecture — Deployment](02-architecture.md#deployment): "you build
+and run your own instance"). A builder registers one or more databases
+(`AddDatabase<TDb,TTx>(name, options => { ... })`, `DatabaseOptions<TDb,TTx>`
+supplying `CreateDb`/`LoadAsync`/`LoadFromGenesis` — the last two
+mode-conditionally required, not always both, since e.g. a database that
+only ever runs normally shouldn't have to also configure a replay delegate
+it will never call) against one shared CLI `args[]` array, each database's
+flags namespaced by its registered name (`--{name}.cold-path`,
+`--{name}.mode`, `--{name}.replay-upto-lsn`) so one process can host several
+actor-model databases side by side, matching the execution model's existing
+"single-writer per database, several databases can share a process"
+design. `BuildAsync()` fails fast on the first registration that fails to
+open/recover/replay, rather than coming up with one database silently
+broken while another runs. `Migrate` mode is a recognized, parseable value
+already — forward-compatible with `Docs/06-schema-migration.md`'s eventual
+runtime migration protocol — but refuses loudly rather than silently
+no-opping, since nothing implements migration yet.
+
+**Left before this stage is done**: Phase 4, the ring buffer itself (a
+per-database RAM circular buffer of recent committed changes, covering both
+`Instant` and `Persistent` tables via one new generator hook in
+`EmitInstantApply`/`EmitPersistentApply` — see `Docs/05-wal-design.md` Phase
+4 for the full design, including why it's needed even for non-durable
+`Instant` tables); and a re-run of the throughput benchmarks plus a
+documentation pass now that the write path is WAL-based rather than
+direct-libmdbx (the last full benchmark writeup, `ThroughputBenchmarks.md`
+above, predates the WAL replacing libmdbx's synchronous path and needs
+redoing against the current write path, not just re-read). Both are
+prerequisites for Stage 6/7+8, not independent follow-up work — see the
+sequencing note above.
+
 ## Stage 6 — Inter-Database Communication (IDC) ⏳ designed, not built, built after Stage 7+8
 
 Renamed 2026-09-13 from "Change propagation" — that name was ambiguous between
@@ -825,9 +914,16 @@ don't get built before they're needed:
   actual latency/bandwidth problem shows up that WebSocket can't serve well
   enough — not built speculatively ahead of that evidence.
 - **WAL-based durability, replacing libmdbx as the write-durability path**
-  (libmdbx stays for `Load`/`Evict`/`Peek`) — decided in principle
-  2026-09-14, not built. Prompted by the fresh-page-write investigation
-  above: libmdbx's memory-mapped copy-on-write B+tree pays a real,
+  (libmdbx stays for `Load`/`Evict`/`Peek`) — **superseded 2026-09-14, moved
+  out of the Backlog into its own Stage 5.5 section above.** Kept here
+  as the original investigation record, not as the
+  current status — the "not built" framing and the "sequenced after Stage
+  7+8... not before" call below did not survive contact with the ring
+  buffer's real dependency relationship to Stage 8 (see Stage 5.5's
+  "Sequencing correction"); most of what this bullet once called "real,
+  not-yet-designed work" is real, built work now. Prompted by the
+  fresh-page-write investigation above: libmdbx's memory-mapped
+  copy-on-write B+tree pays a real,
   measured ~900 μs-1 ms cost the *first* time any given page is touched
   (page-fault handling when the OS backs a newly-dirtied mapped page with a
   real physical page/disk block) - confirmed via `RawFileIoBenchmarks.cs`
@@ -853,28 +949,30 @@ don't get built before they're needed:
   (replayed from the WAL, likely lagging slightly), refreshed by a
   checkpoint process rather than synchronously on every write.
 
-  **Real, not-yet-designed work this implies, named so it isn't
-  underestimated later**: WAL record format (framing, checksums) and an
-  append-only writer; startup replay logic (rebuilding in-memory state - and
-  bringing libmdbx back up to date - from the last consistent point after a
-  crash); a background WAL→libmdbx checkpoint/compaction process; WAL
-  rotation/truncation policy so it doesn't grow forever; and correctness
-  handling for a crash mid-checkpoint (some WAL entries reflected in
-  libmdbx, some not yet - must not lose or double-apply anything on
-  recovery). This is a genuinely large undertaking, comparable in scope to
-  Stage 5's original libmdbx integration, not a small swap - sequenced
-  after Stage 7+8 (networking) and the tiny proof-of-concept game, per this
-  doc's own build-order priority, not before.
+  **Then-projected work, named so it wasn't underestimated — now built, see
+  Stage 5.5**: WAL record format (framing, checksums) and an append-only
+  writer; startup replay logic (rebuilding in-memory state - and bringing
+  libmdbx back up to date - from the last consistent point after a crash); a
+  background WAL→libmdbx checkpoint/compaction process; WAL rotation/
+  truncation policy so it doesn't grow forever; and correctness handling for
+  a crash mid-checkpoint (some WAL entries reflected in libmdbx, some not
+  yet - must not lose or double-apply anything on recovery). This was a
+  genuinely large undertaking, comparable in scope to Stage 5's original
+  libmdbx integration, not a small swap — the "sequenced after Stage 7+8...
+  not before" call this sentence originally ended on is exactly what Stage
+  5.5's "Sequencing correction" now overrides.
 
-  **Secondary, already-planned benefit this converges with**: Stage 6 (IDC)
-  and Stage 8 (client subscribe-and-diff) both already need a durable,
-  ordered, replayable record of `Change<TKey,TRow>`s so a reconnecting peer
-  database or client can catch up on what it missed - a "commit log" in the
-  Kafka/CDC sense. A WAL built for write durability is the same shape of
-  primitive; worth designing the two together rather than building a
-  second, separate change-retention mechanism later. Not yet decided
-  whether they end up as literally the same log or two logs sharing a
-  format - a question for whenever this is actually scoped for real.
+  **Secondary, already-planned benefit this converges with — confirmed, see
+  Stage 5.5's 2026-09-18 entry**: Stage 6 (IDC) and Stage 8 (client
+  subscribe-and-diff) both already need a durable, ordered, replayable
+  record of `Change<TKey,TRow>`s so a reconnecting peer database or client
+  can catch up on what it missed - a "commit log" in the Kafka/CDC sense. A
+  WAL built for write durability is the same shape of primitive; worth
+  designing the two together rather than building a second, separate
+  change-retention mechanism later. Turned out to be the ring buffer (WAL
+  design Phase 4, still pending) sitting *alongside* the WAL rather than
+  reusing its on-disk log directly — two structures sharing one LSN
+  sequence, not one log serving both jobs.
 - **`[Database]` gains an `Accessor`-style name** — for a future networked/RPC
   access layer (`ctx.Db.Table.Insert(...)`, `ctx` being an RPC-scoped context,
   not `DbContext` itself) a remote client can't address a database by its C#
