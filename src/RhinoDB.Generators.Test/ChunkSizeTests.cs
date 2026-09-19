@@ -10,6 +10,8 @@ namespace RhinoDB.Test.Generators;
 // observable right after construction before any row is inserted.
 public class ChunkSizeTests {
     private const string DefaultSource = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -19,10 +21,14 @@ public class ChunkSizeTests {
         public partial class DefaultChunkDb : DbContext<DefaultChunkDbTransaction> { }
 
         [Table(TableKind.Instant, typeof(DefaultChunkDb))]
-        public readonly partial record struct Widget([PrimaryKey] int Id);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
         """;
 
     private const string ExplicitSource = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -32,7 +38,9 @@ public class ChunkSizeTests {
         public partial class ExplicitChunkDb : DbContext<ExplicitChunkDbTransaction> { }
 
         [Table(TableKind.Instant, typeof(ExplicitChunkDb), ChunkSize = 100)]
-        public readonly partial record struct Widget([PrimaryKey] int Id);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
         """;
 
     static private int StorageCapacity(System.Reflection.Assembly asm, string dbTypeName, string fieldName) {

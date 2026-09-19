@@ -14,14 +14,12 @@ namespace RhinoDB.Test.Generators;
 public class Milestone3Tests {
     private string dir = "";
 
-    // Account is deliberately all-unmanaged fields (no string) - MemoryPack
-    // serializes unmanaged structs automatically, with no [MemoryPackable]
-    // attribute or generated formatter needed, which sidesteps a real
-    // MemoryPack.Generator/Roslyn-preview interop gap this harness hit when
-    // trying to run that generator manually alongside TableGenerator (see
-    // git history around 2026-09-12 if this needs revisiting for a
-    // reference-typed persistent-table field).
+    // [MemoryPackable(GenerateType.VersionTolerant)]/[MessagePackObject] are mandatory on every
+    // [Table] row type now (both kinds), so every field carries [MemoryPackOrder(n)]/[Key(n)] too -
+    // see TableGenerator.cs's MissingSerializationAttributesDiagnostic (RHINO015).
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -31,10 +29,19 @@ public class Milestone3Tests {
         public partial class BankDb : DbContext<BankDbTransaction> { }
 
         [Table(TableKind.Persistent, typeof(BankDb), Evictable = true)]
-        public readonly partial record struct Account([PrimaryKey] int Id, int OwnerId, decimal Balance);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Account(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] int OwnerId,
+            [property: MemoryPackOrder(2)] [property: Key(2)] decimal Balance);
 
         [Table(TableKind.Instant, typeof(BankDb))]
-        public readonly partial record struct Player([PrimaryKey] int Id, string Name);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Player(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
         """;
 
     [SetUp]

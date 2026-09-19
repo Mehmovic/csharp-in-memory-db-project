@@ -12,6 +12,8 @@ namespace RhinoDB.Test.Generators;
 // composite key has to survive chunk splits, binary-search starts and swap-removes.
 public class CompositeStringIndexTests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -21,16 +23,20 @@ public class CompositeStringIndexTests {
         public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
 
         [Table(TableKind.Instant, typeof(LeagueDb))]
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
         public readonly partial record struct Player(
-            [PrimaryKey] int Id,
-            [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "ByClubAndName", Order = 0)] int ClubId,
-            [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "ByClubAndName", Order = 1)] string Name);
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "ByClubAndName", Order = 0)] [property: MemoryPackOrder(1)] [property: Key(1)] int ClubId,
+            [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "ByClubAndName", Order = 1)] [property: MemoryPackOrder(2)] [property: Key(2)] string Name);
 
         [Table(TableKind.Instant, typeof(LeagueDb))]
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
         public readonly partial record struct SquadSlot(
-            [PrimaryKey] int Id,
-            [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByClubAndRole", Order = 0)] int ClubId,
-            [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByClubAndRole", Order = 1)] string Role);
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByClubAndRole", Order = 0)] [property: MemoryPackOrder(1)] [property: Key(1)] int ClubId,
+            [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByClubAndRole", Order = 1)] [property: MemoryPackOrder(2)] [property: Key(2)] string Role);
 
         // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
         // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching

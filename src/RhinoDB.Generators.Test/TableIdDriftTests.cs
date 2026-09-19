@@ -11,6 +11,8 @@ namespace RhinoDB.Test.Generators;
 // comparisons).
 public class TableIdDriftTests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -20,7 +22,11 @@ public class TableIdDriftTests {
         public partial class DriftDb : DbContext<DriftDbTransaction> { }
 
         [Table(TableKind.Persistent, typeof(DriftDb), Accessor = "Accounts")]
-        public readonly partial record struct Account([PrimaryKey] int Id, string Email);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Account(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Email);
         """;
 
     [Test]

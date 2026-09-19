@@ -8,6 +8,8 @@ namespace RhinoDB.Test.Generators;
 // primary key round-trips the same as the default HashIndex-backed one.
 public class PrimaryKeyKindTests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -17,7 +19,11 @@ public class PrimaryKeyKindTests {
         public partial class RankingDb : DbContext<RankingDbTransaction> {{ }}
 
         [Table(TableKind.Instant, typeof(RankingDb))]
-        public readonly partial record struct Ranking([PrimaryKey(IndexKind.{0})] int Id, string Name);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Ranking(
+            [PrimaryKey(IndexKind.{0})] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
         """;
 
     [Test]

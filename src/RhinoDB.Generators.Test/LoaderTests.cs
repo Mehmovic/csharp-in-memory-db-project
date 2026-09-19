@@ -13,6 +13,8 @@ namespace RhinoDB.Test.Generators;
 // generated assembly) for a consumer who wants to eager-load one anyway.
 public class LoaderTests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -22,13 +24,23 @@ public class LoaderTests {
         public partial class GameDb : DbContext<GameDbTransaction> { }
 
         [Table(TableKind.Persistent, typeof(GameDb))]
-        public readonly partial record struct Club([PrimaryKey] int Id, int Rating);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Club(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] int Rating);
 
         [Table(TableKind.Persistent, typeof(GameDb), Evictable = true)]
-        public readonly partial record struct Account([PrimaryKey] int Id, decimal Balance);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Account(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance);
 
         [Table(TableKind.Instant, typeof(GameDb))]
-        public readonly partial record struct Session([PrimaryKey] int Id);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Session([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
         """;
 
     static private object NewClub(System.Reflection.Assembly assembly, int id, int rating) {
@@ -169,6 +181,8 @@ public class LoaderTests {
     [Test]
     public void InstantOnlyDatabase_DoesNotGenerateALoaderAtAll() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -178,7 +192,9 @@ public class LoaderTests {
             public partial class ShopDb : DbContext<ShopDbTransaction> { }
 
             [Table(TableKind.Instant, typeof(ShopDb))]
-            public readonly partial record struct Widget([PrimaryKey] int Id);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
             """;
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);

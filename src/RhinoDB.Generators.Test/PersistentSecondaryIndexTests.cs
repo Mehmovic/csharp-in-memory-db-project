@@ -17,6 +17,8 @@ public class PersistentSecondaryIndexTests {
     // Milestone3Tests.cs's Account for why (MemoryPack.Generator interop gap
     // sidestepped by keeping every persistent-table row fully unmanaged).
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -26,11 +28,13 @@ public class PersistentSecondaryIndexTests {
         public partial class BankDb : DbContext<BankDbTransaction> { }
 
         [Table(TableKind.Persistent, typeof(BankDb), Evictable = true)]
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
         public readonly partial record struct Account(
-            [PrimaryKey] int Id,
-            [Index(IndexKind.Hash, Uniqueness.Unique)] int AccountNumber,
-            [Index(IndexKind.Hash, Uniqueness.NonUnique)] int OwnerId,
-            decimal Balance);
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [Index(IndexKind.Hash, Uniqueness.Unique)] [property: MemoryPackOrder(1)] [property: Key(1)] int AccountNumber,
+            [Index(IndexKind.Hash, Uniqueness.NonUnique)] [property: MemoryPackOrder(2)] [property: Key(2)] int OwnerId,
+            [property: MemoryPackOrder(3)] [property: Key(3)] decimal Balance);
 
         // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
         // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching

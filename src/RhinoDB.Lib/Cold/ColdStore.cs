@@ -1,3 +1,5 @@
+using MemoryPack;
+
 using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Execution;
 using RhinoDB.Lib.Tables;
@@ -206,6 +208,21 @@ public sealed class ColdStore : IDisposable {
 
     public ColdTable<TKey, TRow> OpenTable<TKey, TRow>(string name)
         where TKey : IEquatable<TKey>, IComparable<TKey>
+        where TRow : struct =>
+        OpenTable<TKey, TRow>(
+            name,
+            k => MemoryPackSerializer.Serialize(k),
+            b => MemoryPackSerializer.Deserialize<TKey>(b)!,
+            b => MemoryPackSerializer.Deserialize<TRow>(b)!
+        );
+
+    public ColdTable<TKey, TRow> OpenTable<TKey, TRow>(
+        string name,
+        Func<TKey, byte[]> serializeKey,
+        Func<byte[], TKey> deserializeKey,
+        Func<byte[], TRow> deserializeRow
+    )
+        where TKey : IEquatable<TKey>, IComparable<TKey>
         where TRow : struct {
         if (tables.TryGetValue(name, out var existing)) return (ColdTable<TKey, TRow>)existing;
 
@@ -221,7 +238,7 @@ public sealed class ColdStore : IDisposable {
         var rcCommit = txn.Commit();
         if (rcCommit != 0) throw MdbxErrorMapper.Map(rcCommit).ToException();
 
-        var table = new ColdTable<TKey, TRow>(dbi);
+        var table = new ColdTable<TKey, TRow>(dbi, serializeKey, deserializeKey, deserializeRow);
         tables[name] = table;
         tableDbisById[TableIdHash.Compute(name)] = dbi;
         return table;

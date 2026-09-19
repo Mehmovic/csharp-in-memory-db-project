@@ -17,6 +17,8 @@ public class PersistentDurabilityTests {
     private string dir = "";
 
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -26,7 +28,12 @@ public class PersistentDurabilityTests {
         public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
         [Table(TableKind.Persistent, typeof(VaultDb), Evictable = true)]
-        public readonly partial record struct Account([PrimaryKey] int Id, int OwnerId, decimal Balance);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Account(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] int OwnerId,
+            [property: MemoryPackOrder(2)] [property: Key(2)] decimal Balance);
         """;
 
     [SetUp]

@@ -5,6 +5,8 @@ namespace RhinoDB.Test.Generators;
 
 public class MultiDatabaseTableTests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -18,7 +20,11 @@ public class MultiDatabaseTableTests {
 
         [Table(TableKind.Instant, typeof(GameDb))]
         [Table(TableKind.Instant, typeof(ShardDb))]
-        public readonly partial record struct Player([PrimaryKey] int Id, string Name);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Player(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
         """;
 
     [Test]
@@ -73,6 +79,8 @@ public class MultiDatabaseTableTests {
     [Test]
     public async Task SameDatabase_TwoTablesOfTheSameRowType_DistinctAccessors_AreIndependent() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -83,7 +91,11 @@ public class MultiDatabaseTableTests {
 
             [Table(TableKind.Instant, typeof(LeagueDb), Accessor = "PrimaryPlayers")]
             [Table(TableKind.Instant, typeof(LeagueDb), Accessor = "BackupPlayers")]
-            public readonly partial record struct Player([PrimaryKey] int Id, string Name);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Player(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
             """;
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
@@ -109,6 +121,8 @@ public class MultiDatabaseTableTests {
     [Test]
     public void SameDatabase_TwoTablesWithTheSameAccessor_ReportsRHINO010() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -119,7 +133,11 @@ public class MultiDatabaseTableTests {
 
             [Table(TableKind.Instant, typeof(DupAccessorDb), Accessor = "Players")]
             [Table(TableKind.Instant, typeof(DupAccessorDb), Accessor = "Players")]
-            public readonly partial record struct Player([PrimaryKey] int Id, string Name);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Player(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
             """;
 
         var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));

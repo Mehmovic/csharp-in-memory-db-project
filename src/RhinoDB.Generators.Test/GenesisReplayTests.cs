@@ -12,6 +12,8 @@ namespace RhinoDB.Test.Generators;
 // to reach today's state).
 public class GenesisReplayTests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -21,7 +23,11 @@ public class GenesisReplayTests {
         public partial class GameDb : DbContext<GameDbTransaction> { }
 
         [Table(TableKind.Persistent, typeof(GameDb))]
-        public readonly partial record struct Club([PrimaryKey] int Id, int Rating);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Club(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] int Rating);
         """;
 
     static private object NewClub(System.Reflection.Assembly assembly, int id, int rating) {

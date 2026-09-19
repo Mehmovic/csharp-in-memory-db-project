@@ -5,6 +5,8 @@ namespace RhinoDB.Test.Generators;
 
 public class Milestone5Tests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
@@ -15,7 +17,12 @@ public class Milestone5Tests {
         public partial class ShopDb : DbContext<ShopDbTransaction> { }
 
         [Table(TableKind.Instant, typeof(ShopDb))]
-        public readonly partial record struct Club([PrimaryKey] int Id, string Name, decimal Balance) {
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Club(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
+            [property: MemoryPackOrder(2)] [property: Key(2)] decimal Balance) {
             [Validate]
             internal static DbError? ValidateBalance(Club row) => row.Balance < 0 ? DbError.Custom(1) : null;
 
@@ -114,6 +121,8 @@ public class Milestone5Tests {
     [Test]
     public void InvalidValidateMethodSignature_ReportsRHINO009() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
@@ -124,7 +133,9 @@ public class Milestone5Tests {
             public partial class BadDb : DbContext<BadDbTransaction> { }
 
             [Table(TableKind.Instant, typeof(BadDb))]
-            public readonly partial record struct Widget([PrimaryKey] int Id) {
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id) {
                 [Validate]
                 DbError? ValidateSomething() => null;
             }
@@ -140,6 +151,8 @@ public class Milestone5Tests {
         // sibling class) can never call it, so this must be a diagnostic,
         // not a confusing CS0122 surfacing out of generated code.
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
@@ -150,7 +163,9 @@ public class Milestone5Tests {
             public partial class PrivateValidateDb : DbContext<PrivateValidateDbTransaction> { }
 
             [Table(TableKind.Instant, typeof(PrivateValidateDb))]
-            public readonly partial record struct Widget([PrimaryKey] int Id) {
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id) {
                 [Validate]
                 static DbError? ValidateSomething(Widget row) => null;
             }

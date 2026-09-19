@@ -10,6 +10,8 @@ namespace RhinoDB.Test.Generators;
 // generator's own comment on Iter() for why).
 public class IterTests {
     private const string InstantSource = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -19,10 +21,16 @@ public class IterTests {
         public partial class ShopDb : DbContext<ShopDbTransaction> { }
 
         [Table(TableKind.Instant, typeof(ShopDb))]
-        public readonly partial record struct Widget([PrimaryKey] int Id, string Name);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Widget(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
         """;
 
     private const string PersistentSource = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -32,7 +40,11 @@ public class IterTests {
         public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
         [Table(TableKind.Persistent, typeof(VaultDb))]
-        public readonly partial record struct Account([PrimaryKey] int Id, decimal Balance);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Account(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance);
         """;
 
     static private object NewWidget(System.Reflection.Assembly assembly, int id, string name) {

@@ -106,6 +106,15 @@ static internal class GeneratorTestHost {
         return method.Invoke(null, args);
     }
 
+    // Same as InvokeHelper, but for the private static members (e.g. the raw serializer methods
+    // TableGenerator emits on each Ops class) that a plain public-only GetMethod lookup won't find.
+    static public object? InvokePrivateStaticHelper(Assembly asm, string typeName, string methodName, params object?[] args) {
+        var type = asm.GetType(typeName) ?? throw new InvalidOperationException($"Type '{typeName}' not found.");
+        var method = type.GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException($"Method '{methodName}' not found on '{typeName}'.");
+        return method.Invoke(null, args);
+    }
+
     static private ImmutableArray<MetadataReference> BuildReferences() {
         var trustedPlatformAssemblies = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator);
         var references = trustedPlatformAssemblies.Select(path => (MetadataReference)MetadataReference.CreateFromFile(path)).ToList();

@@ -5,6 +5,8 @@ namespace RhinoDB.Test.Generators;
 
 public class AutoIncrementTests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -14,7 +16,11 @@ public class AutoIncrementTests {
         public partial class GadgetDb : DbContext<GadgetDbTransaction> { }
 
         [Table(TableKind.Instant, typeof(GadgetDb))]
-        public readonly partial record struct Gadget([PrimaryKey][AutoIncrement] int Id, string Name);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Gadget(
+            [PrimaryKey][AutoIncrement] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
         """;
 
     static private (object Db, Type TxType, System.Reflection.Assembly Assembly) NewDb() {
@@ -124,6 +130,8 @@ public class AutoIncrementTests {
     [Test]
     public async Task TwoAutoIncrementFieldsOnOneTable_TrackIndependentSequences() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -133,7 +141,12 @@ public class AutoIncrementTests {
             public partial class WidgetDb : DbContext<WidgetDbTransaction> { }
 
             [Table(TableKind.Instant, typeof(WidgetDb))]
-            public readonly partial record struct Widget([PrimaryKey][AutoIncrement] int Id, [AutoIncrement] long Sequence, string Name);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Widget(
+                [PrimaryKey][AutoIncrement] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [AutoIncrement] [property: MemoryPackOrder(1)] [property: Key(1)] long Sequence,
+                [property: MemoryPackOrder(2)] [property: Key(2)] string Name);
             """;
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var dbType = asm.GetType("TestNs.WidgetDb")!;
@@ -167,6 +180,8 @@ public class AutoIncrementTests {
     [Test]
     public async Task AutoIncrementField_GuardedByAUniqueIndex_AutoAssignsDistinctValues() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -176,7 +191,12 @@ public class AutoIncrementTests {
             public partial class TicketDb : DbContext<TicketDbTransaction> { }
 
             [Table(TableKind.Instant, typeof(TicketDb))]
-            public readonly partial record struct Ticket([PrimaryKey] int Id, [Index(IndexKind.Hash, Uniqueness.Unique)][AutoIncrement] int Code, string Name);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Ticket(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [Index(IndexKind.Hash, Uniqueness.Unique)][AutoIncrement] [property: MemoryPackOrder(1)] [property: Key(1)] int Code,
+                [property: MemoryPackOrder(2)] [property: Key(2)] string Name);
 
             // QuerySingle is a ref struct and can never cross a dynamic call boundary (see
             // GeneratorTestHost.InvokeHelper) - this helper does the Idx.Code.Find(...) touching
@@ -220,6 +240,8 @@ public class AutoIncrementTests {
     [Test]
     public async Task SignedAutoIncrementField_WithNegativeExplicitValue_StillAutoAssigns() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -229,7 +251,11 @@ public class AutoIncrementTests {
             public partial class NegDb : DbContext<NegDbTransaction> { }
 
             [Table(TableKind.Instant, typeof(NegDb))]
-            public readonly partial record struct Item([PrimaryKey][AutoIncrement] int Id, string Name);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Item(
+                [PrimaryKey][AutoIncrement] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
             """;
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var dbType = asm.GetType("TestNs.NegDb")!;
@@ -254,6 +280,8 @@ public class AutoIncrementTests {
     [Test]
     public async Task UnsignedAutoIncrementField_TriggersOnlyOnExplicitZero() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -263,7 +291,11 @@ public class AutoIncrementTests {
             public partial class CrateDb : DbContext<CrateDbTransaction> { }
 
             [Table(TableKind.Instant, typeof(CrateDb))]
-            public readonly partial record struct Crate([PrimaryKey][AutoIncrement] uint Id, string Name);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Crate(
+                [PrimaryKey][AutoIncrement] [property: MemoryPackOrder(0)] [property: Key(0)] uint Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
             """;
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var dbType = asm.GetType("TestNs.CrateDb")!;
@@ -298,6 +330,8 @@ public class AutoIncrementTests {
     [Test]
     public void AutoIncrementOnNonIntegerField_ReportsRHINO007() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -307,7 +341,11 @@ public class AutoIncrementTests {
             public partial class BadDb : DbContext<BadDbTransaction> { }
 
             [Table(TableKind.Instant, typeof(BadDb))]
-            public readonly partial record struct Invoice([PrimaryKey] int Id, [AutoIncrement] decimal Amount);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Invoice(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [AutoIncrement] [property: MemoryPackOrder(1)] [property: Key(1)] decimal Amount);
             """;
 
         var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));

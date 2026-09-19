@@ -11,6 +11,8 @@ public class EvictableTests {
     [Test]
     public void EvictableNotSet_PersistentTable_DoesNotExposeStorage() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -20,7 +22,11 @@ public class EvictableTests {
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
             [Table(TableKind.Persistent, typeof(VaultDb))]
-            public readonly partial record struct Account([PrimaryKey] int Id, decimal Balance);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Account(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance);
             """;
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
@@ -32,6 +38,8 @@ public class EvictableTests {
     [Test]
     public void EvictableFalseExplicitly_PersistentTable_DoesNotExposeStorage() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -41,7 +49,11 @@ public class EvictableTests {
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
             [Table(TableKind.Persistent, typeof(VaultDb), Evictable = false)]
-            public readonly partial record struct Account([PrimaryKey] int Id, decimal Balance);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Account(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance);
             """;
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
@@ -53,6 +65,8 @@ public class EvictableTests {
     [Test]
     public void EvictableTrue_PersistentTable_ExposesStorage() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -62,7 +76,11 @@ public class EvictableTests {
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
             [Table(TableKind.Persistent, typeof(VaultDb), Evictable = true)]
-            public readonly partial record struct Account([PrimaryKey] int Id, decimal Balance);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Account(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance);
             """;
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
@@ -74,6 +92,8 @@ public class EvictableTests {
     [Test]
     public void EvictableTrue_OnAnInstantKindTable_ReportsRHINO008() {
         const string source = """
+            using MemoryPack;
+            using MessagePack;
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
 
@@ -83,7 +103,9 @@ public class EvictableTests {
             public partial class ShopDb : DbContext<ShopDbTransaction> { }
 
             [Table(TableKind.Instant, typeof(ShopDb), Evictable = true)]
-            public readonly partial record struct Widget([PrimaryKey] int Id);
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
             """;
 
         var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));

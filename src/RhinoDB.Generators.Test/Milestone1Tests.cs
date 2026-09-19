@@ -11,6 +11,8 @@ namespace RhinoDB.Test.Generators;
 // ctx.Run call.
 public class Milestone1Tests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -20,7 +22,12 @@ public class Milestone1Tests {
         public partial class WidgetDb : DbContext<WidgetDbTransaction> { }
 
         [Table(TableKind.Instant, typeof(WidgetDb))]
-        public readonly partial record struct Widget([PrimaryKey] int Id, string Name, int Stock);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Widget(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
+            [property: MemoryPackOrder(2)] [property: Key(2)] int Stock);
         """;
 
     static private (object Db, Type TxType, System.Reflection.Assembly Assembly) NewDb() {

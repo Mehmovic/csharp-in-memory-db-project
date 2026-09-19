@@ -13,6 +13,8 @@ namespace RhinoDB.Test.Generators;
 // collide with the first).
 public class MultipleIndexesPerFieldTests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -22,15 +24,17 @@ public class MultipleIndexesPerFieldTests {
         public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
 
         [Table(TableKind.Instant, typeof(LeagueDb))]
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
         public readonly partial record struct Player(
-            [PrimaryKey] int Id,
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [Index(IndexKind.Hash, Uniqueness.NonUnique, Accessor = "ByClub")]
             [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByClubOrdered")]
-            int ClubId,
+            [property: MemoryPackOrder(1)] [property: Key(1)] int ClubId,
             [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "ByShirt")]
             [Index(IndexKind.BTree, Uniqueness.NonUnique, Accessor = "ByShirtLoose")]
-            int ShirtNumber,
-            string Name);
+            [property: MemoryPackOrder(2)] [property: Key(2)] int ShirtNumber,
+            [property: MemoryPackOrder(3)] [property: Key(3)] string Name);
 
         // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
         // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching

@@ -8,6 +8,8 @@ namespace RhinoDB.Test.Generators;
 // table's Ops on the database's Transaction (default "{RowTypeName}").
 public class AccessorOverrideTests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -17,7 +19,11 @@ public class AccessorOverrideTests {
         public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
 
         [Table(TableKind.Instant, typeof(LeagueDb), Accessor = "Teams")]
-        public readonly partial record struct Club([PrimaryKey(Accessor = "ById")] int Id, string Name);
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Club(
+            [PrimaryKey(Accessor = "ById")] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
         """;
 
     static private (object Db, Type TxType, System.Reflection.Assembly Assembly) NewDb() {

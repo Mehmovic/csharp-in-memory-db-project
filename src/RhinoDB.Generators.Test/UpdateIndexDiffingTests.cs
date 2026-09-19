@@ -18,6 +18,8 @@ namespace RhinoDB.Test.Generators;
 // behind or falsely reject the revert as a duplicate.
 public class UpdateIndexDiffingTests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -27,16 +29,20 @@ public class UpdateIndexDiffingTests {
         public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
 
         [Table(TableKind.Instant, typeof(LeagueDb))]
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
         public readonly partial record struct Club(
-            [PrimaryKey] int Id,
-            string Name,
-            [Index(IndexKind.Hash, Uniqueness.Unique)] string ShortCode);
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
+            [Index(IndexKind.Hash, Uniqueness.Unique)] [property: MemoryPackOrder(2)] [property: Key(2)] string ShortCode);
 
         [Table(TableKind.Instant, typeof(LeagueDb))]
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
         public readonly partial record struct Player(
-            [PrimaryKey] int Id,
-            string Name,
-            [Index(IndexKind.Hash, Uniqueness.NonUnique)] int ClubId);
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
+            [Index(IndexKind.Hash, Uniqueness.NonUnique)] [property: MemoryPackOrder(2)] [property: Key(2)] int ClubId);
 
         // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
         // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching

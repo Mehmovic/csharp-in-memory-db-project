@@ -10,6 +10,8 @@ namespace RhinoDB.Test.Generators;
 // machinery needed (see Docs/02-architecture.md § Transactions).
 public class Milestone2Tests {
     private const string Source = """
+        using MemoryPack;
+        using MessagePack;
         using RhinoDB.Core.Tables;
         using RhinoDB.Lib.Execution;
 
@@ -19,22 +21,28 @@ public class Milestone2Tests {
         public partial class ShopDb : DbContext<ShopDbTransaction> { }
 
         [Table(TableKind.Instant, typeof(ShopDb))]
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
         public readonly partial record struct Club(
-            [PrimaryKey] int Id,
-            string Name,
-            [Index(IndexKind.Hash, Uniqueness.Unique)] string ShortCode);
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
+            [Index(IndexKind.Hash, Uniqueness.Unique)] [property: MemoryPackOrder(2)] [property: Key(2)] string ShortCode);
 
         [Table(TableKind.Instant, typeof(ShopDb))]
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
         public readonly partial record struct Player(
-            [PrimaryKey] int Id,
-            string Name,
-            [Index(IndexKind.Hash, Uniqueness.NonUnique)] int ClubId);
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
+            [Index(IndexKind.Hash, Uniqueness.NonUnique)] [property: MemoryPackOrder(2)] [property: Key(2)] int ClubId);
 
         [Table(TableKind.Instant, typeof(ShopDb))]
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
         public readonly partial record struct Fixture(
-            [PrimaryKey] int Id,
-            [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "HomeAway", Order = 1)] int HomeClubId,
-            [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "HomeAway", Order = 0)] int AwayClubId);
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "HomeAway", Order = 1)] [property: MemoryPackOrder(1)] [property: Key(1)] int HomeClubId,
+            [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "HomeAway", Order = 0)] [property: MemoryPackOrder(2)] [property: Key(2)] int AwayClubId);
 
         // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
         // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching

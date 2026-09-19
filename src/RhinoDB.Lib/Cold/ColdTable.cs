@@ -1,18 +1,22 @@
-using MemoryPack;
 using RhinoDB.Native;
 
 namespace RhinoDB.Lib.Cold;
 
-public sealed class ColdTable<TKey, TRow>(uint dbi)
+public sealed class ColdTable<TKey, TRow>(
+    uint dbi,
+    Func<TKey, byte[]> serializeKey,
+    Func<byte[], TKey> deserializeKey,
+    Func<byte[], TRow> deserializeRow
+)
     where TKey : IEquatable<TKey>, IComparable<TKey>
     where TRow : struct {
     internal uint Dbi { get; } = dbi;
 
     internal Result<TRow> Get(Transaction txn, TKey key) {
-        var keyBytes = MemoryPackSerializer.Serialize(key);
+        var keyBytes = serializeKey(key);
         var rc = txn.Get(Dbi, keyBytes, out var rowBytes);
         if (rc != 0) return Result<TRow>.Error(MdbxErrorMapper.Map(rc));
-        return MemoryPackSerializer.Deserialize<TRow>(rowBytes)!;
+        return deserializeRow(rowBytes);
     }
 
     internal IEnumerable<(TKey Key, TRow Row)> ScanAll(Transaction txn) {
@@ -22,7 +26,7 @@ public sealed class ColdTable<TKey, TRow>(uint dbi)
         using (cursor) {
             var getRc = cursor!.GetFirst(out var keyBytes, out var valueBytes);
             while (getRc == 0) {
-                yield return (MemoryPackSerializer.Deserialize<TKey>(keyBytes)!, MemoryPackSerializer.Deserialize<TRow>(valueBytes)!);
+                yield return (deserializeKey(keyBytes), deserializeRow(valueBytes));
                 getRc = cursor.GetNext(out keyBytes, out valueBytes);
             }
         }
