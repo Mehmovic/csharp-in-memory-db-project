@@ -118,6 +118,47 @@ public class RawSerializerTests {
         Assert.That(ranksProp.GetValue(roundTripped), Is.EqualTo(new[] { 1, 2, 3 }));
     }
 
+    // List/Dictionary/HashSet/Queue/Stack (BuiltInFormattedGenericCollections) are exempted from
+    // RHINO016's mandatory [CustomType] check the same way arrays are - both MemoryPack and MessagePack
+    // ship global formatters for these with no attribute needed, so they route through the same
+    // WriteValue<T>/ReadValue<T> generic dispatch as the array case above.
+    private const string SourceWithCollectionFields = """
+        using MemoryPack;
+        using MessagePack;
+        using RhinoDB.Core.Tables;
+        using RhinoDB.Lib.Execution;
+        using System.Collections.Generic;
+
+        namespace TestNs;
+
+        [Database]
+        public partial class GameDb : DbContext<GameDbTransaction> { }
+
+        [Table(TableKind.Instant, typeof(GameDb))]
+        [MemoryPackable(GenerateType.VersionTolerant)]
+        [MessagePackObject]
+        public readonly partial record struct Inventory(
+            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+            [property: MemoryPackOrder(1)] [property: Key(1)] List<int> ItemIds,
+            [property: MemoryPackOrder(2)] [property: Key(2)] Dictionary<int, string> ItemNames
+        );
+        """;
+
+    [Test]
+    public void OtherKindField_BuiltInListAndDictionaryFormatters_SerializeRowThenDeserializeRow_RoundTrips() {
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(SourceWithCollectionFields);
+        var rowType = asm.GetType("TestNs.Inventory")!;
+        var itemIds = new List<int> { 1, 2, 3 };
+        var itemNames = new Dictionary<int, string> { [1] = "Sword", [2] = "Shield" };
+        var row = Activator.CreateInstance(rowType, 1, itemIds, itemNames)!;
+
+        var bytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.GameDbInventoryOps", "SerializeRow", row)!;
+        var roundTripped = GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.GameDbInventoryOps", "DeserializeRow", bytes);
+
+        Assert.That(rowType.GetProperty("ItemIds")!.GetValue(roundTripped), Is.EqualTo(itemIds));
+        Assert.That(rowType.GetProperty("ItemNames")!.GetValue(roundTripped), Is.EqualTo(itemNames));
+    }
+
     // SerializeVersionedMemoryPack/SerializeMessagePack call MemoryPackSerializer.Serialize<T>/
     // MessagePackSerializer.Serialize<T> directly - unlike SerializeRow/SerializeKey (hand-rolled,
     // no formatter dependency), these need a REAL formatter registered for the row type. Confirmed

@@ -145,13 +145,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor MissingSerializationAttributesOnCustomTypeFieldDiagnostic = new(
+    static internal readonly DiagnosticDescriptor MissingSerializationAttributesOnCustomTypeFieldDiagnostic = new(
         "RHINO016",
-        "Table row field's custom type missing mandatory IDC/client serialization attributes",
-        "Field '{0}.{1}' has type '{2}', which is missing {3} - a row field that isn't unmanaged or "
-        + "string is serialized via MemoryPack/MessagePack's own formatter dispatch for its type, so "
-        + "that type needs the same mandatory [MemoryPackable]/[MessagePackObject] contract as a "
-        + "[Table] row itself, or (de)serialization fails at runtime instead of compile time",
+        "Field's type must be a [CustomType] with mandatory IDC/client serialization attributes",
+        "Field '{0}.{1}' has type '{2}', which is missing {3} - a field that isn't unmanaged or string "
+        + "must be an explicitly [CustomType]-marked type carrying both [MemoryPackable] and "
+        + "[MessagePackObject]; unmarked types are rejected rather than silently falling back to "
+        + "MemoryPack's generic WriteValue<T>/ReadValue<T> formatter dispatch at runtime. This check "
+        + "applies at every level - a [CustomType]'s own fields are checked the same way when that type "
+        + "is itself processed by CustomTypeGenerator.",
         "RhinoDB.Generators",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
@@ -243,26 +245,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
         }
 
-        // One level deep only, matching the row -> field relationship - a CustomType field's own
-        // nested CustomType fields aren't recursed into. Array-typed fields (IArrayTypeSymbol, not
-        // INamedTypeSymbol) are deliberately excluded - MemoryPack ships a global formatter for arrays
-        // of unmanaged types with no attribute needed, confirmed via RawSerializerTests.cs's
-        // OtherKindField_BuiltInArrayFormatter test. Known limitation, not fixed here: a field typed as
-        // some OTHER built-in-formatted framework type (Guid, DateTime, List<T>, ...) would be a false
-        // positive - none of this codebase's row fixtures use one today, and exhaustively allow-listing
-        // every type MemoryPack/MessagePack ship a formatter for is out of scope for this diagnostic.
-        foreach (var p in primaryCtor.Parameters) {
-            if (p.Type.SpecialType == SpecialType.System_String || p.Type.IsUnmanagedType) continue;
-            if (p.Type is not INamedTypeSymbol fieldType) continue;
-
-            var missingOnField = ImmutableArray.CreateBuilder<string>();
-            if (!HasMemoryPackable(fieldType)) missingOnField.Add("[MemoryPackable]");
-            if (!HasMessagePackObject(fieldType)) missingOnField.Add("[MessagePackObject]");
-            if (missingOnField.Count > 0)
-                rowDiagnostics.Add(Diagnostic.Create(
-                    MissingSerializationAttributesOnCustomTypeFieldDiagnostic, ctx.TargetNode.GetLocation(),
-                    rowType.Name, p.Name, fieldType.Name, string.Join(" and ", missingOnField)));
-        }
+        rowDiagnostics.AddRange(CheckOtherKindFieldAttributes(primaryCtor.Parameters, rowType.Name, ctx.TargetNode.GetLocation()));
         if (rowDiagnostics.Count > 0) return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
 
         var primaryKeyAttribute = primaryKeyParam.GetAttributes().First(a => a.AttributeClass?.ToDisplayString() == PrimaryKeyAttributeFullName);
@@ -274,15 +257,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             rowDiagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(primaryKeyAttribute), $"[PrimaryKey] on '{rowType.Name}.{primaryKeyParam.Name}'"));
         var primaryKeyAccessor = pkAccessorProvided && pkAccessorValue != "" ? pkAccessorValue! : "Find";
 
-        var rowFields = primaryCtor.Parameters
-            .Select(p => new RowFieldModel(
-                p.Name,
-                p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                p.Type.SpecialType == SpecialType.System_String ? RowFieldKind.String
-                    : p.Type.IsUnmanagedType ? RowFieldKind.Unmanaged
-                    : RowFieldKind.Other
-            ))
-            .ToImmutableArray();
+        var rowFields = ToRowFieldModels(primaryCtor.Parameters);
 
         var autoIncrementFields = ImmutableArray.CreateBuilder<AutoIncrementFieldModel>();
         foreach (var p in primaryCtor.Parameters) {
@@ -517,11 +492,74 @@ public sealed class TableGenerator : IIncrementalGenerator {
             .Aggregate(2166136261u, (current, b) => (current ^ b) * 16777619u);
     }
 
-    static private bool HasMemoryPackable(INamedTypeSymbol type) =>
+    internal const string CustomTypeAttributeFullName = "RhinoDB.Core.Tables.CustomTypeAttribute";
+
+    static internal bool HasMemoryPackable(INamedTypeSymbol type) =>
         type.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "MemoryPack.MemoryPackableAttribute");
 
-    static private bool HasMessagePackObject(INamedTypeSymbol type) =>
+    static internal bool HasMessagePackObject(INamedTypeSymbol type) =>
         type.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "MessagePack.MessagePackObjectAttribute");
+
+    static internal bool HasCustomTypeAttribute(INamedTypeSymbol type) =>
+        type.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == CustomTypeAttributeFullName);
+
+    static private readonly ImmutableHashSet<(string Name, int Arity)> BuiltInFormattedGenericCollections =
+        ImmutableHashSet.Create(("List", 1), ("Dictionary", 2), ("HashSet", 1), ("Queue", 1), ("Stack", 1));
+
+    static internal bool IsBuiltInFormattedCollection(INamedTypeSymbol type) =>
+        type.OriginalDefinition.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic"
+        && BuiltInFormattedGenericCollections.Contains((type.OriginalDefinition.Name, type.OriginalDefinition.Arity));
+
+    // Shared between TableGenerator (row fields) and CustomTypeGenerator (custom type fields) - both
+    // walk a primary constructor's parameters into the exact same field shape.
+    static internal ImmutableArray<RowFieldModel> ToRowFieldModels(ImmutableArray<IParameterSymbol> parameters) =>
+        parameters
+            .Select(p => new RowFieldModel(
+                p.Name,
+                p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                p.Type.SpecialType == SpecialType.System_String ? RowFieldKind.String
+                    : p.Type.IsUnmanagedType ? RowFieldKind.Unmanaged
+                    : RowFieldKind.Other,
+                p.Type is INamedTypeSymbol namedType && HasCustomTypeAttribute(namedType)
+            ))
+            .ToImmutableArray();
+
+    // Shared between TableGenerator (a row's own fields) and CustomTypeGenerator (a [CustomType]'s own
+    // fields) - every Other-kind field whose type is an INamedTypeSymbol must be explicitly marked
+    // [CustomType] and carry both [MemoryPackable]/[MessagePackObject]. Only marked types participate in
+    // the serialization pipeline - there is no silent fallback to MemoryPack's generic WriteValue<T>/
+    // ReadValue<T> dispatch for an unmarked developer-authored type. This check only ever looks one level
+    // deep (a type's own immediate fields), but since every [CustomType] is independently processed by
+    // CustomTypeGenerator as its own generator target, that type's own call to this same method covers
+    // ITS fields the same way - recursion falls out naturally from every level checking its own
+    // immediate children, no explicit multi-hop walk needed. Array-typed fields (IArrayTypeSymbol, not
+    // INamedTypeSymbol) and the short BCL collection allowlist (BuiltInFormattedGenericCollections -
+    // List/Dictionary/HashSet/Queue/Stack) are deliberately excluded - both libraries ship global
+    // formatters for these with no attribute needed. Guid/DateTime/DateTimeOffset/TimeSpan need no
+    // special-casing here at all - they're fully blittable, so they're already RowFieldKind.Unmanaged
+    // and never reach this check in the first place. Known limitation, not fixed here: any OTHER
+    // built-in-formatted framework type outside this short list (Uri, custom collections, ...) would be
+    // a false positive - none of this codebase's fixtures use one today, and exhaustively allow-listing
+    // every type MemoryPack/MessagePack ship a formatter for is out of scope for this diagnostic.
+    static internal ImmutableArray<Diagnostic> CheckOtherKindFieldAttributes(
+        ImmutableArray<IParameterSymbol> parameters, string containingTypeName, Location location) {
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+        foreach (var p in parameters) {
+            if (p.Type.SpecialType == SpecialType.System_String || p.Type.IsUnmanagedType) continue;
+            if (p.Type is not INamedTypeSymbol fieldType) continue;
+            if (IsBuiltInFormattedCollection(fieldType)) continue;
+
+            var missing = ImmutableArray.CreateBuilder<string>();
+            if (!HasCustomTypeAttribute(fieldType)) missing.Add("[CustomType]");
+            if (!HasMemoryPackable(fieldType)) missing.Add("[MemoryPackable]");
+            if (!HasMessagePackObject(fieldType)) missing.Add("[MessagePackObject]");
+            if (missing.Count > 0)
+                diagnostics.Add(Diagnostic.Create(
+                    MissingSerializationAttributesOnCustomTypeFieldDiagnostic, location,
+                    containingTypeName, p.Name, fieldType.Name, string.Join(" and ", missing)));
+        }
+        return diagnostics.ToImmutable();
+    }
 
     static private string EmitOpsClass(TableModel table, string ownerSimpleName) =>
         table.Kind == TableKind.Persistent ? EmitPersistentOpsClass(table, ownerSimpleName) : EmitInstantOpsClass(table, ownerSimpleName);
@@ -782,15 +820,18 @@ public sealed class TableGenerator : IIncrementalGenerator {
         }
     }
 
-    static private void EmitWriteField(StringBuilder sb, RowFieldModel field, string expr) {
+    static internal void EmitWriteField(StringBuilder sb, RowFieldModel field, string expr) {
         switch (field.Kind) {
             case RowFieldKind.Unmanaged: sb.AppendLine($"        writer.WriteUnmanaged({expr});"); break;
             case RowFieldKind.String: sb.AppendLine($"        writer.WriteString({expr});"); break;
-            default: sb.AppendLine($"        writer.WriteValue({expr});"); break;
+            default:
+                if (field.IsCustomType) sb.AppendLine($"        {field.FieldTypeFullName}CustomTypeOps.WriteRaw(ref writer, {expr});");
+                else sb.AppendLine($"        writer.WriteValue({expr});");
+                break;
         }
     }
 
-    static private void EmitReadField(StringBuilder sb, RowFieldModel field) {
+    static internal void EmitReadField(StringBuilder sb, RowFieldModel field) {
         var varName = $"{Camel(field.FieldName)}Value";
         switch (field.Kind) {
             case RowFieldKind.Unmanaged:
@@ -800,7 +841,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine($"        var {varName} = reader.ReadString()!;");
                 break;
             default:
-                sb.AppendLine($"        var {varName} = reader.ReadValue<{field.FieldTypeFullName}>();");
+                if (field.IsCustomType) sb.AppendLine($"        var {varName} = {field.FieldTypeFullName}CustomTypeOps.ReadRaw(ref reader);");
+                else sb.AppendLine($"        var {varName} = reader.ReadValue<{field.FieldTypeFullName}>();");
                 break;
         }
     }
@@ -1435,7 +1477,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("}");
     }
 
-    static private string Camel(string name) => name.Length == 0 ? name : char.ToLowerInvariant(name[0]) + name.Substring(1);
+    static internal string Camel(string name) => name.Length == 0 ? name : char.ToLowerInvariant(name[0]) + name.Substring(1);
     
     // Those that have "Scan" method and inherit from OrderedIndex<TKey> and its children (Range, Gt, Gte, Lt, Lte, Iter, Filter)
     static bool IsRangedIndex(IndexModel indexModel) {
@@ -1505,13 +1547,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public string FieldTypeFullName { get; } = fieldTypeFullName;
     }
 
-    private sealed class RowFieldModel(string fieldName, string fieldTypeFullName, RowFieldKind kind) {
+    internal sealed class RowFieldModel(string fieldName, string fieldTypeFullName, RowFieldKind kind, bool isCustomType) {
         public string FieldName { get; } = fieldName;
         public string FieldTypeFullName { get; } = fieldTypeFullName;
         public RowFieldKind Kind { get; } = kind;
+        public bool IsCustomType { get; } = isCustomType;
     }
 
-    private enum RowFieldKind { Unmanaged, String, Other }
+    internal enum RowFieldKind { Unmanaged, String, Other }
 
     private sealed class DatabaseModel(string fullName, string simpleName, string? @namespace) {
         public string FullName { get; } = fullName;

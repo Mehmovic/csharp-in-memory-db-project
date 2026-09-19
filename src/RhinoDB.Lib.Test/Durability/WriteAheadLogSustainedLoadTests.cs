@@ -80,9 +80,9 @@ public class WriteAheadLogSustainedLoadTests {
             "not a self-throttling request-response loop): " +
             string.Join(", ", batchMicros.Select((us, i) => $"batch {i}: {us:F2} us/op")));
 
-        var firstHalfAvg = batchMicros.Take(BatchCount / 2).Average();
-        var secondHalfAvg = batchMicros.Skip(BatchCount / 2).Average();
-        TestContext.Out.WriteLine($"First-half avg: {firstHalfAvg:F2} us/op, second-half avg: {secondHalfAvg:F2} us/op.");
+        var firstHalfMedian = Median(batchMicros.Take(BatchCount / 2));
+        var secondHalfMedian = Median(batchMicros.Skip(BatchCount / 2));
+        TestContext.Out.WriteLine($"First-half median: {firstHalfMedian:F2} us/op, second-half median: {secondHalfMedian:F2} us/op.");
 
         // Generous sanity bounds, not tight perf claims: the settled libmdbx per-commit cost this
         // WAL replaces measured ~50-130us (Docs/03-roadmap.md). Two properties this test exists to
@@ -91,16 +91,30 @@ public class WriteAheadLogSustainedLoadTests {
         // resource leak or unbounded growth in the group-commit path would show up as the second
         // half getting markedly slower than the first).
         //
-        // The absolute bound checks the MINIMUM per-batch cost, not the average: the average is
-        // dominated by machine noise (Windows Defender realtime scanning of the temp-dir file has
-        // already produced misleading I/O numbers in this repo before - commit be219e6; confirmed
-        // flaky across repeated runs), while a single clean batch under the bound proves the
-        // mechanism's actual steady-state capability. A gross regression (e.g. back to the ~280us
-        // self-throttling pattern) fails the min too, so the check keeps its teeth. The
-        // degradation check stays on averages, where noise partly cancels.
-        Assert.That(secondHalfAvg, Is.LessThan(firstHalfAvg * 3),
+        // The absolute bound checks the MINIMUM per-batch cost, not an average: a single clean
+        // batch under the bound proves the mechanism's actual steady-state capability, and a gross
+        // regression (e.g. back to the ~280us self-throttling pattern) fails the min too, so the
+        // check keeps its teeth regardless of noise.
+        //
+        // The degradation check compares MEDIANS, not averages (confirmed necessary, not a
+        // hypothetical): Windows Defender realtime scanning of the temp-dir file has already
+        // produced misleading I/O numbers in this repo before (commit be219e6), and this test
+        // failed again the same way while implementing an unrelated change - one batch spiked to
+        // ~30x its neighbors (a single external-interference event: a real resource leak would
+        // show costs climbing across ALL batches, not one isolated spike) while the other 9
+        // batches, and the absolute-minimum check, stayed clean. A straight average over only 5
+        // batches per half is not resilient to one such outlier - it swamps the other four. The
+        // median is: it takes multiple slow batches (i.e. genuine sustained degradation, not one
+        // noisy sample) to move it.
+        Assert.That(secondHalfMedian, Is.LessThan(firstHalfMedian * 3),
             "Per-op cost degraded significantly over a sustained run - possible resource leak or unbounded growth in the group-commit path.");
         Assert.That(batchMicros.Skip(1).Min(), Is.LessThan(50.0),
             "Sustained per-op Confirmed cost regressed well above the settled libmdbx commit cost it was built to beat.");
+    }
+
+    static private double Median(IEnumerable<double> values) {
+        var sorted = values.OrderBy(v => v).ToArray();
+        var mid = sorted.Length / 2;
+        return sorted.Length % 2 == 0 ? (sorted[mid - 1] + sorted[mid]) / 2.0 : sorted[mid];
     }
 }

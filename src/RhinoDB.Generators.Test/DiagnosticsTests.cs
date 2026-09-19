@@ -483,12 +483,16 @@ public class DiagnosticsTests {
         var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
         Assert.That(ex!.Message, Does.Contain("RHINO016"));
         Assert.That(ex.Message, Does.Contain("PlayerName"));
+        Assert.That(ex.Message, Does.Contain("[CustomType]"));
         Assert.That(ex.Message, Does.Contain("[MemoryPackable]"));
         Assert.That(ex.Message, Does.Contain("[MessagePackObject]"));
     }
 
     [Test]
-    public void CustomTypeFieldWithBothSerializationAttributes_IsAccepted() {
+    public void CustomTypeFieldMissingOnlyTheCustomTypeAttribute_ReportsRHINO016() {
+        // Only [MemoryPackable]/[MessagePackObject] present, no [CustomType] - no silent fallback to
+        // MemoryPack's generic WriteValue<T>/ReadValue<T> dispatch is allowed; unmarked types are
+        // rejected outright, even when they'd otherwise have a real formatter available.
         const string source = """
             using MemoryPack;
             using MessagePack;
@@ -514,7 +518,87 @@ public class DiagnosticsTests {
                 [property: MemoryPackOrder(1)] [property: Key(1)] PlayerName Name);
             """;
 
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO016"));
+        // Exactly one item in the "missing" list - the explanatory text below always mentions
+        // [MemoryPackable]/[MessagePackObject] regardless, so this checks the actual reported list itself.
+        Assert.That(ex.Message, Does.Contain("which is missing [CustomType] -"));
+    }
+
+    [Test]
+    public void CustomTypeFieldWithAllThreeAttributes_IsAccepted() {
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class CustomFieldDb : DbContext<CustomFieldDbTransaction> { }
+
+            [CustomType]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct PlayerName(
+                [property: MemoryPackOrder(0)] [property: Key(0)] string First,
+                [property: MemoryPackOrder(1)] [property: Key(1)] string Last);
+
+            [Table(TableKind.Instant, typeof(CustomFieldDb))]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Player(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] PlayerName Name);
+            """;
+
         Assert.DoesNotThrow(() => GeneratorTestHost.CompileAndLoad(source));
+    }
+
+    [Test]
+    public void NestedCustomTypeWithinACustomTypeMissingTheCustomTypeAttribute_ReportsRHINO016Recursively() {
+        // The check isn't hard-coded to recurse multiple levels - it only ever looks at a type's own
+        // immediate fields. Recursive coverage falls out naturally instead: Contact is itself a
+        // [CustomType], so CustomTypeGenerator independently runs the exact same check on Contact's OWN
+        // fields (including HomeAddress) when it processes Contact as its own generator target - proving
+        // an inner CustomType missing [CustomType] is caught even though the outer row (Player) never
+        // looks past its own immediate field (Contact).
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class CustomFieldDb : DbContext<CustomFieldDbTransaction> { }
+
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Address(
+                [property: MemoryPackOrder(0)] [property: Key(0)] string City);
+
+            [CustomType]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Contact(
+                [property: MemoryPackOrder(0)] [property: Key(0)] string Email,
+                [property: MemoryPackOrder(1)] [property: Key(1)] Address HomeAddress);
+
+            [Table(TableKind.Instant, typeof(CustomFieldDb))]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Player(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] Contact Contact);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO016"));
+        Assert.That(ex.Message, Does.Contain("Address"));
+        Assert.That(ex.Message, Does.Contain("[CustomType]"));
     }
 
     [Test]
@@ -539,6 +623,109 @@ public class DiagnosticsTests {
             public readonly partial record struct Widget(
                 [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
                 [property: MemoryPackOrder(1)] [property: Key(1)] int[] Scores);
+            """;
+
+        Assert.DoesNotThrow(() => GeneratorTestHost.CompileAndLoad(source));
+    }
+
+    [Test]
+    public void BuiltInFormattedCollectionFields_AreExemptFromTheCustomTypeCheck() {
+        // List/Dictionary/HashSet/Queue/Stack (BuiltInFormattedGenericCollections) are exempt the same
+        // way arrays are - both MemoryPack and MessagePack ship global formatters for these, no
+        // attribute needed (see RawSerializerTests.cs's
+        // OtherKindField_BuiltInListAndDictionaryFormatters test for the round-trip proof).
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+            using System.Collections.Generic;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class CollectionFieldDb : DbContext<CollectionFieldDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(CollectionFieldDb))]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Inventory(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] List<int> ItemIds,
+                [property: MemoryPackOrder(2)] [property: Key(2)] Dictionary<int, string> ItemNames,
+                [property: MemoryPackOrder(3)] [property: Key(3)] HashSet<int> Tags,
+                [property: MemoryPackOrder(4)] [property: Key(4)] Queue<int> Pending,
+                [property: MemoryPackOrder(5)] [property: Key(5)] Stack<int> Undo);
+            """;
+
+        Assert.DoesNotThrow(() => GeneratorTestHost.CompileAndLoad(source));
+    }
+
+    [Test]
+    public void CustomTypeMissingBothSerializationAttributes_ReportsRHINO017() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class NoSerializationDb : DbContext<NoSerializationDbTransaction> { }
+
+            [CustomType]
+            public readonly partial record struct PlayerName(string First, string Last);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO017"));
+        Assert.That(ex.Message, Does.Contain("[MemoryPackable]"));
+        Assert.That(ex.Message, Does.Contain("[MessagePackObject]"));
+    }
+
+    [Test]
+    public void CustomTypeMissingOnlyMessagePackObject_ReportsRHINO017MentioningOnlyThatOne() {
+        const string source = """
+            using MemoryPack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class HalfSerializationDb : DbContext<HalfSerializationDbTransaction> { }
+
+            [CustomType]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            public readonly partial record struct PlayerName(
+                [property: MemoryPackOrder(0)] string First,
+                [property: MemoryPackOrder(1)] string Last);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO017"));
+        Assert.That(ex.Message, Does.Contain("[MessagePackObject]"));
+        Assert.That(ex.Message, Does.Not.Contain("missing [MemoryPackable]"));
+    }
+
+    [Test]
+    public void CustomTypeWithBothSerializationAttributes_IsAccepted() {
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class CustomTypeOkDb : DbContext<CustomTypeOkDbTransaction> { }
+
+            [CustomType]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct PlayerName(
+                [property: MemoryPackOrder(0)] [property: Key(0)] string First,
+                [property: MemoryPackOrder(1)] [property: Key(1)] string Last);
             """;
 
         Assert.DoesNotThrow(() => GeneratorTestHost.CompileAndLoad(source));
