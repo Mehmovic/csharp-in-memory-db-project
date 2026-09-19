@@ -4,12 +4,12 @@ using RhinoDB.Core.Exceptions;
 
 namespace RhinoDB.Core;
 
-public struct ArrayPoolContainerBuilder<T> : IDisposable where T : struct {
+public ref struct StackArrayPoolContainerBuilder<T> : IDisposable where T : struct {
     private T[] array;
-    private Memory<T> buffer;
+    private Span<T> buffer;
     private int count;
 
-    private ArrayPoolContainerBuilder(int initialCapacity) {
+    private StackArrayPoolContainerBuilder(int initialCapacity) {
         array = initialCapacity > 0 ? ArrayPool<T>.Shared.Rent(initialCapacity) : [];
         buffer = array;
         count = 0;
@@ -21,20 +21,20 @@ public struct ArrayPoolContainerBuilder<T> : IDisposable where T : struct {
         if (count >= buffer.Length) {
             Grow();
         }
-        buffer.Span[count++] = offset;
+        buffer[count++] = offset;
         return Result.Ok();
     }
 
     public StackResult<ReadOnlySpan<T>> BufferResult() {
         return IsDisposed()
             ? StackResult.Error(DbError.ArrayPoolDisposed())
-            : StackResult<ReadOnlySpan<T>>.Ok(buffer[..count].Span);
+            : StackResult<ReadOnlySpan<T>>.Ok(buffer[..count]);
     }
 
-    public StackResult<ArrayPoolContainer<T>> Build() {
+    public StackResult<StackArrayPoolContainer<T>> Build() {
         if (IsDisposed()) return StackResult.Error(DbError.ArrayPoolDisposed());
 
-        var frozen = new ArrayPoolContainer<T>(array, count);
+        var frozen = new StackArrayPoolContainer<T>(array, count);
         array = null!;
         buffer = null!;
         count = 0;
@@ -64,38 +64,38 @@ public struct ArrayPoolContainerBuilder<T> : IDisposable where T : struct {
         buffer = array;
     }
 
-    static public ArrayPoolContainerBuilder<T> Create(int capacity = 1) {
-        return new ArrayPoolContainerBuilder<T>(capacity);
+    static public StackArrayPoolContainerBuilder<T> Create(int capacity = 1) {
+        return new StackArrayPoolContainerBuilder<T>(capacity);
     }
 
-    static public ArrayPoolContainer<T> Empty() {
-        return ArrayPoolContainer<T>.Empty();
+    static public StackArrayPoolContainer<T> Empty() {
+        return StackArrayPoolContainer<T>.Empty();
     }
 }
 
-public struct ArrayPoolContainer<T> : IDisposable where T : struct {
+public ref struct StackArrayPoolContainer<T> : IDisposable where T : struct {
     private T[] array;
-    private Memory<T> buffer;
+    private Span<T> buffer;
     public readonly int Count;
 
-    internal ArrayPoolContainer(T[] rentedArray, int count) {
+    internal StackArrayPoolContainer(T[] rentedArray, int count) {
         array = rentedArray;
-        buffer = rentedArray.AsMemory()[..count];
+        buffer = rentedArray.AsSpan(0, count);
         Count = count;
     }
 
-    static public ArrayPoolContainer<T> Empty() => new ArrayPoolContainer<T>([], 0);
+    static public StackArrayPoolContainer<T> Empty() => new StackArrayPoolContainer<T>([], 0);
 
     public bool IsEmpty() => Count == 0;
 
     public StackResult<ReadOnlySpan<T>> BufferResult() {
         return IsDisposed()
             ? StackResult.Error(DbError.ArrayPoolDisposed())
-            : StackResult<ReadOnlySpan<T>>.Ok(buffer.Span);
+            : StackResult<ReadOnlySpan<T>>.Ok(buffer);
     }
 
     public readonly ReadOnlySpan<T> Buffer() {
-        return array == null ? throw new ArrayPoolDisposedException() : buffer.Span;
+        return array == null ? throw new ArrayPoolDisposedException() : buffer;
     }
 
     public void Dispose() {
@@ -109,7 +109,7 @@ public struct ArrayPoolContainer<T> : IDisposable where T : struct {
         buffer = default;
     }
 
-    public readonly Enumerator GetEnumerator() => new Enumerator(buffer[..Count].Span, Count);
+    public readonly Enumerator GetEnumerator() => new Enumerator(buffer[..Count], Count);
 
     public ref struct Enumerator {
         private readonly ReadOnlySpan<T> span;

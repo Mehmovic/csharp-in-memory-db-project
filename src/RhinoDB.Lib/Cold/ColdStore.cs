@@ -23,7 +23,6 @@ public sealed class ColdStore : IDisposable {
     private readonly Dictionary<uint, EvictionDropRegistration> evictionDrops = [];
     private readonly List<EvictionCandidate> drainedEvictions = [];
     private readonly List<EvictionCandidate> appliedEvictions = [];
-    private long nextLsn;
     private DbError? durabilityFailure;
 
     internal readonly WriteAheadLog TestOnlyWal;
@@ -37,20 +36,22 @@ public sealed class ColdStore : IDisposable {
 
     public DecodedWalEntry[] PendingWalTail { get; private set; }
 
+    public long RecoveredLsn { get; }
+
     private ColdStore(
         MdbxEnvironment env,
         WriteAheadLog wal,
         string directoryPath,
         string archiveDirectory,
         DecodedWalEntry[] pendingRecoveryEntries,
-        long nextLsn,
+        long recoveredLsn,
         long evictionBatchThresholdBytes
     ) {
         this.env = env;
         this.TestOnlyWal = wal;
         DirectoryPath = directoryPath;
         this.PendingWalTail = pendingRecoveryEntries;
-        this.nextLsn = nextLsn;
+        RecoveredLsn = recoveredLsn;
         checkpoint = new CheckpointEngine(env, wal, archiveDirectory);
         evictionBatch = new EvictionBatch(evictionBatchThresholdBytes);
     }
@@ -145,7 +146,7 @@ public sealed class ColdStore : IDisposable {
         var deletedKeys = latest.Values.Where(c => c.Kind == ChangeKind.Delete)
             .Select(c => (c.TableId, c.Key)).ToArray();
 
-        return checkpoint.RunCheckpoint(nextLsn, tableDbisById, residentRows, deletedKeys, entries);
+        return checkpoint.RunCheckpoint(RecoveredLsn, tableDbisById, residentRows, deletedKeys, entries);
     }
 
     internal void BeginScope() {
@@ -189,14 +190,13 @@ public sealed class ColdStore : IDisposable {
     public void Stage(uint tableId, ChangeKind kind, byte[] key, byte[]? row) =>
         currentOperationChanges.Add(new WalChange(tableId, kind, key, row));
 
-    internal Task<DbError?> EndScope(bool commit, PropagationMode mode) {
+    internal Task<DbError?> EndScope(bool commit, PropagationMode mode, long lsn) {
         IsScopeActive = false;
         if (!commit || currentOperationChanges.Count == 0) {
             currentOperationChanges.Clear();
             return Task.FromResult<DbError?>(null);
         }
 
-        var lsn = ++nextLsn;
         var changes = currentOperationChanges.ToArray();
         currentOperationChanges.Clear();
 

@@ -456,4 +456,91 @@ public class DiagnosticsTests {
 
         Assert.DoesNotThrow(() => GeneratorTestHost.CompileAndLoad(source));
     }
+
+    [Test]
+    public void CustomTypeFieldMissingBothSerializationAttributes_ReportsRHINO016() {
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class CustomFieldDb : DbContext<CustomFieldDbTransaction> { }
+
+            public readonly record struct PlayerName(string First, string Last);
+
+            [Table(TableKind.Instant, typeof(CustomFieldDb))]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Player(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] PlayerName Name);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO016"));
+        Assert.That(ex.Message, Does.Contain("PlayerName"));
+        Assert.That(ex.Message, Does.Contain("[MemoryPackable]"));
+        Assert.That(ex.Message, Does.Contain("[MessagePackObject]"));
+    }
+
+    [Test]
+    public void CustomTypeFieldWithBothSerializationAttributes_IsAccepted() {
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class CustomFieldDb : DbContext<CustomFieldDbTransaction> { }
+
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct PlayerName(
+                [property: MemoryPackOrder(0)] [property: Key(0)] string First,
+                [property: MemoryPackOrder(1)] [property: Key(1)] string Last);
+
+            [Table(TableKind.Instant, typeof(CustomFieldDb))]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Player(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] PlayerName Name);
+            """;
+
+        Assert.DoesNotThrow(() => GeneratorTestHost.CompileAndLoad(source));
+    }
+
+    [Test]
+    public void ArrayTypedField_IsExemptFromTheCustomTypeCheck() {
+        // Arrays are IArrayTypeSymbol, not INamedTypeSymbol - RHINO016 must not flag them, since
+        // MemoryPack ships a global formatter for arrays of unmanaged types with no attribute needed
+        // (see RawSerializerTests.cs's OtherKindField_BuiltInArrayFormatter test).
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class ArrayFieldDb : DbContext<ArrayFieldDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(ArrayFieldDb))]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Widget(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] int[] Scores);
+            """;
+
+        Assert.DoesNotThrow(() => GeneratorTestHost.CompileAndLoad(source));
+    }
 }

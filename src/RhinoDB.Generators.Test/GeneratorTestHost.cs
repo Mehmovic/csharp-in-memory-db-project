@@ -19,9 +19,27 @@ namespace RhinoDB.Test.Generators;
 // compare of the generated source.
 static internal class GeneratorTestHost {
     static private readonly ImmutableArray<MetadataReference> References = BuildReferences();
+    static private readonly ImmutableArray<IIncrementalGenerator> SerializationGenerators = BuildSerializationGenerators();
 
     static public (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoad(
-        string source, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") {
+        string source, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
+        CompileAndLoad(source, ImmutableArray<IIncrementalGenerator>.Empty, testName);
+
+    // Also runs MemoryPack.Generator/MessagePackAnalyzer's real generators alongside TableGenerator,
+    // proving end-to-end that a correctly-attributed row (or CustomType field) gets a REAL generated
+    // formatter - not just that TableGenerator's own textual-presence check (RHINO015/RHINO016) is
+    // satisfied. Deliberately opt-in, not folded into the default CompileAndLoad: many existing
+    // fixtures across this test project were only ever validated against TableGenerator's own
+    // (deliberately looser) attribute-presence check, not the real generators' stricter rules (e.g.
+    // MEMPACK041 - GenerateType.VersionTolerant rejected on a fully-unmanaged struct) - running these
+    // unconditionally would risk breaking tests that were never meant to prove real-generator
+    // correctness in the first place.
+    static public (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoadWithSerializationGenerators(
+        string source, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
+        CompileAndLoad(source, SerializationGenerators, testName);
+
+    static private (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoad(
+        string source, ImmutableArray<IIncrementalGenerator> extraGenerators, string testName) {
         var assemblyName = $"Gen_{testName}_{Guid.NewGuid():N}";
         var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest));
 
@@ -31,7 +49,8 @@ static internal class GeneratorTestHost {
             References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        var driver = CSharpGeneratorDriver.Create(new TableGenerator());
+        var generators = ImmutableArray.Create<IIncrementalGenerator>(new TableGenerator()).AddRange(extraGenerators);
+        var driver = CSharpGeneratorDriver.Create(generators.ToArray());
         driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var generatorDiagnostics);
 
         var generatorErrors = generatorDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToImmutableArray();
@@ -48,6 +67,30 @@ static internal class GeneratorTestHost {
         peStream.Position = 0;
         var context = new AssemblyLoadContext(assemblyName, isCollectible: true);
         return (context.LoadFromStream(peStream), generatorDiagnostics);
+    }
+
+    // MemoryPack.Generator/MessagePackAnalyzer ship as analyzer-only NuGet packages - their generator
+    // DLLs live under the NuGet global-packages cache's analyzers/ folder, not among the runtime
+    // dependencies TRUSTED_PLATFORM_ASSEMBLIES surfaces, so they need an explicit Assembly.LoadFrom.
+    static private ImmutableArray<IIncrementalGenerator> BuildSerializationGenerators() {
+        var memoryPackAsm = Assembly.LoadFrom(FindAnalyzerDll("memorypack.generator", "1.21.4", @"analyzers\dotnet\cs\MemoryPack.Generator.dll"));
+        var messagePackAsm = Assembly.LoadFrom(FindAnalyzerDll("messagepackanalyzer", "3.1.9", @"analyzers\roslyn4.3\cs\MessagePack.SourceGenerator.dll"));
+
+        var memoryPackGeneratorType = memoryPackAsm.GetType("MemoryPack.Generator.MemoryPackGenerator")
+            ?? throw new InvalidOperationException("MemoryPack.Generator.MemoryPackGenerator not found - package layout may have changed.");
+        var messagePackGeneratorType = messagePackAsm.GetType("MessagePack.SourceGenerator.MessagePackGenerator")
+            ?? throw new InvalidOperationException("MessagePack.SourceGenerator.MessagePackGenerator not found - package layout may have changed.");
+
+        return ImmutableArray.Create(
+            (IIncrementalGenerator)Activator.CreateInstance(memoryPackGeneratorType)!,
+            (IIncrementalGenerator)Activator.CreateInstance(messagePackGeneratorType)!
+        );
+    }
+
+    static private string FindAnalyzerDll(string packageId, string version, string relativeDllPath) {
+        var packagesRoot = Environment.GetEnvironmentVariable("NUGET_PACKAGES")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+        return Path.Combine(packagesRoot, packageId, version, relativeDllPath);
     }
 
     // DbContext<TTx>.Run(Func<DbContext<TTx>,TTx,Result>, PropagationMode) lives

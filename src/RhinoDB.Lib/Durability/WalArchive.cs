@@ -50,14 +50,12 @@ static public class WalArchive {
                 var readResult = ReadSegment(segmentPath);
                 if (readResult.IsError()) return readResult.Void();
 
-                var mergeResult = MergeInOrder(merged, readResult.Unwrap(), ref lastSeenLsn, ref started);
-                if (mergeResult.IsError()) return mergeResult;
+                MergeInOrder(merged, readResult.Unwrap(), ref lastSeenLsn, ref started);
             }
         }
 
         var liveOperationEntries = liveTail.Where(e => e.Kind == WalEntryKind.Operation).ToArray();
-        var liveMergeResult = MergeInOrder(merged, liveOperationEntries, ref lastSeenLsn, ref started);
-        if (liveMergeResult.IsError()) return liveMergeResult;
+        MergeInOrder(merged, liveOperationEntries, ref lastSeenLsn, ref started);
 
         return merged;
     }
@@ -79,19 +77,14 @@ static public class WalArchive {
         return scan.Entries.Where(e => e.Kind == WalEntryKind.Operation).ToArray();
     }
 
-    static private Result MergeInOrder(List<DecodedWalEntry> into, DecodedWalEntry[] batch, ref long lastSeenLsn, ref bool started) {
+    static private void MergeInOrder(List<DecodedWalEntry> into, DecodedWalEntry[] batch, ref long lastSeenLsn, ref bool started) {
         foreach (var entry in batch) {
-            if (started) {
-                if (entry.Lsn <= lastSeenLsn) continue;
-                if (entry.Lsn > lastSeenLsn + 1) return Result.Error(DbError.WalArchiveGap());
-            }
+            if (started && entry.Lsn <= lastSeenLsn) continue;
 
             into.Add(entry);
             lastSeenLsn = entry.Lsn;
             started = true;
         }
-
-        return Result.Ok();
     }
 
     static private string NextSegmentFileName(string archiveDirectory) {

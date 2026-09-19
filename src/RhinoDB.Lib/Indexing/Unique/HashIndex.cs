@@ -21,16 +21,16 @@ public class HashIndex<TKey> where TKey : IEquatable<TKey> {
         hashMap.Remove(key);
     }
     
-    public ArrayPoolContainer<int> GetOffsetsIter() => ScanOffsets();
+    public StackArrayPoolContainer<int> GetOffsetsIter() => ScanOffsets();
 
-    public ArrayPoolContainer<int> GetOffsetsExcept(TKey key) {
+    public StackArrayPoolContainer<int> GetOffsetsExcept(TKey key) {
         return ScanOffsets(FilterDescriptor.Exclude(key));
     }
 
-    private ArrayPoolContainer<int> ScanOffsets(FilterDescriptor<TKey>? filterParam = null) {
-        if (hashMap.Count == 0) return ArrayPoolContainer<int>.Empty();
+    private StackArrayPoolContainer<int> ScanOffsets(FilterDescriptor<TKey>? filterParam = null) {
+        if (hashMap.Count == 0) return StackArrayPoolContainer<int>.Empty();
 
-        using var offsetBuilder = ArrayPoolContainerBuilder<int>.Create(Constants.OffsetBuilderInitialCapacity);
+        using var offsetBuilder = StackArrayPoolContainerBuilder<int>.Create(Constants.OffsetBuilderInitialCapacity);
 
         foreach (var kvp in hashMap) {
             if (filterParam is { } filter && filter.MustExclude(kvp.Key)) continue;

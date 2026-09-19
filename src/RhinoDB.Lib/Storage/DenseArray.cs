@@ -73,8 +73,8 @@ public class DenseArray<T>
         return lastItem;
     }
 
-    public ArrayPoolContainer<DenseArrayRelocation<T>> DeleteMany(ReadOnlySpan<int> offsets) {
-        if (offsets.Length == 0) return ArrayPoolContainer<DenseArrayRelocation<T>>.Empty();
+    public StackArrayPoolContainer<DenseArrayRelocation<T>> DeleteMany(ReadOnlySpan<int> offsets) {
+        if (offsets.Length == 0) return StackArrayPoolContainer<DenseArrayRelocation<T>>.Empty();
 
         var targetsArray = ArrayPool<int>.Shared.Rent(offsets.Length);
         try {
@@ -87,7 +87,7 @@ public class DenseArray<T>
             var hi = targets.Length - 1;
             var src = Count - 1;
 
-            using var relocationBuilder = ArrayPoolContainerBuilder<DenseArrayRelocation<T>>.Create(targets.Length);
+            using var relocationBuilder = StackArrayPoolContainerBuilder<DenseArrayRelocation<T>>.Create(targets.Length);
 
             while (lo < targets.Length && targets[lo] < newCount) {
                 while (src >= newCount && hi >= 0 && src == targets[hi]) {

@@ -7,4 +7,5 @@ public sealed class TableAttribute(TableKind kind, Type database) : Attribute {
     public string? Accessor { get; set; }
     public int ChunkSize { get; set; } = 4096;
     public bool Evictable { get; set; }
+    public bool RingBuffer { get; set; } = true;
 }

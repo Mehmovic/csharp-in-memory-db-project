@@ -9,8 +9,11 @@ namespace RhinoDB.Lib.Durability.Test;
 // (matching this project's established convention for WAL/ColdStore tests). ReadHistory takes
 // the live WAL tail as data (ColdStore.PendingWalTail in production) rather than reading wal.dat
 // itself - the live file is held open with FileShare.None by whichever ColdStore owns it, so a
-// second reader in the same process would be a sharing violation. Gap-vs-dedup behavior is the
-// load-bearing contract here, not incidental - see the reasoning in WalArchive.cs itself.
+// second reader in the same process would be a sharing violation. Dedup (a re-archived segment
+// from a crash retry) is the load-bearing contract here - NOT strict LSN contiguity: an
+// Instant-table-only transaction draws an LSN from the shared per-Db LsnSequence but never stages
+// a WAL entry, so a gap between consecutive LSNs is expected and benign, not corruption (see
+// WalArchive.cs's MergeInOrder).
 public class WalArchiveTests {
     private string dir = "";
     private string archiveDir = "";
@@ -98,25 +101,25 @@ public class WalArchiveTests {
     }
 
     [Test]
-    public void ReadHistory_WithAGapBetweenSegments_FailsInsteadOfSilentlyReconstructingWrongState() {
-        // Simulates a segment deleted from the middle of the chain, not the oldest end.
+    public void ReadHistory_WithAGapBetweenSegments_TreatsItAsExpectedInstantOnlyLsnsNotCorruption() {
+        // A gap here is indistinguishable, from LSNs alone, between "a segment was deleted from the
+        // middle of the chain" and "LSNs 3-4 belonged to Instant-only transactions that never staged
+        // a WAL entry" - the latter is the common case, so gaps are tolerated, not rejected.
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)]);
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(5), Entry(6)]);
 
-        var history = WalArchive.ReadHistory(dir, []);
+        var history = WalArchive.ReadHistory(dir, []).Unwrap();
 
-        Assert.That(history.IsError(), Is.True);
-        Assert.That(history.GetError().Kind, Is.EqualTo(ErrorKind.WalArchiveGap));
+        Assert.That(history.Select(e => e.Lsn), Is.EqualTo(new long[] { 1, 2, 5, 6 }));
     }
 
     [Test]
-    public void ReadHistory_WithAGapBetweenTheArchiveAndTheLiveTail_FailsTheSameWay() {
+    public void ReadHistory_WithAGapBetweenTheArchiveAndTheLiveTail_TreatsItTheSameWay() {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)]);
 
-        var history = WalArchive.ReadHistory(dir, [Entry(5), Entry(6)]);
+        var history = WalArchive.ReadHistory(dir, [Entry(5), Entry(6)]).Unwrap();
 
-        Assert.That(history.IsError(), Is.True);
-        Assert.That(history.GetError().Kind, Is.EqualTo(ErrorKind.WalArchiveGap));
+        Assert.That(history.Select(e => e.Lsn), Is.EqualTo(new long[] { 1, 2, 5, 6 }));
     }
 
     [Test]

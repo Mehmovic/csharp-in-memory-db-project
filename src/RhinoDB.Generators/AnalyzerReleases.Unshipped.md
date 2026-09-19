@@ -18,3 +18,5 @@
 | RHINO012 | RhinoDB.Generators | Error    | TableGenerator |
 | RHINO013 | RhinoDB.Generators | Error    | TableGenerator |
 | RHINO014 | RhinoDB.Generators | Error    | TableGenerator |
+| RHINO015 | RhinoDB.Generators | Error    | TableGenerator |
+| RHINO016 | RhinoDB.Generators | Error    | TableGenerator |

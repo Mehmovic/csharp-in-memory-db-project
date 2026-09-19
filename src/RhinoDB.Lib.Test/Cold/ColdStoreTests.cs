@@ -34,10 +34,10 @@ public class ColdStoreTests {
     static private void Stage(ColdStore store, string tableName, ChangeKind kind, int key, Account? row) =>
         store.Stage(TableIdHash.Compute(tableName), kind, MemoryPackSerializer.Serialize(key), row is null ? null : MemoryPackSerializer.Serialize(row.Value));
 
-    static private async Task<DbError?> RunConfirmed(ColdStore store, Action stageActions) {
+    static private async Task<DbError?> RunConfirmed(ColdStore store, Action stageActions, long lsn = 1) {
         store.BeginScope();
         stageActions();
-        return await store.EndScope(commit: true, PropagationMode.Confirmed);
+        return await store.EndScope(commit: true, PropagationMode.Confirmed, lsn);
     }
 
     [Test]
@@ -94,7 +94,7 @@ public class ColdStoreTests {
         store.BeginScope();
         Assert.That(store.IsScopeActive, Is.True);
 
-        await store.EndScope(commit: true, PropagationMode.Optimistic);
+        await store.EndScope(commit: true, PropagationMode.Optimistic, lsn: 1);
         Assert.That(store.IsScopeActive, Is.False);
     }
 
@@ -105,7 +105,7 @@ public class ColdStoreTests {
         using var store = ColdStore.Open(dir).Unwrap();
 
         store.BeginScope();
-        var error = await store.EndScope(commit: true, PropagationMode.Confirmed);
+        var error = await store.EndScope(commit: true, PropagationMode.Confirmed, lsn: 1);
 
         Assert.That(error, Is.Null);
     }
@@ -116,7 +116,7 @@ public class ColdStoreTests {
         using (var store = ColdStore.Open(dir).Unwrap()) {
             store.BeginScope();
             Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m));
-            var error = await store.EndScope(commit: false, PropagationMode.Confirmed);
+            var error = await store.EndScope(commit: false, PropagationMode.Confirmed, lsn: 1);
             Assert.That(error, Is.Null);
         }
 
@@ -158,8 +158,8 @@ public class ColdStoreTests {
     public async Task CompleteRecovery_ADeleteAfterReopen_LeavesTheRowGenuinelyGone() {
         using (var store = ColdStore.Open(dir).Unwrap()) {
             store.OpenTable<int, Account>("accounts");
-            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m)));
-            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Delete, 1, null));
+            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m)), lsn: 1);
+            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Delete, 1, null), lsn: 2);
         }
 
         using var reopened = ColdStore.Open(dir).Unwrap();
@@ -177,9 +177,9 @@ public class ColdStoreTests {
         // each key appears in at most one of the two sets.
         using (var store = ColdStore.Open(dir).Unwrap()) {
             store.OpenTable<int, Account>("accounts");
-            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m)));
-            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Delete, 1, null));
-            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice-reinserted@example.com", 250m)));
+            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice@example.com", 100m)), lsn: 1);
+            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Delete, 1, null), lsn: 2);
+            await RunConfirmed(store, () => Stage(store, "accounts", ChangeKind.Insert, 1, new Account(1, "alice-reinserted@example.com", 250m)), lsn: 3);
         }
 
         using var reopened = ColdStore.Open(dir).Unwrap();

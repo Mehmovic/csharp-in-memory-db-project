@@ -20,8 +20,8 @@ public class QueryResultTests {
         return storage;
     }
 
-    static private ArrayPoolContainer<int> OffsetsOf(params int[] offsets) {
-        using var builder = ArrayPoolContainerBuilder<int>.Create(offsets.Length);
+    static private StackArrayPoolContainer<int> OffsetsOf(params int[] offsets) {
+        using var builder = StackArrayPoolContainerBuilder<int>.Create(offsets.Length);
         foreach (var offset in offsets) builder.Add(offset);
         return builder.Build().Unwrap();
     }

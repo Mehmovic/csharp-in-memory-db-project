@@ -130,14 +130,14 @@ public class BTreeIndex<TKey> : OrderedIndex<TKey> where TKey : IComparable<TKey
         Insert(newKey, newOffset);
     }
 
-    protected override ArrayPoolContainer<int> ScanOffsets(
+    protected override StackArrayPoolContainer<int> ScanOffsets(
         IndexBound<TKey> from,
         IndexBound<TKey> to,
         FilterDescriptor<TKey>? filterParam = null
     ) {
-        if (chunks.Count == 0 || Count == 0) return ArrayPoolContainer<int>.Empty();
+        if (chunks.Count == 0 || Count == 0) return StackArrayPoolContainer<int>.Empty();
 
-        using var offsetBuilder = ArrayPoolContainerBuilder<int>.Create(Constants.OffsetBuilderInitialCapacity);
+        using var offsetBuilder = StackArrayPoolContainerBuilder<int>.Create(Constants.OffsetBuilderInitialCapacity);
         var chunkSpan = CollectionsMarshal.AsSpan(chunks);
         var startChunk = from.IsBounded ? FindFirstChunkWithMaxKeyAtLeast(from.Key) : 0;
 

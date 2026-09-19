@@ -145,6 +145,18 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
+    static private readonly DiagnosticDescriptor MissingSerializationAttributesOnCustomTypeFieldDiagnostic = new(
+        "RHINO016",
+        "Table row field's custom type missing mandatory IDC/client serialization attributes",
+        "Field '{0}.{1}' has type '{2}', which is missing {3} - a row field that isn't unmanaged or "
+        + "string is serialized via MemoryPack/MessagePack's own formatter dispatch for its type, so "
+        + "that type needs the same mandatory [MemoryPackable]/[MessagePackObject] contract as a "
+        + "[Table] row itself, or (de)serialization fails at runtime instead of compile time",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
     static private readonly ImmutableHashSet<string> ReservedOpsMemberNames =
         ImmutableHashSet.Create("Insert", "Update", "Delete", "Iter", "Evict");
     
@@ -191,11 +203,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
         return (false, 0);
     }
 
-    static private bool BoolNamedArg(AttributeData attr, string name) {
+    static private bool BoolNamedArg(AttributeData attr, string name, bool defaultValue = false) {
         foreach (var kv in attr.NamedArguments)
             if (kv.Key == name)
                 return (bool)kv.Value.Value!;
-        return false;
+        return defaultValue;
     }
 
     static private Location Loc(AttributeData attr) => attr.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? Location.None;
@@ -230,6 +242,28 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 MissingSerializationAttributesDiagnostic, ctx.TargetNode.GetLocation(), rowType.Name, string.Join(" and ", missingSerializationAttrs)));
             return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
         }
+
+        // One level deep only, matching the row -> field relationship - a CustomType field's own
+        // nested CustomType fields aren't recursed into. Array-typed fields (IArrayTypeSymbol, not
+        // INamedTypeSymbol) are deliberately excluded - MemoryPack ships a global formatter for arrays
+        // of unmanaged types with no attribute needed, confirmed via RawSerializerTests.cs's
+        // OtherKindField_BuiltInArrayFormatter test. Known limitation, not fixed here: a field typed as
+        // some OTHER built-in-formatted framework type (Guid, DateTime, List<T>, ...) would be a false
+        // positive - none of this codebase's row fixtures use one today, and exhaustively allow-listing
+        // every type MemoryPack/MessagePack ship a formatter for is out of scope for this diagnostic.
+        foreach (var p in primaryCtor.Parameters) {
+            if (p.Type.SpecialType == SpecialType.System_String || p.Type.IsUnmanagedType) continue;
+            if (p.Type is not INamedTypeSymbol fieldType) continue;
+
+            var missingOnField = ImmutableArray.CreateBuilder<string>();
+            if (!HasMemoryPackable(fieldType)) missingOnField.Add("[MemoryPackable]");
+            if (!HasMessagePackObject(fieldType)) missingOnField.Add("[MessagePackObject]");
+            if (missingOnField.Count > 0)
+                rowDiagnostics.Add(Diagnostic.Create(
+                    MissingSerializationAttributesOnCustomTypeFieldDiagnostic, ctx.TargetNode.GetLocation(),
+                    rowType.Name, p.Name, fieldType.Name, string.Join(" and ", missingOnField)));
+        }
+        if (rowDiagnostics.Count > 0) return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
 
         var primaryKeyAttribute = primaryKeyParam.GetAttributes().First(a => a.AttributeClass?.ToDisplayString() == PrimaryKeyAttributeFullName);
         var primaryKeyKind = primaryKeyAttribute.ConstructorArguments.Length > 0
@@ -374,6 +408,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
             if (evictable && kind == TableKind.Instant)
                 attrDiagnostics.Add(Diagnostic.Create(EvictableOnInstantKindDiagnostic, Loc(attribute), rowType.Name));
 
+            var ringBuffer = BoolNamedArg(attribute, "RingBuffer", defaultValue: true);
+
             if (attrDiagnostics.Count > 0) {
                 results.Add((null, attrDiagnostics.ToImmutable()));
                 continue;
@@ -391,6 +427,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 tableAccessor,
                 chunkSize,
                 evictable,
+                ringBuffer,
                 autoIncrementFields.ToImmutable(),
                 indexes,
                 validateMethodNames.ToImmutable(),
@@ -403,10 +440,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private DatabaseModel ToDatabaseModel(GeneratorAttributeSyntaxContext ctx) {
         var databaseType = (INamedTypeSymbol)ctx.TargetSymbol;
+        var attribute = ctx.Attributes[0];
+        var (ringBufferCapacityProvided, ringBufferCapacityValue) = IntNamedArg(attribute, "RingBufferCapacity");
+        var ringBufferCapacity = ringBufferCapacityProvided ? ringBufferCapacityValue : 10_000;
         return new DatabaseModel(
             databaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             databaseType.Name,
-            databaseType.ContainingNamespace.IsGlobalNamespace ? null : databaseType.ContainingNamespace.ToDisplayString()
+            databaseType.ContainingNamespace.IsGlobalNamespace ? null : databaseType.ContainingNamespace.ToDisplayString(),
+            ringBufferCapacity
         );
     }
 
@@ -498,6 +539,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("using MemoryPack;");
         sb.AppendLine("using MessagePack;");
         sb.AppendLine("using RhinoDB.Core;");
+        sb.AppendLine("using RhinoDB.Lib.Changes;");
         if (isPersistent) {
             sb.AppendLine("using RhinoDB.Lib.Cold;");
         }
@@ -843,7 +885,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitOpsClassHeader(sb, table, isPersistent: false);
 
         sb.AppendLine($"public sealed class {opsName} {{");
+        sb.AppendLine($"    private const uint TableId = {ComputeTableId(table.Accessor)}u;");
         EmitStorageAndIndexFields(sb, table, primaryIndexType);
+        sb.AppendLine("    private readonly ChangeRingBuffer ring;");
         EmitChangeTrackingFields(sb, key, row);
         EmitIndexWiringFields(sb, table, ownerSimpleName);
 
@@ -851,10 +895,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    (");
         sb.AppendLine($"        DenseArray<{row}> storage");
         sb.AppendLine($"        ,{primaryIndexType} primaryIndex");
+        sb.AppendLine($"        ,ChangeRingBuffer ring");
         AppendAutoIncrementAndIndexParams(sb, table);
         sb.AppendLine("    ) {");
         sb.AppendLine("        this.storage = storage;");
         sb.AppendLine("        this.primaryIndex = primaryIndex;");
+        sb.AppendLine("        this.ring = ring;");
         AppendAutoIncrementAndIndexAssignments(sb, table);
         EmitIndexWiringConstruction(sb, table, ownerSimpleName);
         sb.AppendLine("    }");
@@ -874,9 +920,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
         return sb.ToString();
     }
 
+    static private void EmitRingBufferRecordCall(StringBuilder sb, TableModel table, string changeKindName, string keyExpr, string rowExpr) {
+        if (!table.RingBuffer) return;
+        sb.AppendLine($"                    ring.Record(TableId, ChangeKind.{changeKindName}, lsn, {keyExpr}, {rowExpr});");
+    }
+
     static private void EmitInstantApply(StringBuilder sb, TableModel table) {
-        sb.AppendLine("    internal void Apply() {");
-        sb.AppendLine("        using var deleteOffsetsBuilder = ArrayPoolContainerBuilder<int>.Create(changes.Count);");
+        sb.AppendLine("    internal void Apply(long lsn) {");
+        sb.AppendLine("        using var deleteOffsetsBuilder = StackArrayPoolContainerBuilder<int>.Create(changes.Count);");
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
         sb.AppendLine("            switch (c.Kind) {");
         sb.AppendLine("                case ChangeKind.Insert: {");
@@ -886,6 +937,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    primaryIndex.Insert(pk, offset);");
         foreach (var idx in table.Indexes)
             sb.AppendLine($"                    {IndexFieldName(idx)}.Insert({KeyExpr("c.Row", idx)}, offset);");
+        EmitRingBufferRecordCall(sb, table, "Insert", "SerializeKey(pk)", "SerializeRow(c.Row)");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("                case ChangeKind.Update: {");
@@ -901,6 +953,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"                        {IndexFieldName(idx)}.Insert({KeyExpr("c.Row", idx)}, offset);");
             sb.AppendLine("                    }");
         }
+        EmitRingBufferRecordCall(sb, table, "Update", "SerializeKey(c.Key)", "SerializeRow(c.Row)");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("                default: {");
@@ -914,6 +967,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
         }
         sb.AppendLine("                    deleteOffsetsBuilder.Add(offset);");
+        EmitRingBufferRecordCall(sb, table, "Delete", "SerializeKey(c.Key)", "null");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
@@ -955,6 +1009,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitStorageAndIndexFields(sb, table, primaryIndexType);
         sb.AppendLine($"    private readonly ColdTable<{key}, {row}> coldTable;");
         sb.AppendLine("    private readonly ColdStore cold;");
+        sb.AppendLine("    private readonly ChangeRingBuffer ring;");
         EmitChangeTrackingFields(sb, key, row);
         EmitEvictableField(sb, table);
         EmitIndexWiringFields(sb, table, ownerSimpleName);
@@ -965,12 +1020,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"        ,{primaryIndexType} primaryIndex");
         sb.AppendLine($"        ,ColdTable<{key}, {row}> coldTable");
         sb.AppendLine($"        ,ColdStore cold");
+        sb.AppendLine($"        ,ChangeRingBuffer ring");
         AppendAutoIncrementAndIndexParams(sb, table);
         sb.AppendLine("    ) {");
         sb.AppendLine("        this.storage = storage;");
         sb.AppendLine("        this.primaryIndex = primaryIndex;");
         sb.AppendLine("        this.coldTable = coldTable;");
         sb.AppendLine("        this.cold = cold;");
+        sb.AppendLine("        this.ring = ring;");
         AppendAutoIncrementAndIndexAssignments(sb, table);
         EmitIndexWiringConstruction(sb, table, ownerSimpleName);
         if (table.Evictable) sb.AppendLine("        cold.RegisterEvictionDrop(TableId, TryGetCurrentRowBytesForEviction, EvictDrop);");
@@ -995,8 +1052,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
     }
 
     static private void EmitPersistentApply(StringBuilder sb, TableModel table) {
-        sb.AppendLine("    internal void Apply() {");
-        sb.AppendLine("        using var deleteOffsetsBuilder = ArrayPoolContainerBuilder<int>.Create(changes.Count);");
+        sb.AppendLine("    internal void Apply(long lsn) {");
+        sb.AppendLine("        using var deleteOffsetsBuilder = StackArrayPoolContainerBuilder<int>.Create(changes.Count);");
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
         sb.AppendLine("            switch (c.Kind) {");
         sb.AppendLine("                case ChangeKind.Insert: {");
@@ -1007,7 +1064,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    primaryIndex.Insert(pk, offset);");
         foreach (var idx in table.Indexes)
             sb.AppendLine($"                    {IndexFieldName(idx)}.Insert({KeyExpr("c.Row", idx)}, offset);");
-        sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Insert, SerializeKey(pk), SerializeRow(c.Row));");
+        sb.AppendLine("                    var insertKeyBytes = SerializeKey(pk);");
+        sb.AppendLine("                    var insertRowBytes = SerializeRow(c.Row);");
+        sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Insert, insertKeyBytes, insertRowBytes);");
+        EmitRingBufferRecordCall(sb, table, "Insert", "insertKeyBytes", "insertRowBytes");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("                case ChangeKind.Update: {");
@@ -1024,7 +1084,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"                        {IndexFieldName(idx)}.Insert({KeyExpr("c.Row", idx)}, offset);");
             sb.AppendLine("                    }");
         }
-        sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Update, SerializeKey(c.Key), SerializeRow(c.Row));");
+        sb.AppendLine("                    var updateKeyBytes = SerializeKey(c.Key);");
+        sb.AppendLine("                    var updateRowBytes = SerializeRow(c.Row);");
+        sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Update, updateKeyBytes, updateRowBytes);");
+        EmitRingBufferRecordCall(sb, table, "Update", "updateKeyBytes", "updateRowBytes");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("                default: {");
@@ -1039,7 +1102,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
         }
         sb.AppendLine("                    deleteOffsetsBuilder.Add(offset);");
-        sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Delete, SerializeKey(c.Key), null);");
+        sb.AppendLine("                    var deleteKeyBytes = SerializeKey(c.Key);");
+        sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Delete, deleteKeyBytes, null);");
+        EmitRingBufferRecordCall(sb, table, "Delete", "deleteKeyBytes", "null");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
@@ -1203,6 +1268,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using RhinoDB.Core;");
+        sb.AppendLine("using RhinoDB.Lib.Changes;");
         sb.AppendLine("using RhinoDB.Lib.Cold;");
         sb.AppendLine("using RhinoDB.Lib.Durability;");
         sb.AppendLine("using RhinoDB.Lib.Execution;");
@@ -1220,19 +1286,27 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"public sealed class {txName} : ITransaction {{");
         foreach (var table in tables)
             sb.AppendLine($"    public readonly {database.SimpleName}{table.Accessor}Ops {table.Accessor};");
+        sb.AppendLine("    private readonly LsnSequence lsnSequence;");
+        sb.AppendLine("    public long? LastLsn { get; private set; }");
         sb.AppendLine();
         sb.Append($"    internal {txName}(");
         sb.Append(string.Join(", ", tables.Select(t => $"{database.SimpleName}{t.Accessor}Ops {Camel(t.Accessor)}")));
+        sb.Append(tables.Length > 0 ? ", " : "");
+        sb.Append("LsnSequence lsnSequence");
         sb.AppendLine(") {");
         foreach (var table in tables)
             sb.AppendLine($"        {table.Accessor} = {Camel(table.Accessor)};");
+        sb.AppendLine("        this.lsnSequence = lsnSequence;");
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine("    public Result Apply() {");
         foreach (var table in tables)
             sb.AppendLine($"        if ({table.Accessor}.Dirty && !{table.Accessor}.Validate()) return Result.Error({table.Accessor}.LastError);");
+        var anyDirtyExpr = tables.Length > 0 ? string.Join(" || ", tables.Select(t => $"{t.Accessor}.Dirty")) : "false";
+        sb.AppendLine($"        var anyDirty = {anyDirtyExpr};");
+        sb.AppendLine("        LastLsn = anyDirty ? lsnSequence.Next() : null;");
         foreach (var table in tables)
-            sb.AppendLine($"        if ({table.Accessor}.Dirty) {table.Accessor}.Apply();");
+            sb.AppendLine($"        if ({table.Accessor}.Dirty) {table.Accessor}.Apply(LastLsn ?? 0);");
         sb.AppendLine("        return Result.Ok();");
         sb.AppendLine("    }");
         sb.AppendLine();
@@ -1270,6 +1344,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         }
 
         if (persistentTables.Length > 0) sb.AppendLine("    private readonly ColdStore cold;");
+        sb.AppendLine("    private readonly ChangeRingBuffer ring;");
         foreach (var table in tables)
             sb.AppendLine($"    private readonly {database.SimpleName}{table.Accessor}Ops {Camel(table.Accessor)}Ops;");
         sb.AppendLine($"    private readonly {txName} cachedTransaction;");
@@ -1286,6 +1361,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 sb.AppendLine($"        {Camel(table.Accessor)}ColdTable = cold.OpenTable<{table.PrimaryKeyTypeFullName}, {table.RowTypeFullName}>(\"{table.Accessor}\", {opsName}.SerializeKey, {opsName}.DeserializeKey, {opsName}.DeserializeRow);");
             }
         }
+        sb.AppendLine($"        ring = new ChangeRingBuffer({database.RingBufferCapacity});");
         foreach (var table in tables) {
             var args = new List<string> {
                 $"{Camel(table.Accessor)}Storage",
@@ -1295,12 +1371,16 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 args.Add($"{Camel(table.Accessor)}ColdTable");
                 args.Add("cold");
             }
+            args.Add("ring");
             foreach (var aif in table.AutoIncrementFields) args.Add($"{Camel(table.Accessor)}{aif.FieldName}Counter");
             foreach (var idx in table.Indexes) args.Add($"{Camel(table.Accessor)}{idx.AccessorName}Index");
             sb.AppendLine($"        {Camel(table.Accessor)}Ops = new {database.SimpleName}{table.Accessor}Ops({string.Join(", ", args)});");
         }
+        sb.AppendLine($"        var lsnSequence = {(persistentTables.Length > 0 ? "new LsnSequence(cold.RecoveredLsn)" : "new LsnSequence(0)")};");
         sb.Append($"        cachedTransaction = new {txName}(");
         sb.Append(string.Join(", ", tables.Select(t => $"{Camel(t.Accessor)}Ops")));
+        sb.Append(tables.Length > 0 ? ", " : "");
+        sb.Append("lsnSequence");
         sb.AppendLine(");");
         sb.AppendLine("    }");
         sb.AppendLine();
@@ -1384,6 +1464,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         string accessor,
         int chunkSize,
         bool evictable,
+        bool ringBuffer,
         ImmutableArray<AutoIncrementFieldModel> autoIncrementFields,
         ImmutableArray<IndexModel> indexes,
         ImmutableArray<string> validateMethodNames,
@@ -1400,6 +1481,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public string Accessor { get; } = accessor;
         public int ChunkSize { get; } = chunkSize;
         public bool Evictable { get; } = evictable;
+        public bool RingBuffer { get; } = ringBuffer;
         public ImmutableArray<AutoIncrementFieldModel> AutoIncrementFields { get; } = autoIncrementFields;
         public ImmutableArray<IndexModel> Indexes { get; } = indexes;
         public ImmutableArray<string> ValidateMethodNames { get; } = validateMethodNames;
@@ -1432,10 +1514,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     private enum RowFieldKind { Unmanaged, String, Other }
 
-    private sealed class DatabaseModel(string fullName, string simpleName, string? @namespace) {
+    private sealed class DatabaseModel(string fullName, string simpleName, string? @namespace, int ringBufferCapacity) {
         public string FullName { get; } = fullName;
         public string SimpleName { get; } = simpleName;
         public string? Namespace { get; } = @namespace;
+        public int RingBufferCapacity { get; } = ringBufferCapacity;
     }
 
     private enum TableKind { Instant, Persistent }

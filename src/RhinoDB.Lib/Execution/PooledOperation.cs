@@ -83,7 +83,7 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
         catch (Exception ex) { result = TValue.FromException(ex); }
         if (txCreated && !result.IsOk()) tx.Discard();
 
-        Complete(result, ctx, cold?.EndScope(commit: result.IsOk(), mode));
+        Complete(result, ctx, cold?.EndScope(commit: result.IsOk(), mode, tx.LastLsn ?? 0));
     }
 
     private void Complete(TValue result, DbContext<TTx> ctx, Task<DbError?>? durabilityTask) {
