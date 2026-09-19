@@ -431,24 +431,52 @@ mixed-API surface to reason about) rather than a further patch to the
 > (`ColdStore.Put`/`Delete`/`BeginScope`/`EndScope`) still stays exactly as
 > today's generated code calls it — this exception is scoped narrowly to
 > ring-buffer recording, not durability.
+>
+> **Amended 2026-09-19**: the "one shared per-`{Db}` `ChangeRingBuffer`"
+> shape below was replaced with **one dedicated `ChangeRingBuffer` per table**,
+> opt-in via `[Table(RingBufferCapacity = N)]` (default `0`, disabled —
+> `[Database(RingBufferCapacity=)]` was removed entirely). Motivation: a
+> single shared buffer means one chatty table (e.g. tick-rate position
+> updates) can evict a quiet table's history (e.g. rare score events) from the
+> retention window before a reconnecting client catches up, even though very
+> few events actually happened on the quiet table — sizing capacity per table
+> against that table's own write rate fixes this structurally instead of
+> requiring careful shared-capacity tuning. The LSN sequence itself is
+> unaffected — still one shared per-`{Db}` `LsnSequence`, so a client wanting
+> a whole-session cross-table ordered view merges multiple per-table
+> `TryGetChangesSince` results by LSN, paid once at reconnect/catch-up time,
+> not on every live update. A genuine, related bug surfaced by this change
+> and fixed alongside it: `ChangeRingBuffer.TryGetChangesSince`'s gap check
+> now only fires when the ring has actually evicted something
+> (`writePosition > capacity`) — a per-table ring that simply started
+> recording late (the table wasn't written to in the earliest transactions)
+> must not report a spurious gap for a cursor at or before its own first
+> entry, since nothing was ever lost there.
 
 - **The idea**: a per-database circular buffer of the most recent committed
   `Change`s, LSN-indexed, held in RAM. Its retention horizon = the longest
   supported client disconnect (policy: e.g. 10k changes or N MB —
   configurable, like `ChunkSize`).
-- **Unified recording hook (both table kinds)**: `TableGenerator.cs`'s
-  `EmitPersistentApply` and `EmitInstantApply` both gain one call per applied
-  change — `ring.Record(tableId, kind, lsn, key, row)` — at the exact point
-  each already clears `changes`/resets `Dirty`. `{Db}`'s constructor builds
-  one `ChangeRingBuffer` and passes it into every table's `Ops` instance
-  regardless of kind, including databases with zero Persistent tables (no
-  `ColdStore` at all). `tableId` is a compile-time FNV-1a hash of the table's
-  `Accessor` string, embedded as a generated `const uint`. The LSN counter is
-  shared across both consumers — a single per-`{Db}` increment, read once per
-  operation on the (already-serializing) single writer thread before the
-  validate/apply pass — so Persistent-table WAL entries and Instant-table
-  ring-only entries share one sequence, with expected gaps in the WAL
-  wherever an operation touched only Instant tables.
+- **Unified recording hook (both table kinds), per-table buffer (amended
+  2026-09-19)**: `TableGenerator.cs`'s `EmitPersistentApply` and
+  `EmitInstantApply` both gain one call per applied change — matching table's
+  own `ring.Record(tableId, kind, lsn, key, row)` — at the exact point each
+  already clears `changes`/resets `Dirty`, emitted only when that table opts
+  in with `RingBufferCapacity > 0`. `{Db}`'s constructor builds one dedicated
+  `ChangeRingBuffer` per ring-enabled table (not one shared instance) —
+  a table with the default `RingBufferCapacity = 0` gets no ring field, no
+  constructor param, and no `ring.Record` call site at all, costing nothing.
+  `tableId` is a compile-time FNV-1a hash of the table's `Accessor` string,
+  embedded as a generated `const uint` (kept even though each table's own
+  ring now only ever holds that one table's entries, for consistency with the
+  WAL's `WalChange` shape and to support a future merge across tables). The
+  LSN counter is still shared across every table regardless of kind — one
+  per-`{Db}` `LsnSequence`, read once per operation on the
+  (already-serializing) single writer thread before the validate/apply pass —
+  so Persistent-table WAL entries and Instant-table ring-only entries share
+  one sequence, with expected gaps in the WAL wherever an operation touched
+  only Instant tables, even though each table's ring-recorded entries now
+  live in physically separate buffers.
 - **Why it works with the WAL, not instead of it, for Persistent data**:
   reconnect handling becomes a two-level lookup on the requested cursor:
   1. `cursor ≥ ring.oldestLsn` → replay from RAM. **Zero disk reads** — the
@@ -460,7 +488,13 @@ mixed-API surface to reason about) rather than a further patch to the
   For Instant-only changes there is no WAL tail to fall back to (Instant is
   deliberately non-durable) — a cursor older than the ring's retention for an
   Instant table always means a full resync, the same as a first-time
-  subscribe.
+  subscribe. That resync is still possible with zero persistence, as long as
+  the server process itself is still running — "full resync" here means a
+  fresh read of the table's current in-memory state, not a history replay,
+  and Instant tables always have that available. The one case a resync is
+  genuinely impossible is a server restart, since Instant tables don't
+  survive one at all (confirmed elsewhere: `RecoveredLsn` only ever reflects
+  WAL-recorded, i.e. Persistent, history).
 - **Structure**: preallocated ring of `Change` records (or of pooled byte
   buffers holding entry bytes) — `ArrayPool`/chunk-allocated, no per-change
   heap allocation, LSN→slot is a modulo of the ring's base LSN. Written on the

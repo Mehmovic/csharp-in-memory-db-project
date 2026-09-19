@@ -7,10 +7,11 @@ using RhinoDB.Lib.Tables;
 
 namespace RhinoDB.Test.Generators;
 
-// Proves EmitRingBufferRecordCall's wiring (task #79): Insert/Update/Delete on both an Instant and a
-// Persistent table push a matching entry into the per-Db ChangeRingBuffer (correct TableId/ChangeKind/
-// key/row, strictly increasing Lsn shared across both kinds), and RingBuffer=false opts a table out of
-// ring participation entirely.
+// Proves EmitRingBufferRecordCall's wiring (task #79) under the per-table ring buffer redesign (task
+// #84): Insert/Update/Delete on both an Instant and a Persistent table push a matching entry into that
+// TABLE's OWN ChangeRingBuffer (correct TableId/ChangeKind/key/row, strictly increasing Lsn shared
+// across tables even though storage is now per-table), and RingBufferCapacity = 0 (the default) opts a
+// table out of ring participation entirely - no ring.Record call, no ring field at all.
 public class RingBufferGenerationTests {
     private string dir = "";
 
@@ -25,21 +26,21 @@ public class RingBufferGenerationTests {
         [Database]
         public partial class RingDb : DbContext<RingDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(RingDb))]
+        [Table(TableKind.Instant, typeof(RingDb), RingBufferCapacity = 100)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Widget(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] int Value);
 
-        [Table(TableKind.Persistent, typeof(RingDb))]
+        [Table(TableKind.Persistent, typeof(RingDb), RingBufferCapacity = 100)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Account(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance);
 
-        [Table(TableKind.Instant, typeof(RingDb), RingBuffer = false)]
+        [Table(TableKind.Instant, typeof(RingDb))]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Muted(
@@ -74,16 +75,18 @@ public class RingBufferGenerationTests {
     static private object NewMuted(Assembly asm, int id) =>
         Activator.CreateInstance(asm.GetType("TestNs.Muted")!, id)!;
 
-    static private ChangeRingBuffer GetRing(object db) =>
-        (ChangeRingBuffer)db.GetType().GetField("ring", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(db)!;
+    static private string Camel(string name) => char.ToLowerInvariant(name[0]) + name.Substring(1);
+
+    static private ChangeRingBuffer GetRing(object db, string accessor) =>
+        (ChangeRingBuffer)db.GetType().GetField($"{Camel(accessor)}Ring", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(db)!;
 
     static private uint GetTableId(Assembly asm, string opsTypeName) =>
         (uint)asm.GetType(opsTypeName)!.GetField("TableId", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
 
-    // Cursor -1, not 0: RingDb has a Persistent table, and ColdStore.RecoveredLsn seeds at -1 for a
-    // fresh store (nothing checkpointed yet - see CheckpointEngine.ReadCheckpointedLsn's -1 sentinel),
-    // so the shared LsnSequence's first real value is 0, not 1. A cursor of 0 would incorrectly read
-    // as "already caught up to LSN 0" and silently exclude that first entry.
+    // Cursor -1, not 0: a table with any Persistent table sharing its Db has ColdStore.RecoveredLsn seed
+    // at -1 for a fresh store (nothing checkpointed yet - see CheckpointEngine.ReadCheckpointedLsn's -1
+    // sentinel), so the shared LsnSequence's first real value is 0, not 1. A cursor of 0 would
+    // incorrectly read as "already caught up to LSN 0" and silently exclude that first entry.
     static private RingEntry[] GetAllEntries(ChangeRingBuffer ring) {
         using var entries = ring.TryGetChangesSince(-1).Unwrap();
         return entries.Buffer().ToArray();
@@ -98,7 +101,7 @@ public class RingBufferGenerationTests {
             db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
             PropagationMode.Confirmed);
 
-        var entries = GetAllEntries(GetRing(db));
+        var entries = GetAllEntries(GetRing(db, "Widget"));
 
         Assert.That(entries, Has.Length.EqualTo(1));
         Assert.That(entries[0].Change.TableId, Is.EqualTo(GetTableId(asm, "TestNs.RingDbWidgetOps")));
@@ -119,7 +122,7 @@ public class RingBufferGenerationTests {
             db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Update(1, (dynamic)NewWidget(asm, 1, 500)); return Result.Ok(); },
             PropagationMode.Confirmed);
 
-        var entries = GetAllEntries(GetRing(db));
+        var entries = GetAllEntries(GetRing(db, "Widget"));
 
         Assert.That(entries, Has.Length.EqualTo(2));
         Assert.That(entries[1].Change.Kind, Is.EqualTo(ChangeKind.Update));
@@ -139,7 +142,7 @@ public class RingBufferGenerationTests {
             db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Delete(1); return Result.Ok(); },
             PropagationMode.Confirmed);
 
-        var entries = GetAllEntries(GetRing(db));
+        var entries = GetAllEntries(GetRing(db, "Widget"));
 
         Assert.That(entries, Has.Length.EqualTo(2));
         Assert.That(entries[1].Change.Kind, Is.EqualTo(ChangeKind.Delete));
@@ -162,7 +165,7 @@ public class RingBufferGenerationTests {
             db, txType, (ctx, tx) => { ((dynamic)tx).Account.Delete(1); return Result.Ok(); },
             PropagationMode.Confirmed);
 
-        var entries = GetAllEntries(GetRing(db));
+        var entries = GetAllEntries(GetRing(db, "Account"));
 
         Assert.That(entries, Has.Length.EqualTo(3));
         Assert.That(entries.Select(e => e.Change.TableId), Has.All.EqualTo(expectedTableId));
@@ -174,7 +177,7 @@ public class RingBufferGenerationTests {
     }
 
     [Test]
-    public async Task LsnSequence_IsSharedAcrossInstantAndPersistentTransactions() {
+    public async Task LsnSequence_IsSharedAcrossInstantAndPersistentTablesEvenThoughStorageIsPerTable() {
         using var cold = ColdStore.Open(dir).Unwrap();
         var (db, txType, asm) = NewDb(cold);
 
@@ -185,43 +188,50 @@ public class RingBufferGenerationTests {
             db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 100m)); return Result.Ok(); },
             PropagationMode.Confirmed);
 
-        var entries = GetAllEntries(GetRing(db));
+        var widgetEntries = GetAllEntries(GetRing(db, "Widget"));
+        var accountEntries = GetAllEntries(GetRing(db, "Account"));
 
-        Assert.That(entries, Has.Length.EqualTo(2));
-        Assert.That(entries[0].Lsn, Is.EqualTo(0), "An Instant-only transaction still draws from the shared sequence.");
-        Assert.That(entries[1].Lsn, Is.EqualTo(1), "The very next transaction, Persistent this time, continues the SAME sequence rather than starting its own.");
+        Assert.That(widgetEntries, Has.Length.EqualTo(1));
+        Assert.That(accountEntries, Has.Length.EqualTo(1));
+        Assert.That(widgetEntries[0].Lsn, Is.EqualTo(0), "An Instant-only transaction still draws from the shared sequence.");
+        Assert.That(accountEntries[0].Lsn, Is.EqualTo(1),
+            "The very next transaction, Persistent this time, continues the SAME sequence rather than starting its own - even though it lands in a completely separate ring buffer from Widget's.");
     }
 
     [Test]
-    public async Task Insert_OnATableWithRingBufferDisabled_RecordsNothing() {
+    public async Task Insert_OnATableWithRingBufferCapacityZero_RecordsNothing() {
         using var cold = ColdStore.Open(dir).Unwrap();
         var (db, txType, asm) = NewDb(cold);
 
-        await (Task<Result>)GeneratorTestHost.RunTransactional(
+        var insertResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => { ((dynamic)tx).Muted.Insert((dynamic)NewMuted(asm, 1)); return Result.Ok(); },
             PropagationMode.Confirmed);
 
-        var entries = GetAllEntries(GetRing(db));
-
-        Assert.That(entries, Is.Empty, "[Table(RingBuffer = false)] must suppress every ring.Record call for that table.");
+        Assert.That(insertResult.IsOk(), Is.True, "Muted must still insert successfully - RingBufferCapacity = 0 disables ring participation, not the table itself.");
     }
 
     [Test]
-    public async Task Insert_OnAMutedTableAlongsideARingedTable_OnlyTheRingedTablesChangeAppears() {
-        using var cold = ColdStore.Open(dir).Unwrap();
-        var (db, txType, asm) = NewDb(cold);
+    public void MutedTable_HasNoRingFieldAtAll_ConfirmingRingBufferCapacityZeroCostsNoMemory() {
+        // RingBufferCapacity = 0 (the default) must not just skip ring.Record calls - it must skip
+        // emitting the ring field/constructor param entirely, so a disabled table's Ops instance
+        // carries zero ChangeRingBuffer-related state.
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
+        var mutedOpsType = asm.GetType("TestNs.RingDbMutedOps")!;
 
-        await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => {
-                dynamic dtx = tx;
-                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, 100));
-                dtx.Muted.Insert((dynamic)NewMuted(asm, 1));
-                return Result.Ok();
-            }, PropagationMode.Confirmed);
+        var ringField = mutedOpsType.GetField("ring", BindingFlags.NonPublic | BindingFlags.Instance);
 
-        var entries = GetAllEntries(GetRing(db));
+        Assert.That(ringField, Is.Null, "A RingBufferCapacity = 0 table's Ops class must have no 'ring' field at all.");
+    }
 
-        Assert.That(entries, Has.Length.EqualTo(1));
-        Assert.That(entries[0].Change.TableId, Is.EqualTo(GetTableId(asm, "TestNs.RingDbWidgetOps")));
+    [Test]
+    public void RingDb_HasNoMutedRingField_ConfirmingPerTableOptOutSkipsDbLevelConstructionToo() {
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
+        var dbType = asm.GetType("TestNs.RingDb")!;
+
+        var mutedRingField = dbType.GetField("mutedRing", BindingFlags.NonPublic | BindingFlags.Instance);
+        var widgetRingField = dbType.GetField("widgetRing", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        Assert.That(mutedRingField, Is.Null, "Muted has RingBufferCapacity = 0 (unset, defaults to 0) - {Db} must not construct a ChangeRingBuffer for it.");
+        Assert.That(widgetRingField, Is.Not.Null, "Widget has RingBufferCapacity = 100 - {Db} must construct and hold its own dedicated ChangeRingBuffer.");
     }
 }

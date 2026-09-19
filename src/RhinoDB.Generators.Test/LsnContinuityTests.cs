@@ -7,12 +7,13 @@ using RhinoDB.Lib.Execution;
 
 namespace RhinoDB.Test.Generators;
 
-// Proves the LSN-ownership refactor's cross-cutting invariants end to end (tasks #75-79): the ring
-// buffer sees every dirty transaction - Instant-only included - with a contiguous LSN run, the WAL
-// only ever sees Persistent-table transactions (so an Instant-only transaction's LSN is a real,
-// expected, non-corruption gap in the WAL - see the fix to WalArchive.MergeInOrder made while writing
-// these tests), and RecoveredLsn correctly continues the sequence across a restart rather than
-// colliding with or restarting from an LSN the WAL has already recorded.
+// Proves the LSN-ownership refactor's cross-cutting invariants end to end (tasks #75-79, redesigned
+// per-table in task #84): the union of every ring-enabled table's OWN ChangeRingBuffer sees every dirty
+// transaction - Instant-only included - with a contiguous LSN run across tables, the WAL only ever sees
+// Persistent-table transactions (so an Instant-only transaction's LSN is a real, expected, non-corruption
+// gap in the WAL - see the fix to WalArchive.MergeInOrder made while writing these tests), and
+// RecoveredLsn correctly continues the sequence across a restart rather than colliding with or
+// restarting from an LSN the WAL has already recorded.
 public class LsnContinuityTests {
     private string dir = "";
 
@@ -27,14 +28,14 @@ public class LsnContinuityTests {
         [Database]
         public partial class GameDb : DbContext<GameDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(GameDb))]
+        [Table(TableKind.Instant, typeof(GameDb), RingBufferCapacity = 100)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Widget(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] int Value);
 
-        [Table(TableKind.Persistent, typeof(GameDb))]
+        [Table(TableKind.Persistent, typeof(GameDb), RingBufferCapacity = 100)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Club(
@@ -59,8 +60,10 @@ public class LsnContinuityTests {
     static private object NewWidget(Assembly asm, int id, int value) =>
         Activator.CreateInstance(asm.GetType("TestNs.Widget")!, id, value)!;
 
-    static private ChangeRingBuffer GetRing(object db) =>
-        (ChangeRingBuffer)db.GetType().GetField("ring", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(db)!;
+    static private string Camel(string name) => char.ToLowerInvariant(name[0]) + name.Substring(1);
+
+    static private ChangeRingBuffer GetRing(object db, string accessor) =>
+        (ChangeRingBuffer)db.GetType().GetField($"{Camel(accessor)}Ring", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(db)!;
 
     static private long[] GetAllRingLsns(ChangeRingBuffer ring) {
         using var entries = ring.TryGetChangesSince(-1).Unwrap();
@@ -71,7 +74,7 @@ public class LsnContinuityTests {
     }
 
     [Test]
-    public async Task MixedTransactions_RingHasNoGapsButWalOnlyRecordsThePersistentOnes() {
+    public async Task MixedTransactions_TheUnionOfPerTableRingsHasNoGapsButWalOnlyRecordsThePersistentOnes() {
         var (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
         var dbType = asm.GetType("TestNs.GameDb")!;
         var txType = asm.GetType("TestNs.GameDbTransaction")!;
@@ -80,7 +83,8 @@ public class LsnContinuityTests {
         using (var cold = ColdStore.Open(dir).Unwrap()) {
             var db = Activator.CreateInstance(dbType, cold)!;
 
-            // Persistent (Lsn 0), Instant-only (Lsn 1, never staged to cold), Persistent (Lsn 2).
+            // Persistent (Lsn 0, lands in Club's own ring), Instant-only (Lsn 1, never staged to cold,
+            // lands in Widget's own ring), Persistent (Lsn 2, Club's ring again).
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, 80)); return Result.Ok(); },
                 PropagationMode.Confirmed);
@@ -91,11 +95,11 @@ public class LsnContinuityTests {
                 db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 2, 75)); return Result.Ok(); },
                 PropagationMode.Confirmed);
 
-            ringLsns = GetAllRingLsns(GetRing(db));
+            ringLsns = GetAllRingLsns(GetRing(db, "Club")).Concat(GetAllRingLsns(GetRing(db, "Widget"))).OrderBy(lsn => lsn).ToArray();
         }
 
         Assert.That(ringLsns, Is.EqualTo(new long[] { 0, 1, 2 }),
-            "The ring buffer records every dirty transaction, Instant-only included, so its LSNs must be contiguous.");
+            "The union of every table's own ring buffer must cover every dirty transaction, Instant-only included, with no gap in the LSN run - even though each table's changes are now stored separately.");
 
         // wal.dat is held open (FileShare.None) by the ColdStore that wrote it - reopen fresh to read
         // PendingWalTail as it stands now, matching how a real recovery/replay would observe it.

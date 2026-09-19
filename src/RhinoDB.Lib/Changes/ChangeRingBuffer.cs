@@ -21,7 +21,8 @@ public sealed class ChangeRingBuffer(int capacity) {
         var oldestLsn = slots[(int)(oldestIndex % slots.Length)].Lsn;
         var newestLsn = slots[(int)((writePosition - 1) % slots.Length)].Lsn;
 
-        if (lsn < oldestLsn - 1) return Result<ArrayPoolContainer<RingEntry>>.Error(DbError.RingBufferGap());
+        var hasEvicted = writePosition > slots.Length;
+        if (hasEvicted && lsn < oldestLsn - 1) return Result<ArrayPoolContainer<RingEntry>>.Error(DbError.RingBufferGap());
         if (lsn >= newestLsn) return ArrayPoolContainer<RingEntry>.Empty();
 
         var matchesBuilder = ArrayPoolContainerBuilder<RingEntry>.Create(count);

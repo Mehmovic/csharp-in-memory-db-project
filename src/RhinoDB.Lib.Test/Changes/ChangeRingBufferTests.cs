@@ -102,6 +102,23 @@ public class ChangeRingBufferTests {
     }
 
     [Test]
+    public void TryGetChangesSince_CursorBeforeTheFirstEverEntryOnARingThatHasNeverEvicted_IsNotAGap() {
+        // Per-table ring buffers (task #84): a rarely-written table's ring can legitimately have its
+        // very first-ever entry at a high LSN, simply because the table wasn't touched earlier - that's
+        // not lost history. Only a ring that has actually evicted something (wrapped past capacity)
+        // can have a genuine gap.
+        var ring = new ChangeRingBuffer(capacity: 8);
+        ring.Record(1, ChangeKind.Insert, lsn: 50, Bytes(1), null);
+
+        var result = ring.TryGetChangesSince(-1);
+
+        Assert.That(result.IsOk(), Is.True);
+        using var entries = result.Unwrap();
+        Assert.That(entries.Count, Is.EqualTo(1));
+        Assert.That(entries.Buffer()[0].Lsn, Is.EqualTo(50));
+    }
+
+    [Test]
     public void Record_MultipleChangesSharingOneLsn_AllSurviveWithoutOverwritingEachOther() {
         // One transaction can touch several tables/changes and they all share one LSN (LSN is
         // per-transaction, not per-change) - the ring must not let same-LSN entries collide.
