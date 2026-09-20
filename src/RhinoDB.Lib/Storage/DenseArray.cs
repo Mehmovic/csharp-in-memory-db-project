@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace RhinoDB.Lib.Storage;
 
@@ -36,19 +37,19 @@ public class DenseArray<T>
         }
 
         var indexInChunk = index & chunkMask;
-        values[currentChunk][indexInChunk] = item;
+        CollectionsMarshal.AsSpan(values)[currentChunk][indexInChunk] = item;
         Count += 1;
         return index;
     }
 
     public T Get(int index) {
         var chunkIndex = index >> chunkShift;
-        return values[chunkIndex][index & chunkMask];
+        return CollectionsMarshal.AsSpan(values)[chunkIndex][index & chunkMask];
     }
 
     public void Set(int index, T value) {
         var chunkIndex = index >> chunkShift;
-        values[chunkIndex][index & chunkMask] = value;
+        CollectionsMarshal.AsSpan(values)[chunkIndex][index & chunkMask] = value;
     }
 
     public T? Delete(int index) {
@@ -64,8 +65,9 @@ public class DenseArray<T>
 
         var targetChunk = index >> chunkShift;
         var indexInChunk = index & chunkMask;
-        var lastItem = values[currentChunk][lastIndexInChunk];
-        values[targetChunk][indexInChunk] = lastItem;
+        var chunkSpan = CollectionsMarshal.AsSpan(values);
+        var lastItem = chunkSpan[currentChunk][lastIndexInChunk];
+        chunkSpan[targetChunk][indexInChunk] = lastItem;
 
         Count -= 1;
         RemoveEmptyChunkIfRequired();
