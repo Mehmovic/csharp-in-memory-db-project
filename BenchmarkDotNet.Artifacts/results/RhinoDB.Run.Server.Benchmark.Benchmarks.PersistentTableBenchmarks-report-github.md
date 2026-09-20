@@ -1,26 +1,24 @@
 ```
 
-BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.9445)
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.9457)
 Unknown processor
 .NET SDK 11.0.100-rc.1.26425.128
-  [Host] : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
-  Dry    : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  [Host]     : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  DefaultJob : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
 
-Job=Dry  IterationCount=1  LaunchCount=1  
-RunStrategy=ColdStart  UnrollFactor=1  WarmupCount=1  
 
 ```
-| Method           | RecordCount | Mean        | Error | Allocated |
-|----------------- |------------ |------------:|------:|----------:|
-| **Get**              | **100**         |  **3,562.3 μs** |    **NA** |         **-** |
-| InsertOptimistic | 100         |  2,639.7 μs |    NA |         - |
-| InsertConfirmed  | 100         |  4,600.0 μs |    NA |         - |
-| Update           | 100         |  2,824.8 μs |    NA |         - |
-| **Get**              | **10000**       |  **3,536.7 μs** |    **NA** |         **-** |
-| InsertOptimistic | 10000       |  3,578.4 μs |    NA |         - |
-| InsertConfirmed  | 10000       |  4,973.9 μs |    NA |         - |
-| Update           | 10000       |  4,077.6 μs |    NA |         - |
-| **Get**              | **1000000**     |  **2,952.7 μs** |    **NA** |         **-** |
-| InsertOptimistic | 1000000     |    995.7 μs |    NA |         - |
-| InsertConfirmed  | 1000000     | 31,947.8 μs |    NA |         - |
-| Update           | 1000000     |  1,609.1 μs |    NA |         - |
+| Method           | RecordCount | Mean       | Error     | StdDev     | Gen0   | Gen1   | Allocated |
+|----------------- |------------ |-----------:|----------:|-----------:|-------:|-------:|----------:|
+| **Get**              | **100**         |   **3.266 μs** | **0.0635 μs** |  **0.0951 μs** | **0.0076** |      **-** |      **88 B** |
+| InsertOptimistic | 100         |   4.874 μs | 0.0953 μs |  0.1812 μs | 0.0916 | 0.0153 |     632 B |
+| InsertConfirmed  | 100         | 425.405 μs | 8.3678 μs | 10.2765 μs |      - |      - |     993 B |
+| Update           | 100         |   4.581 μs | 0.0865 μs |  0.1469 μs | 0.0916 |      - |     592 B |
+| **Get**              | **10000**       |   **3.391 μs** | **0.0554 μs** |  **0.0491 μs** | **0.0076** |      **-** |      **88 B** |
+| InsertOptimistic | 10000       |   5.006 μs | 0.0993 μs |  0.2700 μs | 0.0916 | 0.0153 |     632 B |
+| InsertConfirmed  | 10000       | 446.656 μs | 4.1453 μs |  3.6747 μs |      - |      - |     993 B |
+| Update           | 10000       |   4.791 μs | 0.0957 μs |  0.1598 μs | 0.0916 |      - |     592 B |
+| **Get**              | **1000000**     |   **3.268 μs** | **0.0386 μs** |  **0.0361 μs** | **0.0114** |      **-** |      **88 B** |
+| InsertOptimistic | 1000000     |   4.838 μs | 0.0920 μs |  0.1588 μs | 0.0916 | 0.0153 |     632 B |
+| InsertConfirmed  | 1000000     | 462.470 μs | 9.2226 μs | 10.6208 μs |      - |      - |    1025 B |
+| Update           | 1000000     |   4.542 μs | 0.0889 μs |  0.0694 μs | 0.0916 |      - |     592 B |

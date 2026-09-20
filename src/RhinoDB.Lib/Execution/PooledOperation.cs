@@ -21,15 +21,17 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
     private Func<DbContext<TTx>, TTx, TArgs, TValue>? operation;
     private TArgs args = default!;
     private PropagationMode mode;
+    private TValue pendingResult;
 
     private PooledOperation() => core.RunContinuationsAsynchronously = true;
-    
+
     public TValue GetResult(short token) {
         var result = core.GetResult(token);
 
         context = null;
         operation = null;
         args = default!;
+        pendingResult = default!;
         core.Reset();
         Pool.Enqueue(this);
 
@@ -91,7 +93,11 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
             core.SetResult(Finalize(result, durabilityTask, ctx));
             return;
         }
-        durabilityTask.ContinueWith(t => core.SetResult(Finalize(result, t, ctx)), TaskScheduler.Default);
+        pendingResult = result;
+        durabilityTask.ContinueWith(static (t, state) => {
+            var self = (PooledOperation<TTx, TValue, TArgs>)state!;
+            self.core.SetResult(Finalize(self.pendingResult, t, self.context!));
+        }, this, TaskScheduler.Default);
     }
 
     static private TValue Finalize(TValue result, Task<DbError?>? durabilityTask, DbContext<TTx> ctx) {

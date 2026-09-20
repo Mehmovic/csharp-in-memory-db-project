@@ -524,23 +524,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
             ))
             .ToImmutableArray();
 
-    // Shared between TableGenerator (a row's own fields) and CustomTypeGenerator (a [CustomType]'s own
-    // fields) - every Other-kind field whose type is an INamedTypeSymbol must be explicitly marked
-    // [CustomType] and carry both [MemoryPackable]/[MessagePackObject]. Only marked types participate in
-    // the serialization pipeline - there is no silent fallback to MemoryPack's generic WriteValue<T>/
-    // ReadValue<T> dispatch for an unmarked developer-authored type. This check only ever looks one level
-    // deep (a type's own immediate fields), but since every [CustomType] is independently processed by
-    // CustomTypeGenerator as its own generator target, that type's own call to this same method covers
-    // ITS fields the same way - recursion falls out naturally from every level checking its own
-    // immediate children, no explicit multi-hop walk needed. Array-typed fields (IArrayTypeSymbol, not
-    // INamedTypeSymbol) and the short BCL collection allowlist (BuiltInFormattedGenericCollections -
-    // List/Dictionary/HashSet/Queue/Stack) are deliberately excluded - both libraries ship global
-    // formatters for these with no attribute needed. Guid/DateTime/DateTimeOffset/TimeSpan need no
-    // special-casing here at all - they're fully blittable, so they're already RowFieldKind.Unmanaged
-    // and never reach this check in the first place. Known limitation, not fixed here: any OTHER
-    // built-in-formatted framework type outside this short list (Uri, custom collections, ...) would be
-    // a false positive - none of this codebase's fixtures use one today, and exhaustively allow-listing
-    // every type MemoryPack/MessagePack ship a formatter for is out of scope for this diagnostic.
     static internal ImmutableArray<Diagnostic> CheckOtherKindFieldAttributes(
         ImmutableArray<IParameterSymbol> parameters, string containingTypeName, Location location) {
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
@@ -898,12 +881,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine();
     }
 
-    // Protocol wrappers, named by wire format, not by consumer - always emitted (the row type's
-    // [MemoryPackable]/[MessagePackObject] are mandatory, enforced by
-    // MissingSerializationAttributesDiagnostic), even though no caller exists yet. Nothing here
-    // decides which protocol IDC or a client uses - that choice belongs entirely to Stage 6/8's
-    // caller, not to the table. Plain MemoryPack already exists as SerializeRow/DeserializeRow
-    // (Raw, hand-rolled) - only VersionedMemoryPack and MessagePack need their own pair here.
     static private void EmitProtocolWrappers(StringBuilder sb, TableModel table) {
         var row = table.RowTypeFullName;
 
@@ -1479,12 +1456,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static internal string Camel(string name) => name.Length == 0 ? name : char.ToLowerInvariant(name[0]) + name.Substring(1);
     
-    // Those that have "Scan" method and inherit from OrderedIndex<TKey> and its children (Range, Gt, Gte, Lt, Lte, Iter, Filter)
     static bool IsRangedIndex(IndexModel indexModel) {
         return indexModel.Kind is IndexKind.BTree;
     }
     
-    // Those that only support Iter, Filter and not (Range, Gt, Gte, Lt, Lte)
     static bool IsMultiReturnButNotRangedIndex(IndexModel indexModel) {
         return (indexModel.Kind, indexModel.Uniqueness) switch {
             (IndexKind.Hash, Uniqueness.NonUnique) => true,

@@ -2,7 +2,7 @@
 <html lang='en'>
 <head>
 <meta charset='utf-8' />
-<title>RhinoDB.Run.Server.Benchmark.Benchmarks.PersistentTableBenchmarks-20260913-214028</title>
+<title>RhinoDB.Run.Server.Benchmark.Benchmarks.PersistentTableBenchmarks-20260920-103053</title>
 
 <style type="text/css">
 	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
@@ -13,31 +13,29 @@
 </head>
 <body>
 <pre><code>
-BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.9445)
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.9457)
 Unknown processor
 .NET SDK 11.0.100-rc.1.26425.128
-  [Host] : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
-  Dry    : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  [Host]     : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  DefaultJob : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
 </code></pre>
-<pre><code>Job=Dry  IterationCount=1  LaunchCount=1  
-RunStrategy=ColdStart  UnrollFactor=1  WarmupCount=1  
-</code></pre>
+<pre><code></code></pre>
 
 <table>
-<thead><tr><th>Method    </th><th>RecordCount</th><th>Mean </th><th>Error</th><th>Allocated</th>
+<thead><tr><th>Method    </th><th>RecordCount</th><th>Mean</th><th>Error</th><th>StdDev</th><th>Gen0</th><th>Gen1</th><th>Allocated</th>
 </tr>
-</thead><tbody><tr><td>Get</td><td>100</td><td>3,562.3 &mu;s</td><td>NA</td><td>-</td>
-</tr><tr><td>InsertOptimistic</td><td>100</td><td>2,639.7 &mu;s</td><td>NA</td><td>-</td>
-</tr><tr><td>InsertConfirmed</td><td>100</td><td>4,600.0 &mu;s</td><td>NA</td><td>-</td>
-</tr><tr><td>Update</td><td>100</td><td>2,824.8 &mu;s</td><td>NA</td><td>-</td>
-</tr><tr><td>Get</td><td>10000</td><td>3,536.7 &mu;s</td><td>NA</td><td>-</td>
-</tr><tr><td>InsertOptimistic</td><td>10000</td><td>3,578.4 &mu;s</td><td>NA</td><td>-</td>
-</tr><tr><td>InsertConfirmed</td><td>10000</td><td>4,973.9 &mu;s</td><td>NA</td><td>-</td>
-</tr><tr><td>Update</td><td>10000</td><td>4,077.6 &mu;s</td><td>NA</td><td>-</td>
-</tr><tr><td>Get</td><td>1000000</td><td>2,952.7 &mu;s</td><td>NA</td><td>-</td>
-</tr><tr><td>InsertOptimistic</td><td>1000000</td><td>995.7 &mu;s</td><td>NA</td><td>-</td>
-</tr><tr><td>InsertConfirmed</td><td>1000000</td><td>31,947.8 &mu;s</td><td>NA</td><td>-</td>
-</tr><tr><td>Update</td><td>1000000</td><td>1,609.1 &mu;s</td><td>NA</td><td>-</td>
+</thead><tbody><tr><td>Get</td><td>100</td><td>3.266 &mu;s</td><td>0.0635 &mu;s</td><td>0.0951 &mu;s</td><td>0.0076</td><td>-</td><td>88 B</td>
+</tr><tr><td>InsertOptimistic</td><td>100</td><td>4.874 &mu;s</td><td>0.0953 &mu;s</td><td>0.1812 &mu;s</td><td>0.0916</td><td>0.0153</td><td>632 B</td>
+</tr><tr><td>InsertConfirmed</td><td>100</td><td>425.405 &mu;s</td><td>8.3678 &mu;s</td><td>10.2765 &mu;s</td><td>-</td><td>-</td><td>993 B</td>
+</tr><tr><td>Update</td><td>100</td><td>4.581 &mu;s</td><td>0.0865 &mu;s</td><td>0.1469 &mu;s</td><td>0.0916</td><td>-</td><td>592 B</td>
+</tr><tr><td>Get</td><td>10000</td><td>3.391 &mu;s</td><td>0.0554 &mu;s</td><td>0.0491 &mu;s</td><td>0.0076</td><td>-</td><td>88 B</td>
+</tr><tr><td>InsertOptimistic</td><td>10000</td><td>5.006 &mu;s</td><td>0.0993 &mu;s</td><td>0.2700 &mu;s</td><td>0.0916</td><td>0.0153</td><td>632 B</td>
+</tr><tr><td>InsertConfirmed</td><td>10000</td><td>446.656 &mu;s</td><td>4.1453 &mu;s</td><td>3.6747 &mu;s</td><td>-</td><td>-</td><td>993 B</td>
+</tr><tr><td>Update</td><td>10000</td><td>4.791 &mu;s</td><td>0.0957 &mu;s</td><td>0.1598 &mu;s</td><td>0.0916</td><td>-</td><td>592 B</td>
+</tr><tr><td>Get</td><td>1000000</td><td>3.268 &mu;s</td><td>0.0386 &mu;s</td><td>0.0361 &mu;s</td><td>0.0114</td><td>-</td><td>88 B</td>
+</tr><tr><td>InsertOptimistic</td><td>1000000</td><td>4.838 &mu;s</td><td>0.0920 &mu;s</td><td>0.1588 &mu;s</td><td>0.0916</td><td>0.0153</td><td>632 B</td>
+</tr><tr><td>InsertConfirmed</td><td>1000000</td><td>462.470 &mu;s</td><td>9.2226 &mu;s</td><td>10.6208 &mu;s</td><td>-</td><td>-</td><td>1025 B</td>
+</tr><tr><td>Update</td><td>1000000</td><td>4.542 &mu;s</td><td>0.0889 &mu;s</td><td>0.0694 &mu;s</td><td>0.0916</td><td>-</td><td>592 B</td>
 </tr></tbody></table>
 </body>
 </html>
