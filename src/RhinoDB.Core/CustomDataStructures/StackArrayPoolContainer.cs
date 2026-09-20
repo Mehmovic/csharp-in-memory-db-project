@@ -1,10 +1,11 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 
 using RhinoDB.Core.Exceptions;
 
 namespace RhinoDB.Core;
 
-public ref struct StackArrayPoolContainerBuilder<T> : IDisposable where T : struct {
+public ref struct StackArrayPoolContainerBuilder<T> : IDisposable {
     private T[] array;
     private Span<T> buffer;
     private int count;
@@ -44,7 +45,7 @@ public ref struct StackArrayPoolContainerBuilder<T> : IDisposable where T : stru
     public void Dispose() {
         if (IsDisposed()) return;
         if (array.Length > 0) {
-            ArrayPool<T>.Shared.Return(array);
+            ArrayPool<T>.Shared.Return(array, clearArray: RuntimeHelpers.IsReferenceOrContainsReferences<T>());
         }
         array = null!;
     }
@@ -57,7 +58,7 @@ public ref struct StackArrayPoolContainerBuilder<T> : IDisposable where T : stru
 
         if (array.Length > 0) {
             buffer[..count].CopyTo(newArray);
-            ArrayPool<T>.Shared.Return(array);
+            ArrayPool<T>.Shared.Return(array, clearArray: RuntimeHelpers.IsReferenceOrContainsReferences<T>());
         }
 
         array = newArray;
@@ -73,7 +74,7 @@ public ref struct StackArrayPoolContainerBuilder<T> : IDisposable where T : stru
     }
 }
 
-public ref struct StackArrayPoolContainer<T> : IDisposable where T : struct {
+public ref struct StackArrayPoolContainer<T> : IDisposable {
     private T[] array;
     private Span<T> buffer;
     public readonly int Count;
@@ -102,7 +103,7 @@ public ref struct StackArrayPoolContainer<T> : IDisposable where T : struct {
         if (IsDisposed()) return;
 
         if (array.Length > 0) {
-            ArrayPool<T>.Shared.Return(array);
+            ArrayPool<T>.Shared.Return(array, clearArray: RuntimeHelpers.IsReferenceOrContainsReferences<T>());
         }
 
         array = null!;
