@@ -2,7 +2,7 @@
 <html lang='en'>
 <head>
 <meta charset='utf-8' />
-<title>RhinoDB.Run.Server.Benchmark.Benchmarks.ThroughputBenchmarks-20260914-002041</title>
+<title>RhinoDB.Run.Server.Benchmark.Benchmarks.ThroughputBenchmarks-20260920-121559</title>
 
 <style type="text/css">
 	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
@@ -13,7 +13,7 @@
 </head>
 <body>
 <pre><code>
-BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.9445)
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.9457)
 Unknown processor
 .NET SDK 11.0.100-rc.1.26425.128
   [Host]   : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
@@ -24,10 +24,12 @@ WarmupCount=3
 </code></pre>
 
 <table>
-<thead><tr><th>Method                         </th><th>Mean</th><th>Error</th><th>StdDev</th><th>Allocated</th>
+<thead><tr><th>Method                         </th><th>Mean</th><th>Error</th><th>StdDev</th><th>Gen0</th><th>Gen1</th><th>Allocated</th>
 </tr>
-</thead><tbody><tr><td>PersistentOptimisticConcurrentInserts</td><td>9,464.4 ms</td><td>1,786.52 ms</td><td>97.93 ms</td><td>3.77 MB</td>
-</tr><tr><td>PersistentOptimisticConcurrentUpdates</td><td>452.4 ms</td><td>46.16 ms</td><td>2.53 ms</td><td>3.66 MB</td>
+</thead><tbody><tr><td>InstantConcurrentInserts</td><td>3.589 ms</td><td>1.496 ms</td><td>0.0820 ms</td><td>375.0000</td><td>140.6250</td><td>2.29 MB</td>
+</tr><tr><td>InstantConcurrentUpdates</td><td>3.317 ms</td><td>1.862 ms</td><td>0.1021 ms</td><td>367.1875</td><td>273.4375</td><td>2.21 MB</td>
+</tr><tr><td>PersistentOptimisticConcurrentInserts</td><td>9.089 ms</td><td>6.927 ms</td><td>0.3797 ms</td><td>1093.7500</td><td>687.5000</td><td>10.21 MB</td>
+</tr><tr><td>PersistentOptimisticConcurrentUpdates</td><td>8.411 ms</td><td>5.237 ms</td><td>0.2870 ms</td><td>1093.7500</td><td>843.7500</td><td>6.56 MB</td>
 </tr></tbody></table>
 </body>
 </html>

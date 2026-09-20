@@ -35,7 +35,7 @@ the Backlog after all — its last phase (a ring buffer) is a real dependency
 of Stage 8's reconnect/catch-up story, not an independent, deferrable
 improvement (`Docs/05-wal-design.md` Phase 4: "Stage 8's subscription engine
 gets its diff source from the same ring"). Actual order became Stages 1-5
-(done) → **Stage 5.5, WAL durability** (in progress) → Stage 7+8 → poc game
+(done) → **Stage 5.5, WAL durability** (done) → Stage 7+8 → poc game
 → Stage 6, not Stages 1-5 → Stage 7+8 directly as the paragraph above still
 describes.
 
@@ -651,7 +651,7 @@ covering the benchmark's temp directory made no meaningful difference
 normal run-to-run variance). The root cause of the fresh-page-write cost is
 still open.
 
-## Stage 5.5 — WAL-based write durability ⏳ in progress (ring buffer + re-benchmark left)
+## Stage 5.5 — WAL-based write durability ✅ done
 
 **Sequencing correction**: the Backlog entry below originally describing
 this work as "sequenced after Stage 7+8 (networking)... not before" no
@@ -717,18 +717,38 @@ already — forward-compatible with `Docs/06-schema-migration.md`'s eventual
 runtime migration protocol — but refuses loudly rather than silently
 no-opping, since nothing implements migration yet.
 
-**Left before this stage is done**: Phase 4, the ring buffer itself (a
-per-database RAM circular buffer of recent committed changes, covering both
-`Instant` and `Persistent` tables via one new generator hook in
-`EmitInstantApply`/`EmitPersistentApply` — see `Docs/05-wal-design.md` Phase
-4 for the full design, including why it's needed even for non-durable
-`Instant` tables); and a re-run of the throughput benchmarks plus a
-documentation pass now that the write path is WAL-based rather than
-direct-libmdbx (the last full benchmark writeup, `ThroughputBenchmarks.md`
-above, predates the WAL replacing libmdbx's synchronous path and needs
-redoing against the current write path, not just re-read). Both are
-prerequisites for Stage 6/7+8, not independent follow-up work — see the
-sequencing note above.
+2026-09-19: **Phase 4, the ring buffer** — per-table (not per-database, see
+`Docs/05-wal-design.md`'s 2026-09-19 amendment), covering both `Instant` and
+`Persistent` tables via a generator hook in `EmitInstantApply`/
+`EmitPersistentApply`. `CustomTypeGenerator.cs` was built alongside it
+(CustomTypes get the same three-pipeline Raw/`VersionedMemoryPack`/
+`MessagePack` treatment tables do), and `[CustomType]` was made mandatory
+(recursively) on any `Other`-kind row/CustomType field, closing a gap where
+an unmarked nested type would have silently fallen through to a
+reflection-dependent formatter path.
+
+2026-09-20: **Re-ran the throughput benchmarks against the now-WAL-based
+write path, closing this stage out.** `ThroughputBenchmarks.md`'s last
+writeup predated the WAL replacing libmdbx's direct synchronous commit as
+the durability path; re-measuring is the direct before/after proof of
+whether that redesign worked. **It did, decisively**:
+`PersistentOptimisticConcurrentInserts` went from ~964 ops/sec to
+**~1.10M ops/sec (~1,140x)**, `PersistentOptimisticConcurrentUpdates` from
+~20,800 ops/sec to **~1.19M ops/sec (~57x)** — and the ~22x gap between
+Insert (fresh page) and Update (settled page) that was libmdbx's
+mmap/copy-on-write fresh-page tax is gone (Insert and Update now sit within
+~8% of each other), exactly as predicted once writes stopped touching mmap
+pages on the hot path at all. Persistent throughput now clears the ~300k/sec
+external comparison point too (previously only non-durable Instant tables
+did) — Persistent is now within ~2.5-2.7x of Instant's own throughput, down
+from ~3,000x slower. Full writeup:
+`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/ThroughputBenchmarks.md`.
+Also did a scoped gen-0-allocation pass first (per-transaction closure in
+`PooledOperation.Complete`, `ColdStore.EndScope`'s per-transaction
+`WalChange[]` copy, `DenseArray<T>`'s row-storage indexing switched to
+`CollectionsMarshal.AsSpan` matching the pattern already used throughout
+`BTreeIndex`/`NonUniqueBTreeIndex`) before this re-benchmark, so the numbers
+above reflect the engine in its current state, not a stale snapshot.
 
 ## Stage 6 — Inter-Database Communication (IDC) ⏳ designed, not built, built after Stage 7+8
 
