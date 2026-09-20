@@ -37,7 +37,7 @@ public class WalRecordCodecTests {
 
     [Test]
     public void EncodeThenTryDecode_CheckpointMarkerEntry_RoundTripsWithNoChanges() {
-        var frame = WalRecordCodec.Encode(7, WalEntryKind.CheckpointMarker, []);
+        var frame = WalRecordCodec.Encode(7, WalEntryKind.CheckpointMarker, Array.Empty<WalChange>());
 
         var status = WalRecordCodec.TryDecode(frame, out var entry, out var consumed);
 
@@ -52,7 +52,7 @@ public class WalRecordCodecTests {
     public void Scan_MultipleValidEntriesBackToBack_ReturnsAllInOrderAsClean() {
         var frame1 = WalRecordCodec.Encode(1, WalEntryKind.Operation, OneChange());
         var frame2 = WalRecordCodec.Encode(2, WalEntryKind.Operation, OneChange());
-        var frame3 = WalRecordCodec.Encode(3, WalEntryKind.CheckpointMarker, []);
+        var frame3 = WalRecordCodec.Encode(3, WalEntryKind.CheckpointMarker, Array.Empty<WalChange>());
         var buffer = frame1.Concat(frame2).Concat(frame3).ToArray();
 
         var result = WalRecordCodec.Scan(buffer);
@@ -116,6 +116,39 @@ public class WalRecordCodecTests {
             "Corruption with more data after it can't be a torn crash-tail - refuse to open, don't guess.");
         Assert.That(result.ValidLength, Is.EqualTo(frame1.Length));
         Assert.That(result.Entries, Has.Count.EqualTo(1), "Only the entries before the corrupt one are trustworthy.");
+    }
+
+    [Test]
+    public void Encode_FromListOverload_ProducesByteIdenticalFrameToTheArrayOverload() {
+        var changes = TwoChangesAcrossTables();
+
+        var frameFromArray = WalRecordCodec.Encode(42, WalEntryKind.Operation, changes);
+        var frameFromList = WalRecordCodec.Encode(42, WalEntryKind.Operation, changes.ToList());
+
+        Assert.That(frameFromList, Is.EqualTo(frameFromArray),
+            "ColdStore.EndScope passes its change-tracking List directly (no ToArray() copy) - " +
+            "this only stays correct if MemoryPack encodes List<WalChange> and WalChange[] identically.");
+    }
+
+    [Test]
+    public void EncodeThenTryDecode_FromListOverload_RoundTripsTheSameAsTheArrayOverload() {
+        var frame = WalRecordCodec.Encode(42, WalEntryKind.Operation, TwoChangesAcrossTables().ToList());
+
+        var status = WalRecordCodec.TryDecode(frame, out var entry, out var consumed);
+
+        Assert.That(status, Is.EqualTo(WalScanStatus.Clean));
+        Assert.That(consumed, Is.EqualTo(frame.Length));
+        Assert.That(entry.Changes, Has.Length.EqualTo(2));
+        Assert.That(entry.Changes[0].Key, Is.EqualTo(new byte[] { 1 }));
+        Assert.That(entry.Changes[1].Row, Is.Null);
+    }
+
+    [Test]
+    public void Encode_FromListOverload_EmptyList_MatchesEmptyArrayOverload() {
+        var frameFromArray = WalRecordCodec.Encode(7, WalEntryKind.CheckpointMarker, Array.Empty<WalChange>());
+        var frameFromList = WalRecordCodec.Encode(7, WalEntryKind.CheckpointMarker, new List<WalChange>());
+
+        Assert.That(frameFromList, Is.EqualTo(frameFromArray));
     }
 
     [Test]

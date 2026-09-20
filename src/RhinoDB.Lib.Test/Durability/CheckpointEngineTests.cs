@@ -98,7 +98,7 @@ public class CheckpointEngineTests {
     public async Task RunCheckpoint_TruncatesTheWalAfterCommitting() {
         var path = Path.Combine(dir, "wal.dat");
         var wal = WriteAheadLog.Create(path, Guid.NewGuid(), sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
-        await wal.AppendConfirmed(1, WalEntryKind.Operation, [new WalChange(TableId, ChangeKind.Insert, [1], [42])]);
+        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new(TableId, ChangeKind.Insert, [1], [42]) });
         var engine = new CheckpointEngine(env, wal, archiveDir);
         var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };
 
@@ -161,7 +161,7 @@ public class CheckpointEngineTests {
         // WAL would destroy it permanently, so the checkpoint must refuse as a whole.
         var path = Path.Combine(dir, "wal.dat");
         var wal = WriteAheadLog.Create(path, Guid.NewGuid(), sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
-        await wal.AppendConfirmed(1, WalEntryKind.Operation, [new WalChange(TableId, ChangeKind.Insert, [1], [42])]);
+        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new(TableId, ChangeKind.Insert, [1], [42]) });
         var engine = new CheckpointEngine(env, wal, archiveDir);
         var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };
         const uint unknownTableId = 999;

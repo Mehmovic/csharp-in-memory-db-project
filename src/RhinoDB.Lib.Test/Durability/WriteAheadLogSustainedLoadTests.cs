@@ -56,7 +56,7 @@ public class WriteAheadLogSustainedLoadTests {
         var warmup = new Task<DbError?>[WarmupOperations];
         for (var i = 0; i < WarmupOperations; i++) {
             var warmupLsn = ++lsn;
-            warmup[i] = wal.AppendConfirmed(warmupLsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(warmupLsn), payload)]);
+            warmup[i] = wal.AppendConfirmed(warmupLsn, WalEntryKind.Operation, new WalChange[] { new(1, ChangeKind.Insert, BitConverter.GetBytes(warmupLsn), payload) });
         }
         await Task.WhenAll(warmup);
 
@@ -66,7 +66,7 @@ public class WriteAheadLogSustainedLoadTests {
             for (var i = 0; i < BatchSize; i++) {
                 var thisLsn = ++lsn;
                 var change = new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(thisLsn), payload);
-                pending[i] = wal.AppendConfirmed(thisLsn, WalEntryKind.Operation, [change]);
+                pending[i] = wal.AppendConfirmed(thisLsn, WalEntryKind.Operation, new WalChange[] { change });
             }
             await Task.WhenAll(pending);
             stopwatch.Stop();

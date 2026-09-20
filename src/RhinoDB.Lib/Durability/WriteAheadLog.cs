@@ -90,12 +90,28 @@ public sealed class WriteAheadLog : IDisposable {
         return JoinGroupCommit();
     }
 
+    internal Task<DbError?> AppendConfirmed(long lsn, WalEntryKind kind, List<WalChange> changes) {
+        AppendOnly(lsn, kind, changes);
+        return JoinGroupCommit();
+    }
+
     internal void AppendOptimistic(long lsn, WalEntryKind kind, WalChange[] changes) {
         var frameLength = AppendOnly(lsn, kind, changes);
         if (Interlocked.Add(ref bytesSinceLastFlush, frameLength) >= sizeThresholdBytes) _ = JoinGroupCommit();
     }
 
+    internal void AppendOptimistic(long lsn, WalEntryKind kind, List<WalChange> changes) {
+        var frameLength = AppendOnly(lsn, kind, changes);
+        if (Interlocked.Add(ref bytesSinceLastFlush, frameLength) >= sizeThresholdBytes) _ = JoinGroupCommit();
+    }
+
     private int AppendOnly(long lsn, WalEntryKind kind, WalChange[] changes) {
+        var frame = WalRecordCodec.Encode(lsn, kind, changes);
+        lock (appendLock) fileStream.Write(frame, 0, frame.Length);
+        return frame.Length;
+    }
+
+    private int AppendOnly(long lsn, WalEntryKind kind, List<WalChange> changes) {
         var frame = WalRecordCodec.Encode(lsn, kind, changes);
         lock (appendLock) fileStream.Write(frame, 0, frame.Length);
         return frame.Length;

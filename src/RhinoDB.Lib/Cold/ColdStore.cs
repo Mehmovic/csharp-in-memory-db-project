@@ -197,13 +197,16 @@ public sealed class ColdStore : IDisposable {
             return Task.FromResult<DbError?>(null);
         }
 
-        var changes = currentOperationChanges.ToArray();
+        Task<DbError?> result;
+        if (mode == PropagationMode.Confirmed) {
+            result = TestOnlyWal.AppendConfirmed(lsn, WalEntryKind.Operation, currentOperationChanges);
+        } else {
+            TestOnlyWal.AppendOptimistic(lsn, WalEntryKind.Operation, currentOperationChanges);
+            result = Task.FromResult<DbError?>(null);
+        }
+
         currentOperationChanges.Clear();
-
-        if (mode == PropagationMode.Confirmed) return TestOnlyWal.AppendConfirmed(lsn, WalEntryKind.Operation, changes);
-
-        TestOnlyWal.AppendOptimistic(lsn, WalEntryKind.Operation, changes);
-        return Task.FromResult<DbError?>(null);
+        return result;
     }
 
     public ColdTable<TKey, TRow> OpenTable<TKey, TRow>(string name)

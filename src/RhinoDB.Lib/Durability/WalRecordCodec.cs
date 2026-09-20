@@ -7,8 +7,13 @@ namespace RhinoDB.Lib.Durability;
 static public class WalRecordCodec {
     public const int HeaderSize = 4 + 4 + 8 + 1;
 
-    static public byte[] Encode(long lsn, WalEntryKind kind, WalChange[] changes) {
-        var payload = changes.Length == 0 ? [] : MemoryPackSerializer.Serialize(changes);
+    static public byte[] Encode(long lsn, WalEntryKind kind, WalChange[] changes) =>
+        BuildFrame(lsn, kind, changes.Length == 0 ? [] : MemoryPackSerializer.Serialize(changes));
+
+    static public byte[] Encode(long lsn, WalEntryKind kind, List<WalChange> changes) =>
+        BuildFrame(lsn, kind, changes.Count == 0 ? [] : MemoryPackSerializer.Serialize(changes));
+
+    static private byte[] BuildFrame(long lsn, WalEntryKind kind, byte[] payload) {
         var frame = new byte[HeaderSize + payload.Length];
         var span = frame.AsSpan();
 
