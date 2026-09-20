@@ -1,0 +1,29 @@
+<Project>
+
+    <PropertyGroup>
+        <RhinoPreBuildTaskAssembly>$(MSBuildThisFileDirectory)..\bin\$(Configuration)\netstandard2.0\RhinoDB.PreBuild.dll</RhinoPreBuildTaskAssembly>
+    </PropertyGroup>
+
+    <UsingTask TaskName="RhinoDB.PreBuild.ExpandShorthandTask" AssemblyFile="$(RhinoPreBuildTaskAssembly)" />
+
+    <!--
+      DesignTimeBuild/BuildingProject guard: without this, an IDE's background project evaluation
+      (Rider/Visual Studio/VS Code populating IntelliSense - not a real build, no compiled output
+      wanted) ALSO invokes this target, loading RhinoDB.PreBuild.dll into the IDE's own long-lived
+      background process. .NET never unloads that assembly, so it stays locked for as long as the
+      IDE is open - the next real `dotnet build` of RhinoDB.PreBuild.csproj itself then fails to
+      overwrite its own output (confirmed directly: this was the actual cause of repeated
+      file-lock build failures during development, not a leftover/stray process). Real builds set
+      DesignTimeBuild=false (or leave it unset) and BuildingProject=true; IDE design-time
+      evaluations set DesignTimeBuild=true - this condition is the standard, documented way to
+      keep a custom Task out of that path entirely.
+    -->
+    <Target Name="RhinoExpandShorthand" BeforeTargets="CoreCompile"
+            Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildingProject)' == 'true'">
+        <ExpandShorthandTask ProjectDirectory="$(MSBuildProjectDirectory)" />
+        <ItemGroup>
+            <Compile Include="$(RhinoTargetParentDirectory)/**/*.g.cs" Exclude="@(Compile)" />
+        </ItemGroup>
+    </Target>
+
+</Project>

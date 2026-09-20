@@ -1,0 +1,14 @@
+<Project>
+    <PropertyGroup>
+        <_RhinoGeneratorConfigPath>$(MSBuildProjectDirectory)\config.Generator.json</_RhinoGeneratorConfigPath>
+        <_RhinoGeneratorConfigJson Condition="Exists('$(_RhinoGeneratorConfigPath)')">$([System.IO.File]::ReadAllText('$(_RhinoGeneratorConfigPath)'))</_RhinoGeneratorConfigJson>
+        <RhinoSourceParentDirectory Condition="'$(_RhinoGeneratorConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoGeneratorConfigJson)', '"SourceParentDirectory"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoSourceParentDirectory>
+        <RhinoSourceParentDirectory Condition="'$(RhinoSourceParentDirectory)' == ''">RhinoContracts</RhinoSourceParentDirectory>
+        <RhinoTargetParentDirectory Condition="'$(_RhinoGeneratorConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoGeneratorConfigJson)', '"TargetParentDirectory"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoTargetParentDirectory>
+        <RhinoTargetParentDirectory Condition="'$(RhinoTargetParentDirectory)' == ''">RhinoDB</RhinoTargetParentDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+        <Compile Remove="$(RhinoSourceParentDirectory)/**/*.cs" />
+        <None Include="$(RhinoSourceParentDirectory)/**/*.cs" />
+    </ItemGroup>
+</Project>

@@ -6,12 +6,8 @@
         <LangVersion>latest</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <RootNamespace>RhinoDB.Run.Server.Benchmark</RootNamespace>
+        <RootNamespace>RhinoDB.Run.Server.Sandbox</RootNamespace>
     </PropertyGroup>
-
-    <ItemGroup>
-        <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
-    </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\RhinoDB.Core\RhinoDB.Core.csproj" />

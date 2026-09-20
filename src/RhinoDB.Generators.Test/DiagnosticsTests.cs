@@ -1,3 +1,5 @@
+using Microsoft.CodeAnalysis;
+
 namespace RhinoDB.Test.Generators;
 
 // Every rule TableGenerator relies on is a diagnostic, not a silent
@@ -729,5 +731,36 @@ public class DiagnosticsTests {
             """;
 
         Assert.DoesNotThrow(() => GeneratorTestHost.CompileAndLoad(source));
+    }
+
+    [Test]
+    public void ShorthandMarkerAttributesUsedDirectlyInCompiledCode_AreInertNotRecognizedByTableGenerator() {
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class MarkerDb : DbContext<MarkerDbTransaction> { }
+
+            [InstantTable(typeof(MarkerDb))]
+            [MemoryPackable]
+            [MessagePackObject]
+            public readonly partial record struct Widget(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
+            """;
+
+        var (assembly, diagnostics) = GeneratorTestHost.CompileAndLoad(source);
+        Assert.That(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+
+        var txType = assembly.GetType("TestNs.MarkerDbTransaction")!;
+        Assert.That(txType.GetProperty("Widget"), Is.Null,
+            "InstantTableAttribute derives from TableAttribute but ForAttributeWithMetadataName doesn't " +
+            "match by inheritance - TableGenerator must never see a struct that only carries the shorthand " +
+            "marker attribute directly (bypassing the pre-build tool), so Widget must never become a " +
+            "recognized table on the generated transaction.");
     }
 }

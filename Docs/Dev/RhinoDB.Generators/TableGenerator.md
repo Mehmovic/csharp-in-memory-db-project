@@ -51,6 +51,30 @@ shared helpers that take no kind parameter at all; anything that actually
 differs per kind (fields/constructor/Apply()/.Storage) is written out
 separately in full for each kind rather than branched inline.
 
+## `ToTableModels` — shorthand marker attributes never reach the generator (design note, 2026-09-20)
+
+`RhinoDB.Core.Tables.InstantTableAttribute`/`PersistentTableAttribute` exist purely so the IDE can offer
+real IntelliSense (named-argument completion for `Accessor`/`ChunkSize`/`Evictable`/`RingBufferCapacity`,
+inherited from `TableAttribute`, whose `sealed` was removed to allow this) while hand-writing files under
+`RhinoContracts/Tables/`. Before adding them, it was worth confirming they'd stay inert if a developer ever
+applied one directly to a *compiled* row type, bypassing the shorthand system entirely - the initial
+assumption was that `ForAttributeWithMetadataName(TableAttributeFullName)` matches by inheritance (as some
+similar Roslyn APIs do), which would have meant `ctx.Attributes` picking up the derived attribute with a
+mismatched `ConstructorArguments` shape (`InstantTableAttribute(Type database)` - one argument - read as if
+it were `TableAttribute(TableKind, Type)` - two), crashing the generator with an `InvalidCastException`.
+**Confirmed otherwise, not guessed**: `ForAttributeWithMetadataName` deliberately does *not* match derived
+attribute types (tracked as a feature request the API doesn't support - `dotnet/roslyn#76834`) - it only
+matches a syntax node whose attribute's own class is exactly the given metadata name. So
+`[InstantTable]`/`[PersistentTable]` used directly in real compiled code are invisible to this provider by
+construction, with no filtering/guard code needed here at all - they simply have no effect (the struct
+compiles as an ordinary type with an unrecognized-by-TableGenerator attribute on it, nothing more).
+`RhinoDB.Core.Tables.PackIdAttribute` needed no such consideration either - it doesn't derive from
+`MemoryPackOrderAttribute`/`KeyAttribute` (both sealed, third-party types anyway) and `TableGenerator`
+never scans for a `PackId`-named attribute on a field, so a stray `[PackId(n)]` in compiled code is
+likewise inert - existing per-field completeness checks (left to MemoryPack's/MessagePack's own
+generators, see below) already catch the resulting missing `[property: MemoryPackOrder]`/`[property: Key]`
+on their own.
+
 Every rule this generator relies on is a diagnostic, not an assumption or a
 crash: `ToTableModel` never throws on malformed input (a missing
 `[PrimaryKey]`, an empty Accessor, a composite index that disagrees with
