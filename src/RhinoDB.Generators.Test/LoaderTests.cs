@@ -179,6 +179,72 @@ public class LoaderTests {
     }
 
     [Test]
+    public async Task LoadAsync_ReSeedsAutoIncrementCounterFromLoadedRows_SoARestartDoesNotReuseIds() {
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
+
+            [Table(TableKind.Persistent, typeof(LeagueDb))]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Club(
+                [PrimaryKey][AutoIncrement] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] int Rating);
+            """;
+
+        var dir = Path.Combine(Path.GetTempPath(), "rhinodb-loader-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try {
+            System.Reflection.Assembly asm;
+            Type dbType, txType, loaderType, clubType;
+            using (var cold = ColdStore.Open(dir).Unwrap()) {
+                (asm, _) = GeneratorTestHost.CompileAndLoad(source);
+                dbType = asm.GetType("TestNs.LeagueDb")!;
+                txType = asm.GetType("TestNs.LeagueDbTransaction")!;
+                loaderType = asm.GetType("TestNs.LeagueDbLoader")!;
+                clubType = asm.GetType("TestNs.Club")!;
+                var db = Activator.CreateInstance(dbType, cold)!;
+
+                var insert = await (Task<Result>)GeneratorTestHost.RunTransactional(
+                    db, txType, (ctx, tx) => {
+                        dynamic dtx = tx;
+                        dtx.Club.Insert((dynamic)Activator.CreateInstance(clubType, 0, 80)!);
+                        dtx.Club.Insert((dynamic)Activator.CreateInstance(clubType, 0, 75)!);
+                        return Result.Ok();
+                    }, PropagationMode.Confirmed);
+                Assert.That(insert.IsOk(), Is.True);
+            }
+
+            using var reopenedCold = ColdStore.Open(dir).Unwrap();
+            var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
+            reopenedCold.CompleteRecovery();
+            var loader = Activator.CreateInstance(loaderType)!;
+            await (Task)loaderType.GetMethod("LoadAsync")!.Invoke(loader, [reopenedDb])!;
+
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                reopenedDb, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)Activator.CreateInstance(clubType, 0, 60)!); return Result.Ok(); },
+                PropagationMode.Optimistic);
+
+            var thirdClubFound = false;
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                reopenedDb, txType, (ctx, tx) => { thirdClubFound = ((dynamic)tx).Club.Find(3).IsOk(); return Result.Ok(); },
+                PropagationMode.Optimistic);
+
+            Assert.That(thirdClubFound, Is.True,
+                "After eager-loading 2 rows (ids 1-2), a new AutoIncrement insert must continue at id 3, not restart at id 1 and collide.");
+        } finally {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Test]
     public void InstantOnlyDatabase_DoesNotGenerateALoaderAtAll() {
         const string source = """
             using MemoryPack;

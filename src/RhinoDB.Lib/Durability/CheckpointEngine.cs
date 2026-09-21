@@ -63,7 +63,7 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
         var syncRc = env.Sync(force: true, nonblock: false);
         if (syncRc != 0 && syncRc != MdbxResultTrue) return Result.Error(MdbxErrorMapper.Map(syncRc));
 
-        var archiveError = WalArchive.WriteSegment(archiveDirectory, wal.DatabaseId, entries);
+        var archiveError = WalArchive.WriteSegment(archiveDirectory, wal.DatabaseId, entries, 0);
 
         var truncateError = await wal.Truncate();
         if (truncateError is { } err) return Result.Error(err);

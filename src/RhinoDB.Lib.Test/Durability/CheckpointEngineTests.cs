@@ -45,7 +45,7 @@ public class CheckpointEngineTests {
     }
 
     private WriteAheadLog CreateWal() =>
-        WriteAheadLog.Create(Path.Combine(dir, "wal.dat"), Guid.NewGuid(), sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
+        WriteAheadLog.Create(Path.Combine(dir, "wal.dat"), Guid.NewGuid(), 0, sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
 
     private byte[]? ReadRaw(uint dbi, byte[] key) {
         env.BeginTxn(0, out var txn);
@@ -97,7 +97,7 @@ public class CheckpointEngineTests {
     [Test]
     public async Task RunCheckpoint_TruncatesTheWalAfterCommitting() {
         var path = Path.Combine(dir, "wal.dat");
-        var wal = WriteAheadLog.Create(path, Guid.NewGuid(), sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
+        var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0, sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
         await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new(TableId, ChangeKind.Insert, [1], [42]) });
         var engine = new CheckpointEngine(env, wal, archiveDir);
         var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };
@@ -160,7 +160,7 @@ public class CheckpointEngineTests {
         // tail entry naming a table this database never opened. Skipping it and truncating the
         // WAL would destroy it permanently, so the checkpoint must refuse as a whole.
         var path = Path.Combine(dir, "wal.dat");
-        var wal = WriteAheadLog.Create(path, Guid.NewGuid(), sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
+        var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0, sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
         await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new(TableId, ChangeKind.Insert, [1], [42]) });
         var engine = new CheckpointEngine(env, wal, archiveDir);
         var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };

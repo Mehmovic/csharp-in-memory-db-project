@@ -1200,6 +1200,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        primaryIndex.Insert(pk, offset);");
         foreach (var idx in table.Indexes)
             sb.AppendLine($"        {IndexFieldName(idx)}.Insert({KeyExpr("row", idx)}, offset);");
+        foreach (var aif in table.AutoIncrementFields)
+            sb.AppendLine($"        {Camel(aif.FieldName)}Counter.Seed((long)row.{aif.FieldName} + 1);");
         sb.AppendLine("    }");
         sb.AppendLine();
 

@@ -94,7 +94,7 @@ public sealed class ColdStore : IDisposable {
             }
             (wal, tailEntries) = openResult.Unwrap();
         } else {
-            var createResult = WriteAheadLog.Create(walPath, Guid.NewGuid());
+            var createResult = WriteAheadLog.Create(walPath, Guid.NewGuid(), 0);
             if (createResult.IsError()) {
                 env.Dispose();
                 return Result<ColdStore>.Error(createResult.GetError());

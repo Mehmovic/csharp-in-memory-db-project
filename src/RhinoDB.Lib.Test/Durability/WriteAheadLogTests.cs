@@ -28,6 +28,7 @@ public class WriteAheadLogTests {
         WriteAheadLog.Create(
             Path.Combine(dir, "wal.dat"),
             Guid.NewGuid(),
+            0,
             sizeThresholdBytes,
             periodicFlushInterval == default ? TimeSpan.FromMinutes(10) : periodicFlushInterval
         ).Unwrap();
@@ -39,20 +40,34 @@ public class WriteAheadLogTests {
         var path = Path.Combine(dir, "wal.dat");
         var databaseId = Guid.NewGuid();
 
-        WriteAheadLog.Create(path, databaseId).Unwrap().Dispose();
+        WriteAheadLog.Create(path, databaseId, 0).Unwrap().Dispose();
 
         var bytes = File.ReadAllBytes(path);
         var ok = WalFileHeaderCodec.TryDecode(bytes, out var header);
         Assert.That(ok, Is.True);
         Assert.That(header.DatabaseId, Is.EqualTo(databaseId));
+        Assert.That(header.Generation, Is.EqualTo(0), "Generation defaults to 0 until the schema-migration engine assigns a real value.");
+    }
+
+    [Test]
+    public void Create_WithAnExplicitGeneration_RoundTripsThroughOpen() {
+        var path = Path.Combine(dir, "wal.dat");
+
+        using (var wal = WriteAheadLog.Create(path, Guid.NewGuid(), generation: 7).Unwrap()) {
+            Assert.That(wal.Generation, Is.EqualTo(7u));
+        }
+
+        var opened = WriteAheadLog.Open(path).Unwrap();
+        Assert.That(opened.Wal.Generation, Is.EqualTo(7u));
+        opened.Wal.Dispose();
     }
 
     [Test]
     public void Create_AgainstAPathThatAlreadyExists_Fails() {
         var path = Path.Combine(dir, "wal.dat");
-        using var first = WriteAheadLog.Create(path, Guid.NewGuid()).Unwrap();
+        using var first = WriteAheadLog.Create(path, Guid.NewGuid(), 0).Unwrap();
 
-        var second = WriteAheadLog.Create(path, Guid.NewGuid());
+        var second = WriteAheadLog.Create(path, Guid.NewGuid(), 0);
 
         Assert.That(second.IsError(), Is.True);
     }
@@ -60,7 +75,7 @@ public class WriteAheadLogTests {
     [Test]
     public async Task AppendConfirmed_ThenAwaited_PersistsTheEntryDurably() {
         var path = Path.Combine(dir, "wal.dat");
-        using (var wal = WriteAheadLog.Create(path, Guid.NewGuid()).Unwrap()) {
+        using (var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0).Unwrap()) {
             var error = await wal.AppendConfirmed(7, WalEntryKind.Operation, OneChange(42));
             Assert.That(error, Is.Null);
         }
@@ -169,7 +184,7 @@ public class WriteAheadLogTests {
     [Test]
     public void Dispose_FlushesAnyOutstandingAppendsBeforeClosing() {
         var path = Path.Combine(dir, "wal.dat");
-        var wal = WriteAheadLog.Create(path, Guid.NewGuid()).Unwrap();
+        var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0).Unwrap();
         wal.AppendOptimistic(3, WalEntryKind.Operation, OneChange());
 
         wal.Dispose();
@@ -183,7 +198,7 @@ public class WriteAheadLogTests {
     [Test]
     public async Task Truncate_ThenAppend_WritesRightAfterTheHeaderNotAtTheStalePosition() {
         var path = Path.Combine(dir, "wal.dat");
-        var wal = WriteAheadLog.Create(path, Guid.NewGuid()).Unwrap();
+        var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0).Unwrap();
         var error = await wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange());
         Assert.That(error, Is.Null);
 
@@ -208,7 +223,7 @@ public class WriteAheadLogTests {
     public async Task Open_AgainstAPreviouslyClosedWal_RecoversAllPreviouslyDurableEntries() {
         var path = Path.Combine(dir, "wal.dat");
         var databaseId = Guid.NewGuid();
-        using (var wal = WriteAheadLog.Create(path, databaseId).Unwrap()) {
+        using (var wal = WriteAheadLog.Create(path, databaseId, 0).Unwrap()) {
             await wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange());
             await wal.AppendConfirmed(2, WalEntryKind.Operation, OneChange(2));
         }
@@ -225,7 +240,7 @@ public class WriteAheadLogTests {
     [Test]
     public void Open_WithATornTailEntry_TruncatesToTheLastGoodEntryAndStillOpens() {
         var path = Path.Combine(dir, "wal.dat");
-        using (var wal = WriteAheadLog.Create(path, Guid.NewGuid()).Unwrap()) {
+        using (var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0).Unwrap()) {
             wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange()).GetAwaiter().GetResult();
         }
         using (var fs = new FileStream(path, FileMode.Append)) fs.Write([1, 2, 3]); // simulate a torn/partial trailing write
@@ -239,7 +254,7 @@ public class WriteAheadLogTests {
     [Test]
     public void Open_WithMidFileCorruption_RefusesToOpen() {
         var path = Path.Combine(dir, "wal.dat");
-        using (var wal = WriteAheadLog.Create(path, Guid.NewGuid()).Unwrap()) {
+        using (var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0).Unwrap()) {
             wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange()).GetAwaiter().GetResult();
             wal.AppendConfirmed(2, WalEntryKind.Operation, OneChange(2)).GetAwaiter().GetResult();
         }
@@ -260,7 +275,7 @@ public class WriteAheadLogTests {
     public async Task AppendConfirmed_ManyConcurrentAppendsUnderLoad_EveryAcknowledgedEntryIsActuallyPersisted() {
         const int OperationCount = 5_000;
         var path = Path.Combine(dir, "wal.dat");
-        var wal = WriteAheadLog.Create(path, Guid.NewGuid()).Unwrap();
+        var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0).Unwrap();
 
         var pending = new Task<DbError?>[OperationCount];
         for (var i = 0; i < OperationCount; i++) {

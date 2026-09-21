@@ -17,6 +17,8 @@ public sealed class Transaction : IDisposable {
 
     public int Delete(uint dbi, ReadOnlySpan<byte> key) => MdbxValMarshal.Del(handle, dbi, key);
 
+    public int Drop(uint dbi, bool del = true) => MdbxNative.mdbx_drop(handle, dbi, del);
+
     public int OpenCursor(uint dbi, out Cursor? cursor) {
         var rc = MdbxNative.mdbx_cursor_open(handle, dbi, out var cursorHandle);
         cursor = rc == 0 ? new Cursor(cursorHandle) : null;

@@ -7,7 +7,7 @@ static public class WalArchive {
     private const string SegmentExtension = ".wal";
     private const int SequenceWidth = 8;
 
-    static public DbError? WriteSegment(string archiveDirectory, Guid databaseId, DecodedWalEntry[] entries) {
+    static public DbError? WriteSegment(string archiveDirectory, Guid databaseId, DecodedWalEntry[] entries, uint generation) {
         if (entries.Length == 0) return null;
 
         try {
@@ -20,7 +20,7 @@ static public class WalArchive {
 
         try {
             using var fileStream = new FileStream(segmentPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            var header = WalFileHeaderCodec.Encode(databaseId);
+            var header = WalFileHeaderCodec.Encode(databaseId, generation);
             fileStream.Write(header, 0, header.Length);
 
             foreach (var entry in entries) {
@@ -50,7 +50,7 @@ static public class WalArchive {
                 var readResult = ReadSegment(segmentPath);
                 if (readResult.IsError()) return readResult.Void();
 
-                MergeInOrder(merged, readResult.Unwrap(), ref lastSeenLsn, ref started);
+                MergeInOrder(merged, readResult.Unwrap().Entries, ref lastSeenLsn, ref started);
             }
         }
 
@@ -60,21 +60,21 @@ static public class WalArchive {
         return merged;
     }
 
-    static private Result<DecodedWalEntry[]> ReadSegment(string path) {
+    static private Result<(uint Generation, DecodedWalEntry[] Entries)> ReadSegment(string path) {
         byte[] bytes;
         try {
             bytes = File.ReadAllBytes(path);
         } catch (Exception ex) {
-            return Result<DecodedWalEntry[]>.Error(DbError.SystemFailure(ex));
+            return Result<(uint, DecodedWalEntry[])>.Error(DbError.SystemFailure(ex));
         }
 
-        if (bytes.Length < WalFileHeaderCodec.Size || !WalFileHeaderCodec.TryDecode(bytes, out _))
-            return Result<DecodedWalEntry[]>.Error(DbError.WalCorrupted());
+        if (bytes.Length < WalFileHeaderCodec.Size || !WalFileHeaderCodec.TryDecode(bytes, out var header))
+            return Result<(uint, DecodedWalEntry[])>.Error(DbError.WalCorrupted());
 
         var scan = WalRecordCodec.Scan(bytes.AsSpan(WalFileHeaderCodec.Size));
-        if (scan.Status != WalScanStatus.Clean) return Result<DecodedWalEntry[]>.Error(DbError.WalCorrupted());
+        if (scan.Status != WalScanStatus.Clean) return Result<(uint, DecodedWalEntry[])>.Error(DbError.WalCorrupted());
 
-        return scan.Entries.Where(e => e.Kind == WalEntryKind.Operation).ToArray();
+        return (header.Generation, scan.Entries.Where(e => e.Kind == WalEntryKind.Operation).ToArray());
     }
 
     static private void MergeInOrder(List<DecodedWalEntry> into, DecodedWalEntry[] batch, ref long lastSeenLsn, ref bool started) {

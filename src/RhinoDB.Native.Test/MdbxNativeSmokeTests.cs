@@ -103,6 +103,68 @@ public class MdbxNativeSmokeTests {
     }
 
     [Test]
+    public void Drop_ThenReopenSameName_IsFreshAndEmpty() {
+        using var env = OpenEnv();
+
+        env.BeginTxn(0, out var txn);
+        using (txn) {
+            txn!.OpenDbi("widgets", MdbxCreate, out var dbi);
+            txn.Put(dbi, Encoding.UTF8.GetBytes("key"), Encoding.UTF8.GetBytes("value"), 0);
+            txn.Commit();
+        }
+
+        env.BeginTxn(0, out txn);
+        using (txn) {
+            txn!.OpenDbi("widgets", MdbxCreate, out var dbi);
+            Assert.That(txn.Drop(dbi), Is.EqualTo(0));
+            txn.Commit();
+        }
+
+        env.BeginTxn(0, out txn);
+        using (txn) {
+            txn!.OpenDbi("widgets", MdbxCreate, out var dbi);
+            var getRc = txn.Get(dbi, Encoding.UTF8.GetBytes("key"), out _);
+            Assert.That(getRc, Is.Not.EqualTo(0), "reopening a dropped name must start empty, not resurrect old data");
+            txn.Commit();
+        }
+    }
+
+    [Test]
+    public void Drop_ThenReopenSameNameInTheSameTxn_LeavesAnotherOpenDbiInThatTxnUnaffected() {
+        // This is the exact scratch-dbi pattern the schema migration engine's drop-recreate-copy
+        // rewrite depends on: one dbi gets dropped and its name reclaimed while a second,
+        // unrelated dbi opened earlier in the SAME transaction must stay valid and untouched.
+        using var env = OpenEnv();
+
+        env.BeginTxn(0, out var setupTxn);
+        using (setupTxn) {
+            setupTxn!.OpenDbi("widgets", MdbxCreate, out var widgetsDbi);
+            setupTxn.Put(widgetsDbi, Encoding.UTF8.GetBytes("old-key"), Encoding.UTF8.GetBytes("old-value"), 0);
+            setupTxn.OpenDbi("gadgets", MdbxCreate, out var gadgetsDbi);
+            setupTxn.Put(gadgetsDbi, Encoding.UTF8.GetBytes("gadget-key"), Encoding.UTF8.GetBytes("gadget-value"), 0);
+            setupTxn.Commit();
+        }
+
+        env.BeginTxn(0, out var txn);
+        using (txn) {
+            txn!.OpenDbi("gadgets", MdbxCreate, out var gadgetsDbi);
+            txn.OpenDbi("widgets", MdbxCreate, out var widgetsDbi);
+
+            Assert.That(txn.Drop(widgetsDbi), Is.EqualTo(0));
+            Assert.That(txn.OpenDbi("widgets", MdbxCreate, out var freshWidgetsDbi), Is.EqualTo(0));
+
+            var gadgetGetRc = txn.Get(gadgetsDbi, Encoding.UTF8.GetBytes("gadget-key"), out var gadgetValue);
+            Assert.That(gadgetGetRc, Is.EqualTo(0), "the unrelated dbi opened earlier in this txn must remain valid after the drop");
+            Assert.That(Encoding.UTF8.GetString(gadgetValue), Is.EqualTo("gadget-value"));
+
+            var widgetsGetRc = txn.Get(freshWidgetsDbi, Encoding.UTF8.GetBytes("old-key"), out _);
+            Assert.That(widgetsGetRc, Is.Not.EqualTo(0), "the reopened name must be empty, not carry over the dropped dbi's data");
+
+            txn.Commit();
+        }
+    }
+
+    [Test]
     public void AbortedTransaction_DiscardsThePut() {
         using var env = OpenEnv();
 

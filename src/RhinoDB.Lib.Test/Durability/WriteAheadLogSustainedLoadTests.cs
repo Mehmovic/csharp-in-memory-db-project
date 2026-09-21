@@ -43,7 +43,7 @@ public class WriteAheadLogSustainedLoadTests {
         const int BatchCount = 10;
         const int PayloadSize = 64;
 
-        using var wal = WriteAheadLog.Create(Path.Combine(dir, "wal.dat"), Guid.NewGuid()).Unwrap();
+        using var wal = WriteAheadLog.Create(Path.Combine(dir, "wal.dat"), Guid.NewGuid(), 0).Unwrap();
         var payload = new byte[PayloadSize];
         var lsn = 0L;
         var batchMicros = new double[BatchCount];

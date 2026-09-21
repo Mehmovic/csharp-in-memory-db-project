@@ -35,7 +35,7 @@ public class WalArchiveTests {
 
     [Test]
     public void WriteSegment_WithEmptyEntries_CreatesNoFile() {
-        var error = WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), []);
+        var error = WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [], 0);
 
         Assert.That(error, Is.Null);
         Assert.That(Directory.Exists(archiveDir), Is.False);
@@ -43,7 +43,7 @@ public class WalArchiveTests {
 
     [Test]
     public void WriteSegment_ThenReadHistory_RoundTripsAllEntries() {
-        var error = WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2), Entry(3)]);
+        var error = WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2), Entry(3)], 0);
 
         Assert.That(error, Is.Null);
         var history = WalArchive.ReadHistory(dir, []).Unwrap();
@@ -52,8 +52,8 @@ public class WalArchiveTests {
 
     [Test]
     public void WriteSegment_CalledMultipleTimes_CreatesSequentiallyNumberedSegments() {
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1)]);
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(2)]);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(2)], 0);
 
         var files = Directory.GetFiles(archiveDir).Select(Path.GetFileName).OrderBy(f => f).ToArray();
         Assert.That(files, Is.EqualTo(new[] { "00000001.wal", "00000002.wal" }));
@@ -68,8 +68,8 @@ public class WalArchiveTests {
 
     [Test]
     public void ReadHistory_MergesArchivedSegmentsThenTheLiveTail_InLsnOrder() {
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)]);
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(3), Entry(4)]);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(3), Entry(4)], 0);
 
         var history = WalArchive.ReadHistory(dir, [Entry(5), Entry(6)]).Unwrap();
 
@@ -80,9 +80,9 @@ public class WalArchiveTests {
     public void ReadHistory_ADuplicateSegmentFromACrashRetry_IsSkippedNotDuplicated() {
         // Simulates: checkpoint archived LSNs 1-2, then crashed before truncating the live WAL;
         // on restart the same span gets archived again into a second segment file.
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)]);
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)]);
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(3)]);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(3)], 0);
 
         var history = WalArchive.ReadHistory(dir, []).Unwrap();
 
@@ -93,7 +93,7 @@ public class WalArchiveTests {
     public void ReadHistory_PrunedFromTheOldestEnd_StartsFromTheOldestSurvivingSegment() {
         // No special-casing needed: the first entry ever observed establishes the starting
         // point, whatever its LSN. Simulates a user deleting 00000001.wal by hand.
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(4), Entry(5)]);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(4), Entry(5)], 0);
 
         var history = WalArchive.ReadHistory(dir, []).Unwrap();
 
@@ -105,8 +105,8 @@ public class WalArchiveTests {
         // A gap here is indistinguishable, from LSNs alone, between "a segment was deleted from the
         // middle of the chain" and "LSNs 3-4 belonged to Instant-only transactions that never staged
         // a WAL entry" - the latter is the common case, so gaps are tolerated, not rejected.
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)]);
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(5), Entry(6)]);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(5), Entry(6)], 0);
 
         var history = WalArchive.ReadHistory(dir, []).Unwrap();
 
@@ -115,7 +115,7 @@ public class WalArchiveTests {
 
     [Test]
     public void ReadHistory_WithAGapBetweenTheArchiveAndTheLiveTail_TreatsItTheSameWay() {
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)]);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)], 0);
 
         var history = WalArchive.ReadHistory(dir, [Entry(5), Entry(6)]).Unwrap();
 
