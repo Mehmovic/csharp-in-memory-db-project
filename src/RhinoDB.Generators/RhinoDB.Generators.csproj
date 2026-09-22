@@ -15,6 +15,10 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\RhinoDB.SchemaContracts\RhinoDB.SchemaContracts.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
       <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
       <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
     </ItemGroup>

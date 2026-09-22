@@ -5,15 +5,10 @@ using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
+using RhinoDB.SchemaContracts;
+
 namespace RhinoDB.Generators;
 
-// [CustomType] gives a standalone (non-[Table]) record struct the same three-pipeline treatment
-// TableGenerator gives a row: a hand-rolled, composable Raw writer/reader (used both standalone and
-// inlined by a containing row's own Raw serializer via TableGenerator.EmitWriteField/EmitReadField - see
-// the RowFieldModel.IsCustomType branch there), plus VersionedMemoryPack/MessagePack thin wrappers.
-// Fixes a real gap: without this, a row's Raw serializer falls through to MemoryPack's WriteValue<T>/
-// ReadValue<T> generic dispatch for CustomType fields, silently depending on the attribute-driven
-// generator succeeding even on the WAL/cold-storage/ring-buffer critical path.
 [Generator]
 public sealed class CustomTypeGenerator : IIncrementalGenerator {
     static private readonly DiagnosticDescriptor MissingSerializationAttributesDiagnostic = new(
@@ -30,7 +25,7 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var results = context.SyntaxProvider
             .ForAttributeWithMetadataName(
-                TableGenerator.CustomTypeAttributeFullName,
+                SchemaWalk.CustomTypeAttributeFullName,
                 predicate: static (node, _) => node is StructDeclarationSyntax or RecordDeclarationSyntax,
                 transform: static (ctx, _) => ToCustomTypeModel(ctx)
             );
@@ -46,8 +41,8 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
         var missingSerializationAttrs = ImmutableArray.CreateBuilder<string>();
-        if (!TableGenerator.HasMemoryPackable(type)) missingSerializationAttrs.Add("[MemoryPackable]");
-        if (!TableGenerator.HasMessagePackObject(type)) missingSerializationAttrs.Add("[MessagePackObject]");
+        if (!SchemaWalk.HasMemoryPackable(type)) missingSerializationAttrs.Add("[MemoryPackable]");
+        if (!SchemaWalk.HasMessagePackObject(type)) missingSerializationAttrs.Add("[MessagePackObject]");
         if (missingSerializationAttrs.Count > 0) {
             diagnostics.Add(Diagnostic.Create(
                 MissingSerializationAttributesDiagnostic, ctx.TargetNode.GetLocation(), type.Name, string.Join(" and ", missingSerializationAttrs)));
@@ -59,13 +54,13 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
         );
 
         if (primaryCtor is not null) {
-            diagnostics.AddRange(TableGenerator.CheckOtherKindFieldAttributes(primaryCtor.Parameters, type.Name, ctx.TargetNode.GetLocation()));
+            diagnostics.AddRange(SchemaWalk.CheckOtherKindFieldAttributes(primaryCtor.Parameters, type.Name, ctx.TargetNode.GetLocation()));
             if (diagnostics.Count > 0) return (null, diagnostics.ToImmutable());
         }
 
         var fields = primaryCtor is null
-            ? ImmutableArray<TableGenerator.RowFieldModel>.Empty
-            : TableGenerator.ToRowFieldModels(primaryCtor.Parameters);
+            ? ImmutableArray<RowFieldModel>.Empty
+            : SchemaWalk.ToRowFieldModels(primaryCtor.Parameters);
 
         var model = new CustomTypeModel(
             type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
@@ -96,25 +91,19 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
 
         sb.AppendLine($"internal static class {opsName} {{");
 
-        // Composable Raw write/read - writes/reads directly into a caller-supplied writer/reader, so a
-        // containing row's own Raw serializer (or another CustomType's) can inline this type's fields
-        // into the SAME buffer, with no intermediate byte[] allocation and no dependency on MemoryPack's
-        // attribute-driven formatter dispatch.
         sb.AppendLine($"    internal static void WriteRaw<TBufferWriter>(ref MemoryPackWriter<TBufferWriter> writer, {type} value) where TBufferWriter : IBufferWriter<byte> {{");
-        foreach (var f in model.Fields) TableGenerator.EmitWriteField(sb, f, $"value.{f.FieldName}");
+        foreach (var f in model.Fields) SchemaWalk.EmitWriteField(sb, f, $"value.{f.FieldName}");
         sb.AppendLine("    }");
         sb.AppendLine();
 
         sb.AppendLine($"    internal static {type} ReadRaw(ref MemoryPackReader reader) {{");
-        foreach (var f in model.Fields) TableGenerator.EmitReadField(sb, f);
+        foreach (var f in model.Fields) SchemaWalk.EmitReadField(sb, f);
         sb.Append($"        return new {type}(");
         sb.Append(string.Join(", ", model.Fields.Select(f => $"{TableGenerator.Camel(f.FieldName)}Value")));
         sb.AppendLine(");");
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // Standalone byte[] round trip - API parity with a table row's SerializeRow/DeserializeRow, for
-        // direct testing or a top-level caller that isn't embedding this type inside a row.
         sb.AppendLine($"    internal static byte[] SerializeRow({type} value) {{");
         sb.AppendLine("        var bufferWriter = new PooledBufferWriter(256);");
         sb.AppendLine("        var writerState = MemoryPackWriterOptionalStatePool.Rent(null);");
@@ -145,10 +134,10 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
         return sb.ToString();
     }
 
-    private sealed class CustomTypeModel(string fullName, string simpleName, string? @namespace, ImmutableArray<TableGenerator.RowFieldModel> fields) {
+    private sealed class CustomTypeModel(string fullName, string simpleName, string? @namespace, ImmutableArray<RowFieldModel> fields) {
         public string FullName { get; } = fullName;
         public string SimpleName { get; } = simpleName;
         public string? Namespace { get; } = @namespace;
-        public ImmutableArray<TableGenerator.RowFieldModel> Fields { get; } = fields;
+        public ImmutableArray<RowFieldModel> Fields { get; } = fields;
     }
 }

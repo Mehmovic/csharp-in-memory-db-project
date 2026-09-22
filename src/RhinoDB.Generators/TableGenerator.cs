@@ -5,6 +5,8 @@ using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
+using RhinoDB.SchemaContracts;
+
 namespace RhinoDB.Generators;
 
 [Generator]
@@ -145,20 +147,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static internal readonly DiagnosticDescriptor MissingSerializationAttributesOnCustomTypeFieldDiagnostic = new(
-        "RHINO016",
-        "Field's type must be a [CustomType] with mandatory IDC/client serialization attributes",
-        "Field '{0}.{1}' has type '{2}', which is missing {3} - a field that isn't unmanaged or string "
-        + "must be an explicitly [CustomType]-marked type carrying both [MemoryPackable] and "
-        + "[MessagePackObject]; unmarked types are rejected rather than silently falling back to "
-        + "MemoryPack's generic WriteValue<T>/ReadValue<T> formatter dispatch at runtime. This check "
-        + "applies at every level - a [CustomType]'s own fields are checked the same way when that type "
-        + "is itself processed by CustomTypeGenerator.",
-        "RhinoDB.Generators",
-        DiagnosticSeverity.Error,
-        isEnabledByDefault: true
-    );
-
     static private readonly ImmutableHashSet<string> ReservedOpsMemberNames =
         ImmutableHashSet.Create("Insert", "Update", "Delete", "Iter", "Evict");
     
@@ -237,15 +225,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
         }
 
         var missingSerializationAttrs = ImmutableArray.CreateBuilder<string>();
-        if (!HasMemoryPackable(rowType)) missingSerializationAttrs.Add("[MemoryPackable]");
-        if (!HasMessagePackObject(rowType)) missingSerializationAttrs.Add("[MessagePackObject]");
+        if (!SchemaWalk.HasMemoryPackable(rowType)) missingSerializationAttrs.Add("[MemoryPackable]");
+        if (!SchemaWalk.HasMessagePackObject(rowType)) missingSerializationAttrs.Add("[MessagePackObject]");
         if (missingSerializationAttrs.Count > 0) {
             rowDiagnostics.Add(Diagnostic.Create(
                 MissingSerializationAttributesDiagnostic, ctx.TargetNode.GetLocation(), rowType.Name, string.Join(" and ", missingSerializationAttrs)));
             return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
         }
 
-        rowDiagnostics.AddRange(CheckOtherKindFieldAttributes(primaryCtor.Parameters, rowType.Name, ctx.TargetNode.GetLocation()));
+        rowDiagnostics.AddRange(SchemaWalk.CheckOtherKindFieldAttributes(primaryCtor.Parameters, rowType.Name, ctx.TargetNode.GetLocation()));
         if (rowDiagnostics.Count > 0) return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
 
         var primaryKeyAttribute = primaryKeyParam.GetAttributes().First(a => a.AttributeClass?.ToDisplayString() == PrimaryKeyAttributeFullName);
@@ -257,7 +245,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             rowDiagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(primaryKeyAttribute), $"[PrimaryKey] on '{rowType.Name}.{primaryKeyParam.Name}'"));
         var primaryKeyAccessor = pkAccessorProvided && pkAccessorValue != "" ? pkAccessorValue! : "Find";
 
-        var rowFields = ToRowFieldModels(primaryCtor.Parameters);
+        var rowFields = SchemaWalk.ToRowFieldModels(primaryCtor.Parameters);
 
         var autoIncrementFields = ImmutableArray.CreateBuilder<AutoIncrementFieldModel>();
         foreach (var p in primaryCtor.Parameters) {
@@ -490,58 +478,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
     static private uint ComputeTableId(string accessor) {
         return Encoding.UTF8.GetBytes(accessor)
             .Aggregate(2166136261u, (current, b) => (current ^ b) * 16777619u);
-    }
-
-    internal const string CustomTypeAttributeFullName = "RhinoDB.Core.Tables.CustomTypeAttribute";
-
-    static internal bool HasMemoryPackable(INamedTypeSymbol type) =>
-        type.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "MemoryPack.MemoryPackableAttribute");
-
-    static internal bool HasMessagePackObject(INamedTypeSymbol type) =>
-        type.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "MessagePack.MessagePackObjectAttribute");
-
-    static internal bool HasCustomTypeAttribute(INamedTypeSymbol type) =>
-        type.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == CustomTypeAttributeFullName);
-
-    static private readonly ImmutableHashSet<(string Name, int Arity)> BuiltInFormattedGenericCollections =
-        ImmutableHashSet.Create(("List", 1), ("Dictionary", 2), ("HashSet", 1), ("Queue", 1), ("Stack", 1));
-
-    static internal bool IsBuiltInFormattedCollection(INamedTypeSymbol type) =>
-        type.OriginalDefinition.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic"
-        && BuiltInFormattedGenericCollections.Contains((type.OriginalDefinition.Name, type.OriginalDefinition.Arity));
-
-    // Shared between TableGenerator (row fields) and CustomTypeGenerator (custom type fields) - both
-    // walk a primary constructor's parameters into the exact same field shape.
-    static internal ImmutableArray<RowFieldModel> ToRowFieldModels(ImmutableArray<IParameterSymbol> parameters) =>
-        parameters
-            .Select(p => new RowFieldModel(
-                p.Name,
-                p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                p.Type.SpecialType == SpecialType.System_String ? RowFieldKind.String
-                    : p.Type.IsUnmanagedType ? RowFieldKind.Unmanaged
-                    : RowFieldKind.Other,
-                p.Type is INamedTypeSymbol namedType && HasCustomTypeAttribute(namedType)
-            ))
-            .ToImmutableArray();
-
-    static internal ImmutableArray<Diagnostic> CheckOtherKindFieldAttributes(
-        ImmutableArray<IParameterSymbol> parameters, string containingTypeName, Location location) {
-        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
-        foreach (var p in parameters) {
-            if (p.Type.SpecialType == SpecialType.System_String || p.Type.IsUnmanagedType) continue;
-            if (p.Type is not INamedTypeSymbol fieldType) continue;
-            if (IsBuiltInFormattedCollection(fieldType)) continue;
-
-            var missing = ImmutableArray.CreateBuilder<string>();
-            if (!HasCustomTypeAttribute(fieldType)) missing.Add("[CustomType]");
-            if (!HasMemoryPackable(fieldType)) missing.Add("[MemoryPackable]");
-            if (!HasMessagePackObject(fieldType)) missing.Add("[MessagePackObject]");
-            if (missing.Count > 0)
-                diagnostics.Add(Diagnostic.Create(
-                    MissingSerializationAttributesOnCustomTypeFieldDiagnostic, location,
-                    containingTypeName, p.Name, fieldType.Name, string.Join(" and ", missing)));
-        }
-        return diagnostics.ToImmutable();
     }
 
     static private string EmitOpsClass(TableModel table, string ownerSimpleName) =>
@@ -803,33 +739,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         }
     }
 
-    static internal void EmitWriteField(StringBuilder sb, RowFieldModel field, string expr) {
-        switch (field.Kind) {
-            case RowFieldKind.Unmanaged: sb.AppendLine($"        writer.WriteUnmanaged({expr});"); break;
-            case RowFieldKind.String: sb.AppendLine($"        writer.WriteString({expr});"); break;
-            default:
-                if (field.IsCustomType) sb.AppendLine($"        {field.FieldTypeFullName}CustomTypeOps.WriteRaw(ref writer, {expr});");
-                else sb.AppendLine($"        writer.WriteValue({expr});");
-                break;
-        }
-    }
-
-    static internal void EmitReadField(StringBuilder sb, RowFieldModel field) {
-        var varName = $"{Camel(field.FieldName)}Value";
-        switch (field.Kind) {
-            case RowFieldKind.Unmanaged:
-                sb.AppendLine($"        reader.ReadUnmanaged<{field.FieldTypeFullName}>(out var {varName});");
-                break;
-            case RowFieldKind.String:
-                sb.AppendLine($"        var {varName} = reader.ReadString()!;");
-                break;
-            default:
-                if (field.IsCustomType) sb.AppendLine($"        var {varName} = {field.FieldTypeFullName}CustomTypeOps.ReadRaw(ref reader);");
-                else sb.AppendLine($"        var {varName} = reader.ReadValue<{field.FieldTypeFullName}>();");
-                break;
-        }
-    }
-
     static private void EmitRawSerializer(StringBuilder sb, TableModel table) {
         var row = table.RowTypeFullName;
         var key = table.PrimaryKeyTypeFullName;
@@ -840,7 +749,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        var bufferWriter = new PooledBufferWriter(256);");
         sb.AppendLine("        var writerState = MemoryPackWriterOptionalStatePool.Rent(null);");
         sb.AppendLine("        var writer = new MemoryPackWriter<PooledBufferWriter>(ref bufferWriter, writerState);");
-        foreach (var f in table.Fields) EmitWriteField(sb, f, $"row.{f.FieldName}");
+        foreach (var f in table.Fields) SchemaWalk.EmitWriteField(sb, f, $"row.{f.FieldName}");
         sb.AppendLine("        writer.Flush();");
         sb.AppendLine("        var result = bufferWriter.WrittenSpan.ToArray();");
         sb.AppendLine("        bufferWriter.Dispose();");
@@ -851,7 +760,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    internal static {row} DeserializeRow(byte[] bytes) {{");
         sb.AppendLine("        var readerState = MemoryPackReaderOptionalStatePool.Rent(null);");
         sb.AppendLine("        var reader = new MemoryPackReader(bytes, readerState);");
-        foreach (var f in table.Fields) EmitReadField(sb, f);
+        foreach (var f in table.Fields) SchemaWalk.EmitReadField(sb, f);
         sb.AppendLine("        reader.Dispose();");
         sb.Append($"        return new {row}(");
         sb.Append(string.Join(", ", table.Fields.Select(f => $"{Camel(f.FieldName)}Value")));
@@ -863,7 +772,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        var bufferWriter = new PooledBufferWriter(32);");
         sb.AppendLine("        var writerState = MemoryPackWriterOptionalStatePool.Rent(null);");
         sb.AppendLine("        var writer = new MemoryPackWriter<PooledBufferWriter>(ref bufferWriter, writerState);");
-        EmitWriteField(sb, pkField, "key");
+        SchemaWalk.EmitWriteField(sb, pkField, "key");
         sb.AppendLine("        writer.Flush();");
         sb.AppendLine("        var result = bufferWriter.WrittenSpan.ToArray();");
         sb.AppendLine("        bufferWriter.Dispose();");
@@ -874,7 +783,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    internal static {key} DeserializeKey(byte[] bytes) {{");
         sb.AppendLine("        var readerState = MemoryPackReaderOptionalStatePool.Rent(null);");
         sb.AppendLine("        var reader = new MemoryPackReader(bytes, readerState);");
-        EmitReadField(sb, pkField);
+        SchemaWalk.EmitReadField(sb, pkField);
         sb.AppendLine("        reader.Dispose();");
         sb.AppendLine($"        return {Camel(pkField.FieldName)}Value;");
         sb.AppendLine("    }");
@@ -1523,15 +1432,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public string FieldName { get; } = fieldName;
         public string FieldTypeFullName { get; } = fieldTypeFullName;
     }
-
-    internal sealed class RowFieldModel(string fieldName, string fieldTypeFullName, RowFieldKind kind, bool isCustomType) {
-        public string FieldName { get; } = fieldName;
-        public string FieldTypeFullName { get; } = fieldTypeFullName;
-        public RowFieldKind Kind { get; } = kind;
-        public bool IsCustomType { get; } = isCustomType;
-    }
-
-    internal enum RowFieldKind { Unmanaged, String, Other }
 
     private sealed class DatabaseModel(string fullName, string simpleName, string? @namespace) {
         public string FullName { get; } = fullName;

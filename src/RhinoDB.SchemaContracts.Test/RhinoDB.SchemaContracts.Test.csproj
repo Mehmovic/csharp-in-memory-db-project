@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net11.0</TargetFramework>
@@ -6,7 +6,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
-        <RootNamespace>RhinoDB.Test.Core</RootNamespace>
+        <RootNamespace>RhinoDB.Test.SchemaContracts</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
@@ -22,13 +22,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\RhinoDB.Core\RhinoDB.Core.csproj" />
-      <ProjectReference Include="..\RhinoDB.Generators\RhinoDB.Generators.csproj"
-                         OutputItemType="Analyzer"
-                         ReferenceOutputAssembly="false" />
-      <ProjectReference Include="..\RhinoDB.SchemaContracts\RhinoDB.SchemaContracts.csproj"
-                         OutputItemType="Analyzer"
-                         ReferenceOutputAssembly="false" />
+      <ProjectReference Include="..\RhinoDB.SchemaContracts\RhinoDB.SchemaContracts.csproj" />
     </ItemGroup>
 
 </Project>
