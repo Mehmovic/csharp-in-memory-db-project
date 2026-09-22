@@ -30,6 +30,27 @@ public class DenseArrayTests
     }
 
     [Test]
+    public void GetRef_ViewMatchesTheStoredRow_AndSeesLaterMutations()
+    {
+        var store = new DenseArray<TestRow>(chunkSize: 1);
+        var index = store.Insert(new TestRow(42, "Dana"));
+
+        ref readonly var view = ref store.GetRef(index);
+        Assert.That(view.Id, Is.EqualTo(42));
+        Assert.That(view.Name, Is.EqualTo("Dana"));
+
+        // The view is over the live storage: a Set is visible through it, and a
+        // swap-remove re-points what the same offset describes.
+        store.Set(index, new TestRow(43, "Dane"));
+        ref readonly var afterSet = ref store.GetRef(index);
+        Assert.That(afterSet.Id, Is.EqualTo(43));
+
+        store.Insert(new TestRow(99, "Last"));
+        store.Delete(index);
+        Assert.That(store.Get(index).Id, Is.EqualTo(99));
+    }
+
+    [Test]
     public void Delete_OfNonLastElement_SwapsLastElementIntoItsSlot()
     {
         var store = new DenseArray<TestRow>(chunkSize: 1);
@@ -127,5 +148,62 @@ public class DenseArrayTests
 
         Assert.That(store.Get(5), Is.EqualTo(new TestRow(6, "Updated")));
         Assert.That(store.Get(4), Is.EqualTo(new TestRow(5, "Row5"))); // neighbor unaffected
+    }
+
+    // ---- Zero-copy enumeration (DenseArrayRefEnumerator) ----
+
+    [Test]
+    public void EnumerateRef_Dense_VisitsEveryRowInOffsetOrder_AndExposesEachOffset() {
+        var store = new DenseArray<TestRow>(chunkSize: 2);
+        store.Insert(new TestRow(1, "Ada"));
+        store.Insert(new TestRow(2, "Bob"));
+        store.Insert(new TestRow(3, "Cy")); // forces a second chunk
+
+        var rows = new List<TestRow>();
+        var enumerator = store.EnumerateRef();
+        while (enumerator.MoveNext()) {
+            rows.Add(enumerator.Current);
+        }
+
+        Assert.That(rows, Is.EqualTo(new[] { new TestRow(1, "Ada"), new TestRow(2, "Bob"), new TestRow(3, "Cy") }));
+    }
+
+    [Test]
+    public void EnumerateRef_ViewIsLive_NotACopy() {
+        var store = new DenseArray<TestRow>(chunkSize: 2);
+        store.Insert(new TestRow(1, "Ada"));
+
+        var enumerator = store.EnumerateRef();
+        Assert.That(enumerator.MoveNext(), Is.True);
+        ref readonly var view = ref enumerator.Current;
+        Assert.That(view.Name, Is.EqualTo("Ada"));
+
+        // Mutating the slot is visible through the outstanding view - proof it is a
+        // reference into storage, not a snapshot taken at enumeration time.
+        store.Set(0, new TestRow(1, "Ada Lovelace"));
+        Assert.That(view.Name, Is.EqualTo("Ada Lovelace"));
+    }
+
+    [Test]
+    public void EnumerateRef_ExplicitOffsets_VisitsOnlyThoseOffsetsInTheGivenOrder() {
+        var store = new DenseArray<TestRow>(chunkSize: 2);
+        store.Insert(new TestRow(1, "Ada"));
+        store.Insert(new TestRow(2, "Bob"));
+        store.Insert(new TestRow(3, "Cy"));
+
+        var rows = new List<TestRow>();
+        foreach (ref readonly var row in store.EnumerateRef([2, 0, 2])) rows.Add(row);
+
+        Assert.That(rows, Is.EqualTo(new[] { new TestRow(3, "Cy"), new TestRow(1, "Ada"), new TestRow(3, "Cy") }));
+    }
+
+    [Test]
+    public void EnumerateRef_OnAnEmptyArray_YieldsNothing() {
+        var store = new DenseArray<TestRow>(chunkSize: 2);
+
+        var enumerator = store.EnumerateRef();
+
+        Assert.That(enumerator.Count, Is.EqualTo(0));
+        Assert.That(enumerator.MoveNext(), Is.False);
     }
 }

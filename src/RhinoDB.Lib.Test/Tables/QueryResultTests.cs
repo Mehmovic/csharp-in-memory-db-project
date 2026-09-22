@@ -1,4 +1,5 @@
 using RhinoDB.Core;
+using RhinoDB.Core.Exceptions;
 using RhinoDB.Lib.Storage;
 using RhinoDB.Lib.Tables;
 
@@ -176,5 +177,74 @@ public class QueryResultTests {
 
         Assert.That(affected, Is.EqualTo(1));
         Assert.That(deletes, Is.EqualTo(new[] { new TestRow(1, "Ada") }));
+    }
+    // ---- Zero-copy reads (EnumerateRef) ----
+
+    [Test]
+    public void EnumerateRef_ReturnsEveryMatchedRowInOffsetOrder_WithoutCopying() {
+        var storage = NewStorageWith(new TestRow(1, "Ada"), new TestRow(2, "Bob"), new TestRow(3, "Cy"));
+        var mutator = new RecordingMutator([], []);
+        using var set = new QueryResultSet<TestRow, RecordingMutator>(storage, OffsetsOf(2, 0), ref mutator);
+
+        var rows = new List<TestRow>();
+        foreach (ref readonly var row in set.GetRefEnumerator().Unwrap()) {
+            rows.Add(row);
+        }
+
+        Assert.That(rows, Is.EqualTo(new[] { new TestRow(3, "Cy"), new TestRow(1, "Ada") }));
+    }
+
+    [Test]
+    public void EnumerateRef_IsALiveView_ReflectsALaterStorageMutation() {
+        var storage = NewStorageWith(new TestRow(1, "Ada"));
+        var mutator = new RecordingMutator([], []);
+        using var set = new QueryResultSet<TestRow, RecordingMutator>(storage, OffsetsOf(0), ref mutator);
+
+        var enumerator = set.GetRefEnumerator().Unwrap();
+        Assert.That(enumerator.MoveNext(), Is.True);
+        ref readonly var view = ref enumerator.Current;
+        Assert.That(view.Name, Is.EqualTo("Ada"));
+
+        // No buffer is involved, so the view tracks storage directly.
+        storage.Set(0, new TestRow(1, "Ada Lovelace"));
+        Assert.That(view.Name, Is.EqualTo("Ada Lovelace"));
+    }
+
+    [Test]
+    public void EnumerateRef_WithNoMatches_YieldsNothing() {
+        var storage = NewStorageWith(new TestRow(1, "Ada"));
+        var mutator = new RecordingMutator([], []);
+        using var set = new QueryResultSet<TestRow, RecordingMutator>(storage, OffsetsOf(), ref mutator);
+
+        var enumerator = set.GetRefEnumerator().Unwrap();
+
+        Assert.That(enumerator.Count, Is.EqualTo(0));
+        Assert.That(enumerator.MoveNext(), Is.False);
+    }
+
+    [Test]
+    public void EnumerateRefResult_WhenDisposed_ReturnsQueryResultSetDisposedError() {
+        var storage = NewStorageWith(new TestRow(1, "Ada"));
+        var mutator = new RecordingMutator([], []);
+        var set = new QueryResultSet<TestRow, RecordingMutator>(storage, OffsetsOf(0), ref mutator);
+        set.Dispose();
+
+        var result = set.GetRefEnumerator();
+
+        Assert.That(result.IsError(), Is.True);
+        Assert.That(result.GetError().Kind, Is.EqualTo(ErrorKind.QueryResultSetDisposed));
+    }
+
+    [Test]
+    public void EnumerateRefResult_WhenLive_UnwrapsToAWalkableEnumerator() {
+        var storage = NewStorageWith(new TestRow(1, "Ada"), new TestRow(2, "Bob"));
+        var mutator = new RecordingMutator([], []);
+        using var set = new QueryResultSet<TestRow, RecordingMutator>(storage, OffsetsOf(1), ref mutator);
+
+        var rows = new List<TestRow>();
+        var enumerator = set.GetRefEnumerator().Unwrap();
+        while (enumerator.MoveNext()) rows.Add(enumerator.Current);
+
+        Assert.That(rows, Is.EqualTo(new[] { new TestRow(2, "Bob") }));
     }
 }

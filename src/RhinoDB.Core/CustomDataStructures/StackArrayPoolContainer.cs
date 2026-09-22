@@ -111,6 +111,7 @@ public ref struct StackArrayPoolContainer<T> : IDisposable {
     }
 
     public readonly Enumerator GetEnumerator() => new Enumerator(buffer[..Count], Count);
+    public readonly RefEnumerator GetRefEnumerator() => new RefEnumerator(buffer[..Count], Count);
 
     public ref struct Enumerator {
         private readonly ReadOnlySpan<T> span;
@@ -132,6 +133,28 @@ public ref struct StackArrayPoolContainer<T> : IDisposable {
         }
 
         public readonly T Current => span[index];
+    }
+    
+    public ref struct RefEnumerator {
+        private readonly ReadOnlySpan<T> span;
+        private readonly int count;
+        private int index;
+
+        internal RefEnumerator(ReadOnlySpan<T> span, int count) {
+            this.span = span;
+            this.count = count;
+            index = -1;
+        }
+
+        public bool MoveNext() {
+            var next = index + 1;
+            if (next >= count) return false;
+
+            index = next;
+            return true;
+        }
+
+        public readonly ref readonly T Current => ref span[index];
     }
 
     private bool IsDisposed() => array == null;

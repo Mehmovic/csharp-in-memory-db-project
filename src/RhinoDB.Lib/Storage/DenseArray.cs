@@ -47,6 +47,17 @@ public class DenseArray<T>
         return CollectionsMarshal.AsSpan(values)[chunkIndex][index & chunkMask];
     }
 
+    public ref readonly T GetRef(int index) {
+        var chunkIndex = index >> chunkShift;
+        return ref CollectionsMarshal.AsSpan(values)[chunkIndex][index & chunkMask];
+    }
+
+    public StorageRefEnumerator<T> EnumerateRef()
+        => new StorageRefEnumerator<T>(this);
+
+    public StorageOffsetRefEnumerator<T> EnumerateRef(ReadOnlySpan<int> offsets)
+        => new StorageOffsetRefEnumerator<T>(this, offsets);
+
     public void Set(int index, T value) {
         var chunkIndex = index >> chunkShift;
         CollectionsMarshal.AsSpan(values)[chunkIndex][index & chunkMask] = value;
