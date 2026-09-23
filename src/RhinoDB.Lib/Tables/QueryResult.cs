@@ -4,7 +4,7 @@ using RhinoDB.Lib.Storage;
 
 namespace RhinoDB.Lib.Tables;
 
-public ref struct QueryResultSet<TRow, TMutator>
+public ref struct QuerySet<TRow, TMutator>
 (
     DenseArray<TRow> storage,
     StackArrayPoolContainer<int> offsets,
@@ -19,7 +19,7 @@ public ref struct QueryResultSet<TRow, TMutator>
     public int Count => offsets.Count;
 
     public StackResult<ReadOnlySpan<TRow>> Get() {
-        if (IsDisposed()) return StackResult.Error(DbError.QueryResultSetDisposed());
+        if (IsDisposed()) return StackResult.Error(DbError.QuerySetDisposed());
 
         var i = 0;
         foreach (var offset in offsets) buffer[i++] = storage.Get(offset);
@@ -29,45 +29,42 @@ public ref struct QueryResultSet<TRow, TMutator>
 
     public readonly StackResult<StorageOffsetRefEnumerator<TRow>> GetRefEnumerator() {
         return IsDisposed()
-            ? StackResult.Error(DbError.QueryResultSetDisposed())
+            ? StackResult.Error(DbError.QuerySetDisposed())
             : StackResult<StorageOffsetRefEnumerator<TRow>>.Ok(
                 new StorageOffsetRefEnumerator<TRow>(storage, offsets.Buffer())
             );
     }
 
-    public Result<int> Update(TRow newRow) {
-        if (IsDisposed()) return Result.Error(DbError.QueryResultSetDisposed());
+    public Result ExecuteUpdate(TRow newRow) {
+        if (IsDisposed()) return Result.Error(DbError.QuerySetDisposed());
 
-        var affectedCount = 0;
         foreach (var offset in offsets) {
             var original = storage.Get(offset);
             mutator.Update(original, mutator.WithSamePrimaryKey(original, newRow));
-            affectedCount++;
         }
-        return affectedCount;
+        
+        return Result.Ok();
     }
 
-    public Result<int> Update(Func<TRow, TRow> mutate) {
-        if (IsDisposed()) return Result.Error(DbError.QueryResultSetDisposed());
+    public Result ExecuteUpdate(Func<TRow, TRow> mutate) {
+        if (IsDisposed()) return Result.Error(DbError.QuerySetDisposed());
 
-        var affectedCount = 0;
         foreach (var offset in offsets) {
             var original = storage.Get(offset);
             mutator.Update(original, mutate(original));
-            affectedCount++;
         }
-        return affectedCount;
+        
+        return Result.Ok();
     }
 
-    public Result<int> Delete() {
-        if (IsDisposed()) return Result.Error(DbError.QueryResultSetDisposed());
+    public Result ExecuteDelete() {
+        if (IsDisposed()) return Result.Error(DbError.QuerySetDisposed());
 
-        var affectedCount = 0;
         foreach (var offset in offsets) {
             mutator.Delete(storage.Get(offset));
-            affectedCount++;
         }
-        return affectedCount;
+        
+        return Result.Ok();
     }
 
     public void Dispose() {
@@ -92,26 +89,26 @@ public readonly ref struct QuerySingle<TRow, TMutator>(DenseArray<TRow> storage,
     public bool HasRow() => offsetResult.IsOk();
     public ref readonly TRow GetRef() => ref storage.GetRef(offsetResult.Unwrap());
 
-    public Result<int> Update(TRow newRow) {
+    public Result ExecuteUpdate(TRow newRow) {
         if (offsetResult.IsError()) return offsetResult.Void();
 
         var original = storage.Get(offsetResult.Unwrap());
         mutator.Update(original, mutator.WithSamePrimaryKey(original, newRow));
-        return 1;
+        return Result.Ok();
     }
 
-    public Result<int> Update(Func<TRow, TRow> mutate) {
+    public Result ExecuteUpdate(Func<TRow, TRow> mutate) {
         if (offsetResult.IsError()) return offsetResult.Void();
 
         var original = storage.Get(offsetResult.Unwrap());
         mutator.Update(original, mutate(original));
-        return 1;
+        return Result.Ok();
     }
 
-    public Result<int> Delete() {
+    public Result ExecuteDelete() {
         if (offsetResult.IsError()) return offsetResult.Void();
 
         mutator.Delete(storage.Get(offsetResult.Unwrap()));
-        return 1;
+        return Result.Ok();
     }
 }

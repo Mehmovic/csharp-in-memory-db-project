@@ -5,7 +5,7 @@ namespace RhinoDB.Test.Generators;
 
 // Milestone 4 originally proved secondary-index accessors were overlay-aware
 // (saw this operation's own staged-but-not-yet-applied writes). That overlay
-// was deliberately removed in the QueryResultSet/QuerySingle redesign (2026-09-18)
+// was deliberately removed in the QuerySet/QuerySingle redesign (2026-09-18)
 // - no scanning uncommitted `changes` before hitting an index, anywhere, "it will
 // be the user's duty to handle it," to avoid paying that check on every search.
 // This file now proves the opposite contract: a secondary-index Find/Iter during
@@ -40,7 +40,7 @@ public class Milestone4Tests {
             [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
             [Index(IndexKind.Hash, Uniqueness.NonUnique)] [property: MemoryPackOrder(2)] [property: Key(2)] int ClubId);
 
-        // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
+        // QuerySet/QuerySingle are ref structs and can never cross a dynamic call boundary
         // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching
         // as real static-typed C#, exposing only reflection-safe (non-ref-struct) signatures.
         public static class TestHelpers {

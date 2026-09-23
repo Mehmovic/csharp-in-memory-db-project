@@ -616,15 +616,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine();
             sb.AppendLine(idx.Uniqueness == Uniqueness.Unique
                 ? $"    public QuerySingle<{row}, {mutatorName}> Find({parameters}) => new(storage, idx.GetOffset({keyExpr}), ref rowMutator);"
-                : $"    public QueryResultSet<{row}, {mutatorName}> Find({parameters}) => new(storage, idx.GetOffsets({keyExpr}), ref rowMutator);");
-            sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Iter() => new(storage, idx.GetOffsetsIter(), ref rowMutator);");
-            sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Except({parameters}) => new(storage, idx.GetOffsetsExcept({keyExpr}), ref rowMutator);");
+                : $"    public QuerySet<{row}, {mutatorName}> Find({parameters}) => new(storage, idx.GetOffsets({keyExpr}), ref rowMutator);");
+            sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Iter() => new(storage, idx.GetOffsetsIter(), ref rowMutator);");
+            sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Except({parameters}) => new(storage, idx.GetOffsetsExcept({keyExpr}), ref rowMutator);");
             if (IsRangedIndex(idx)) {
-                sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Range({keyType} from, {keyType} to) => new(storage, idx.GetOffsetsRange(from, to), ref rowMutator);");
-                sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Gt({keyType} value) => new(storage, idx.GetOffsetsGt(value), ref rowMutator);");
-                sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Gte({keyType} value) => new(storage, idx.GetOffsetsGte(value), ref rowMutator);");
-                sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Lt({keyType} value) => new(storage, idx.GetOffsetsLt(value), ref rowMutator);");
-                sb.AppendLine($"    public QueryResultSet<{row}, {mutatorName}> Lte({keyType} value) => new(storage, idx.GetOffsetsLte(value), ref rowMutator);");
+                sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Range({keyType} from, {keyType} to) => new(storage, idx.GetOffsetsRange(from, to), ref rowMutator);");
+                sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Gt({keyType} value) => new(storage, idx.GetOffsetsGt(value), ref rowMutator);");
+                sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Gte({keyType} value) => new(storage, idx.GetOffsetsGte(value), ref rowMutator);");
+                sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Lt({keyType} value) => new(storage, idx.GetOffsetsLt(value), ref rowMutator);");
+                sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Lte({keyType} value) => new(storage, idx.GetOffsetsLte(value), ref rowMutator);");
             }
             sb.AppendLine("}");
         }

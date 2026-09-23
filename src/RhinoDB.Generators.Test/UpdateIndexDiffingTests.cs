@@ -44,7 +44,7 @@ public class UpdateIndexDiffingTests {
             [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
             [Index(IndexKind.Hash, Uniqueness.NonUnique)] [property: MemoryPackOrder(2)] [property: Key(2)] int ClubId);
 
-        // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
+        // QuerySet/QuerySingle are ref structs and can never cross a dynamic call boundary
         // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching
         // as real static-typed C#, exposing only reflection-safe (non-ref-struct) signatures.
         public static class TestHelpers {

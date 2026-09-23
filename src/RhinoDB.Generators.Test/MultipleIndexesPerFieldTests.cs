@@ -36,7 +36,7 @@ public class MultipleIndexesPerFieldTests {
             [property: MemoryPackOrder(2)] [property: Key(2)] int ShirtNumber,
             [property: MemoryPackOrder(3)] [property: Key(3)] string Name);
 
-        // QueryResultSet/QuerySingle are ref structs and can never cross a dynamic call boundary
+        // QuerySet/QuerySingle are ref structs and can never cross a dynamic call boundary
         // (see GeneratorTestHost.InvokeHelper) - these small helpers do the Idx.X.Find(...) touching
         // as real static-typed C#, exposing only reflection-safe (non-ref-struct) signatures.
         public static class TestHelpers {

@@ -134,7 +134,7 @@ static internal class GeneratorTestHost {
         return asTask.Invoke(raw, null)!;
     }
 
-    // QueryResultSet<TRow,TMutator>/QuerySingle<TRow,TMutator> are ref structs (inherited from
+    // QuerySet<TRow,TMutator>/QuerySingle<TRow,TMutator> are ref structs (inherited from
     // OffsetList), so their instances can never cross a `dynamic` call boundary - the DLR needs to
     // box the result to `object` to complete the call site, and a ref struct cannot be boxed at all
     // (confirmed empirically: InvalidProgramException at DynamicMethod.CreateDelegate). Same
