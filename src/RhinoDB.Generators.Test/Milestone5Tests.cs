@@ -29,6 +29,12 @@ public class Milestone5Tests {
             [Validate]
             internal static DbError? ValidateName(Club row) => string.IsNullOrWhiteSpace(row.Name) ? DbError.Custom(2) : null;
         }
+
+        // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
+        // boundary (see GeneratorTestHost.InvokeHelper) - typed helper instead.
+        public static class TestHelpers {
+            public static bool ClubFindIsOk(ShopDbClubOps club, int id) => club.Find(id).HasRow();
+        }
         """;
 
     static private (object Db, Type TxType, System.Reflection.Assembly Assembly) NewDb() {
@@ -80,7 +86,7 @@ public class Milestone5Tests {
 
         var found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Club.Find(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubFindIsOk", (object)((dynamic)tx).Club, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.False);

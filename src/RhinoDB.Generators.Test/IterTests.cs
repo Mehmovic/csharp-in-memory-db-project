@@ -26,6 +26,18 @@ public class IterTests {
         public readonly partial record struct Widget(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
+
+        // QuerySet is a ref struct and can never cross a dynamic call boundary
+        // (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
+        public static class TestHelpers {
+            public static System.Collections.Generic.List<string> WidgetNames(ShopDbWidgetOps ops) {
+                using var q = ops.Iter();
+                var rows = q.Get().Unwrap();
+                var names = new System.Collections.Generic.List<string>();
+                for (var i = 0; i < rows.Length; i++) names.Add(rows[i].Name);
+                return names;
+            }
+        }
         """;
 
     private const string PersistentSource = """
@@ -45,6 +57,18 @@ public class IterTests {
         public readonly partial record struct Account(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance);
+
+        // QuerySet is a ref struct and can never cross a dynamic call boundary
+        // (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
+        public static class TestHelpers {
+            public static System.Collections.Generic.List<decimal> AccountBalances(VaultDbAccountOps ops) {
+                using var q = ops.Iter();
+                var rows = q.Get().Unwrap();
+                var balances = new System.Collections.Generic.List<decimal>();
+                for (var i = 0; i < rows.Length; i++) balances.Add(rows[i].Balance);
+                return balances;
+            }
+        }
         """;
 
     static private object NewWidget(System.Reflection.Assembly assembly, int id, string name) {
@@ -76,7 +100,7 @@ public class IterTests {
         var names = new List<string>();
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                foreach (var widget in ((dynamic)tx).Widget.Iter()) names.Add((string)widget.Name);
+                names.AddRange((System.Collections.Generic.List<string>)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetNames", (object)((dynamic)tx).Widget)!);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -104,7 +128,7 @@ public class IterTests {
         var names = new List<string>();
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                foreach (var widget in ((dynamic)tx).Widget.Iter()) names.Add((string)widget.Name);
+                names.AddRange((System.Collections.Generic.List<string>)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetNames", (object)((dynamic)tx).Widget)!);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -133,7 +157,7 @@ public class IterTests {
             var balances = new List<decimal>();
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 db, txType, (ctx, tx) => {
-                    foreach (var account in ((dynamic)tx).Account.Iter()) balances.Add((decimal)account.Balance);
+                    balances.AddRange((System.Collections.Generic.List<decimal>)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountBalances", (object)((dynamic)tx).Account)!);
                     return Result.Ok();
                 }, PropagationMode.Optimistic);
 

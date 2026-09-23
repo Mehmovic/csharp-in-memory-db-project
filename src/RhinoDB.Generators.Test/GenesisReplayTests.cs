@@ -28,6 +28,13 @@ public class GenesisReplayTests {
         public readonly partial record struct Club(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] int Rating);
+
+        // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
+        // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
+        public static class TestHelpers {
+            public static bool ClubFindIsOk(GameDbClubOps ops, int id) => ops.Find(id).HasRow();
+            public static int ClubRating(GameDbClubOps ops, int id) => ops.Find(id).Get().Unwrap().Rating;
+        }
         """;
 
     static private object NewClub(System.Reflection.Assembly assembly, int id, int rating) {
@@ -75,8 +82,8 @@ public class GenesisReplayTests {
                 await (Task<Result>)GeneratorTestHost.RunTransactional(
                     normalDb, txType, (ctx, tx) => {
                         dynamic dtx = tx;
-                        r1 = (int)dtx.Club.Find(1).Unwrap().Rating;
-                        r2 = (int)dtx.Club.Find(2).Unwrap().Rating;
+                        r1 = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubRating", (object)dtx.Club, 1)!;
+                        r2 = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubRating", (object)dtx.Club, 2)!;
                         return Result.Ok();
                     }, PropagationMode.Optimistic);
                 normalRating1 = r1;
@@ -93,8 +100,8 @@ public class GenesisReplayTests {
                 await (Task<Result>)GeneratorTestHost.RunTransactional(
                     replayDb, txType, (ctx, tx) => {
                         dynamic dtx = tx;
-                        r1 = (int)dtx.Club.Find(1).Unwrap().Rating;
-                        r2 = (int)dtx.Club.Find(2).Unwrap().Rating;
+                        r1 = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubRating", (object)dtx.Club, 1)!;
+                        r2 = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubRating", (object)dtx.Club, 2)!;
                         return Result.Ok();
                     }, PropagationMode.Optimistic);
                 replayRating1 = r1;
@@ -140,8 +147,8 @@ public class GenesisReplayTests {
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 stoppedDb, txType, (ctx, tx) => {
                     dynamic dtx = tx;
-                    club1Found = dtx.Club.Find(1).IsOk();
-                    club2Found = dtx.Club.Find(2).IsOk();
+                    club1Found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubFindIsOk", (object)dtx.Club, 1)!;
+                    club2Found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubFindIsOk", (object)dtx.Club, 2)!;
                     return Result.Ok();
                 }, PropagationMode.Optimistic);
 

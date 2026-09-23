@@ -18,6 +18,8 @@ public ref struct QuerySet<TRow, TMutator>
 
     public int Count => offsets.Count;
 
+    public bool HasRow() => !IsDisposed() && offsets.Count > 0;
+    
     public StackResult<ReadOnlySpan<TRow>> Get() {
         if (IsDisposed()) return StackResult.Error(DbError.QuerySetDisposed());
 
@@ -83,10 +85,11 @@ public readonly ref struct QuerySingle<TRow, TMutator>(DenseArray<TRow> storage,
     where TRow : struct
     where TMutator : struct, IRowMutator<TRow> {
     private readonly ref TMutator mutator = ref mutator;
+    
+    public bool HasRow() => offsetResult.IsOk();
 
     public Result<TRow> Get() => offsetResult.IsError() ? offsetResult.Void() : storage.Get(offsetResult.Unwrap());
 
-    public bool HasRow() => offsetResult.IsOk();
     public ref readonly TRow GetRef() => ref storage.GetRef(offsetResult.Unwrap());
 
     public Result ExecuteUpdate(TRow newRow) {

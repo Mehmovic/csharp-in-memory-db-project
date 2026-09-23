@@ -38,7 +38,7 @@ public class InstantTableBenchmarks {
 
     [Benchmark]
     public ValueTask<Result<InstantWidget>> Get() =>
-        db.Run<InstantWidget>((ctx, tx) => tx.InstantWidget.Find(lookupKey), PropagationMode.Optimistic);
+        db.Run<InstantWidget>((ctx, tx) => tx.InstantWidget.Find(lookupKey).Get(), PropagationMode.Optimistic);
 
     [Benchmark]
     public ValueTask<Result> Insert() {
@@ -52,7 +52,7 @@ public class InstantTableBenchmarks {
 
     [Benchmark]
     public ValueTask<Result<InstantWidget>> GetArgs() =>
-        db.Run<InstantWidget, int>(static (ctx, tx, key) => tx.InstantWidget.Find(key), lookupKey, PropagationMode.Optimistic);
+        db.Run<InstantWidget, int>(static (ctx, tx, key) => tx.InstantWidget.Find(key).Get(), lookupKey, PropagationMode.Optimistic);
 
     [Benchmark]
     public ValueTask<Result> InsertArgs() {

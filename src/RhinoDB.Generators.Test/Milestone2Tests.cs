@@ -51,6 +51,7 @@ public class Milestone2Tests {
             public static bool ShortCodeIsOk(ShopDbClubOps club, string code) => club.Idx.ShortCode.Find(code).Get().IsOk();
             public static int ClubIdCount(ShopDbPlayerOps player, int clubId) { using var r = player.Idx.ClubId.Find(clubId); return r.Count; }
             public static bool HomeAwayIsOk(ShopDbFixtureOps fixture, int awayClubId, int homeClubId) => fixture.Idx.HomeAway.Find(awayClubId, homeClubId).Get().IsOk();
+            public static bool ClubFindIsOk(ShopDbClubOps club, int id) => club.Find(id).HasRow();
         }
         """;
 
@@ -162,7 +163,7 @@ public class Milestone2Tests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                rowFound = dtx.Club.Find(1).IsOk();
+                rowFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubFindIsOk", (object)dtx.Club, 1)!;
                 gunResolvesInIndex = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", (object)dtx.Club, "GUN")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);

@@ -28,6 +28,13 @@ public class Milestone1Tests {
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
             [property: MemoryPackOrder(2)] [property: Key(2)] int Stock);
+
+        // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
+        // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
+        public static class TestHelpers {
+            public static bool WidgetFindIsOk(WidgetDbWidgetOps ops, int id) => ops.Find(id).HasRow();
+            public static int WidgetStock(WidgetDbWidgetOps ops, int id) => ops.Find(id).Get().Unwrap().Stock;
+        }
         """;
 
     static private (object Db, Type TxType, System.Reflection.Assembly Assembly) NewDb() {
@@ -54,8 +61,8 @@ public class Milestone1Tests {
 
         var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                var got = ((dynamic)tx).Widget.Find(1);
-                return got.IsOk() ? Result.Ok() : Result.Error((DbError)got.GetError());
+                var found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)((dynamic)tx).Widget, 1)!;
+                return found ? Result.Ok() : Result.Error(DbError.IndexKeyNotFound());
             }, PropagationMode.Optimistic);
         Assert.That(getResult.IsOk(), Is.True);
     }
@@ -74,8 +81,7 @@ public class Milestone1Tests {
         var stock = -1;
         var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                var got = ((dynamic)tx).Widget.Find(1);
-                stock = (int)got.Unwrap().Stock;
+                stock = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetStock", (object)((dynamic)tx).Widget, 1)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -96,8 +102,7 @@ public class Milestone1Tests {
         var foundAfterDelete = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                var got = ((dynamic)tx).Widget.Find(1);
-                foundAfterDelete = got.IsOk();
+                foundAfterDelete = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)((dynamic)tx).Widget, 1)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -118,7 +123,7 @@ public class Milestone1Tests {
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 dtx.Widget.Insert((dynamic)widget);
-                foundWithinSameOperation = dtx.Widget.Find(1).IsOk();
+                foundWithinSameOperation = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)dtx.Widget, 1)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

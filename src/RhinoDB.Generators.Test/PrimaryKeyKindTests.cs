@@ -24,6 +24,14 @@ public class PrimaryKeyKindTests {
         public readonly partial record struct Ranking(
             [PrimaryKey(IndexKind.{0})] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
+
+        // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
+        // boundary (see GeneratorTestHost.InvokeHelper) - typed helper instead.
+        // NOTE: this fixture goes through string.Format, so every literal brace
+        // below must be doubled.
+        public static class TestHelpers {{
+            public static bool FindIsOk(RankingDbRankingOps ranking, int id) => ranking.Find(id).HasRow();
+        }}
         """;
 
     [Test]
@@ -41,7 +49,7 @@ public class PrimaryKeyKindTests {
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Ranking.Find(7).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "FindIsOk", (object)((dynamic)tx).Ranking, 7)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsOk(), Is.True);

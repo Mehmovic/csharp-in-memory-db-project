@@ -41,6 +41,13 @@ public class LoaderTests {
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Session([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
+
+        // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
+        // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
+        public static class TestHelpers {
+            public static bool ClubFindIsOk(GameDbClubOps ops, int id) => ops.Find(id).HasRow();
+            public static bool AccountFindIsOk(GameDbAccountOps ops, int id) => ops.Find(id).HasRow();
+        }
         """;
 
     static private object NewClub(System.Reflection.Assembly assembly, int id, int rating) {
@@ -88,8 +95,8 @@ public class LoaderTests {
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 reopenedDb, txType, (ctx, tx) => {
                     dynamic dtx = tx;
-                    club1Found = dtx.Club.Find(1).IsOk();
-                    club2Found = dtx.Club.Find(2).IsOk();
+                    club1Found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubFindIsOk", (object)dtx.Club, 1)!;
+                    club2Found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubFindIsOk", (object)dtx.Club, 2)!;
                     return Result.Ok();
                 }, PropagationMode.Optimistic);
 
@@ -127,7 +134,7 @@ public class LoaderTests {
 
             var found = false;
             await (Task<Result>)GeneratorTestHost.RunTransactional(
-                reopenedDb, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Find(1).IsOk(); return Result.Ok(); },
+                reopenedDb, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountFindIsOk", (object)((dynamic)tx).Account, 1)!; return Result.Ok(); },
                 PropagationMode.Optimistic);
 
             Assert.That(found, Is.False, "An Evictable table must not be eager-loaded by the default loader.");
@@ -172,7 +179,7 @@ public class LoaderTests {
             var bulkLoad = ((object)accountsOps).GetType().GetMethod("BulkLoadFromCold", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             bulkLoad.Invoke(accountsOps, null);
 
-            Assert.That((bool)accountsOps.Find(1).IsOk(), Is.True, "BulkLoadFromCold() must be usable directly by a custom LoadAsync override to eager-load an Evictable table too.");
+            Assert.That((bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountFindIsOk", (object)accountsOps, 1)!, Is.True, "BulkLoadFromCold() must be usable directly by a custom LoadAsync override to eager-load an Evictable table too.");
         } finally {
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
@@ -197,6 +204,12 @@ public class LoaderTests {
             public readonly partial record struct Club(
                 [PrimaryKey][AutoIncrement] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
                 [property: MemoryPackOrder(1)] [property: Key(1)] int Rating);
+
+            // QuerySingle is a ref struct and can never cross a dynamic call
+            // boundary (see GeneratorTestHost.InvokeHelper) - typed helper instead.
+            public static class TestHelpers {
+                public static bool ClubFindIsOk(LeagueDbClubOps ops, int id) => ops.Find(id).HasRow();
+            }
             """;
 
         var dir = Path.Combine(Path.GetTempPath(), "rhinodb-loader-tests", Guid.NewGuid().ToString("N"));
@@ -234,7 +247,7 @@ public class LoaderTests {
 
             var thirdClubFound = false;
             await (Task<Result>)GeneratorTestHost.RunTransactional(
-                reopenedDb, txType, (ctx, tx) => { thirdClubFound = ((dynamic)tx).Club.Find(3).IsOk(); return Result.Ok(); },
+                reopenedDb, txType, (ctx, tx) => { thirdClubFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubFindIsOk", (object)((dynamic)tx).Club, 3)!; return Result.Ok(); },
                 PropagationMode.Optimistic);
 
             Assert.That(thirdClubFound, Is.True,

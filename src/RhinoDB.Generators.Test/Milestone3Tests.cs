@@ -42,6 +42,14 @@ public class Milestone3Tests {
         public readonly partial record struct Player(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
+
+        // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
+        // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
+        public static class TestHelpers {
+            public static bool AccountFindIsOk(BankDbAccountOps ops, int id) => ops.Find(id).HasRow();
+            public static decimal AccountBalance(BankDbAccountOps ops, int id) => ops.Find(id).Get().Unwrap().Balance;
+            public static bool PlayerFindIsOk(BankDbPlayerOps ops, int id) => ops.Find(id).HasRow();
+        }
         """;
 
     [SetUp]
@@ -84,7 +92,7 @@ public class Milestone3Tests {
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Find(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountFindIsOk", (object)((dynamic)tx).Account, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
@@ -121,7 +129,7 @@ public class Milestone3Tests {
 
         decimal balance = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { balance = (decimal)((dynamic)tx).Account.Find(1).Unwrap().Balance; return Result.Ok(); },
+            db, txType, (ctx, tx) => { balance = (decimal)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountBalance", (object)((dynamic)tx).Account, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(balance, Is.EqualTo(250m));
@@ -141,7 +149,7 @@ public class Milestone3Tests {
 
         var found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Account.Find(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountFindIsOk", (object)((dynamic)tx).Account, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.False);
@@ -175,7 +183,7 @@ public class Milestone3Tests {
             reopenedDb, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 loaded = dtx.Account.Storage.Load(1).IsOk();
-                balance = (decimal)dtx.Account.Find(1).Unwrap().Balance;
+                balance = (decimal)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountBalance", (object)dtx.Account, 1)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -216,7 +224,7 @@ public class Milestone3Tests {
 
         var foundAfterEvict = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            reopenedDb, txType, (ctx, tx) => { foundAfterEvict = ((dynamic)tx).Account.Find(1).IsOk(); return Result.Ok(); },
+            reopenedDb, txType, (ctx, tx) => { foundAfterEvict = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountFindIsOk", (object)((dynamic)tx).Account, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
         Assert.That(foundAfterEvict, Is.False, "Find must never implicitly reload from cold storage.");
 
@@ -255,7 +263,7 @@ public class Milestone3Tests {
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
                 peekedBalance = (decimal)dtx.Account.Storage.Peek(1).Unwrap().Balance;
-                stillNotInMemory = !dtx.Account.Find(1).IsOk();
+                stillNotInMemory = !(bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountFindIsOk", (object)dtx.Account, 1)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -291,7 +299,7 @@ public class Milestone3Tests {
 
         var playerFound = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { playerFound = ((dynamic)tx).Player.Find(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { playerFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "PlayerFindIsOk", (object)((dynamic)tx).Player, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(playerFound, Is.False,

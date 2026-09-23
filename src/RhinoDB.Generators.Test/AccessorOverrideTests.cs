@@ -24,6 +24,12 @@ public class AccessorOverrideTests {
         public readonly partial record struct Club(
             [PrimaryKey(Accessor = "ById")] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
+
+        // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
+        // boundary (see GeneratorTestHost.InvokeHelper) - typed helper instead.
+        public static class TestHelpers {
+            public static bool ByIdIsOk(LeagueDbTeamsOps teams, int id) => teams.ById(id).HasRow();
+        }
         """;
 
     static private (object Db, Type TxType, System.Reflection.Assembly Assembly) NewDb() {
@@ -49,7 +55,7 @@ public class AccessorOverrideTests {
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Teams.ById(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByIdIsOk", (object)((dynamic)tx).Teams, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);

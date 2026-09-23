@@ -539,20 +539,22 @@ public sealed class TableGenerator : IIncrementalGenerator {
         foreach (var idx in table.Indexes) sb.AppendLine($"        this.{IndexFieldName(idx)} = {IndexFieldName(idx)};");
     }
 
-    static private void EmitFindMethod(StringBuilder sb, TableModel table) {
+    static private void EmitFindMethod(StringBuilder sb, TableModel table, string ownerSimpleName) {
         var row = table.RowTypeFullName;
         var key = table.PrimaryKeyTypeFullName;
-        sb.AppendLine($"    public Result<{row}> {table.PrimaryKeyAccessor}({key} id) {{");
-        sb.AppendLine("        var offsetResult = primaryIndex.GetOffset(id);");
-        sb.AppendLine("        if (offsetResult.IsError()) return offsetResult.Void();");
-        sb.AppendLine("        return storage.Get(offsetResult.Unwrap());");
-        sb.AppendLine("    }");
+        var mutatorName = RowMutatorName(table, ownerSimpleName);
+        sb.AppendLine($"    public QuerySingle<{row}, {mutatorName}> {table.PrimaryKeyAccessor}({key} id) => new(storage, primaryIndex.GetOffset(id), ref rowMutator);");
         sb.AppendLine();
     }
 
-    static private void EmitIterMethod(StringBuilder sb, TableModel table) {
-        sb.AppendLine($"    public IEnumerable<{table.RowTypeFullName}> Iter() {{");
-        sb.AppendLine("        for (var i = 0; i < storage.Count; i++) yield return storage.Get(i);");
+    static private void EmitIterMethod(StringBuilder sb, TableModel table, string ownerSimpleName) {
+        var row = table.RowTypeFullName;
+        var mutatorName = RowMutatorName(table, ownerSimpleName);
+        sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Iter() {{");
+        sb.AppendLine("        var count = storage.Count;");
+        sb.AppendLine("        using var offsetsBuilder = StackArrayPoolContainerBuilder<int>.Create(count);");
+        sb.AppendLine("        for (var i = 0; i < count; i++) offsetsBuilder.Add(i);");
+        sb.AppendLine($"        return new QuerySet<{row}, {mutatorName}>(storage, offsetsBuilder.Build().Unwrap(), ref rowMutator);");
         sb.AppendLine("    }");
         sb.AppendLine();
     }
@@ -563,22 +565,20 @@ public sealed class TableGenerator : IIncrementalGenerator {
         $"{ownerSimpleName}{table.Accessor}{idx.AccessorName}IndexOps";
 
     static private void EmitIndexWiringFields(StringBuilder sb, TableModel table, string ownerSimpleName) {
+        sb.AppendLine($"    private {RowMutatorName(table, ownerSimpleName)} rowMutator;");
         if (table.Indexes.Length == 0) return;
-        sb.AppendLine($"    private readonly {RowMutatorName(table, ownerSimpleName)} rowMutator;");
         sb.AppendLine($"    public {IndexCollectionName(table, ownerSimpleName)} Idx {{ get; }}");
     }
 
     static private void EmitIndexWiringConstruction(StringBuilder sb, TableModel table, string ownerSimpleName) {
-        if (table.Indexes.Length == 0) return;
         sb.AppendLine($"        rowMutator = new {RowMutatorName(table, ownerSimpleName)}(this);");
+        if (table.Indexes.Length == 0) return;
         sb.Append($"        Idx = new {IndexCollectionName(table, ownerSimpleName)}(storage, rowMutator");
         foreach (var idx in table.Indexes) sb.Append($", {IndexFieldName(idx)}");
         sb.AppendLine(");");
     }
 
     static private void EmitIndexWiringTypes(StringBuilder sb, TableModel table, string ownerSimpleName) {
-        if (table.Indexes.Length == 0) return;
-
         var opsName = $"{ownerSimpleName}{table.Accessor}Ops";
         var row = table.RowTypeFullName;
         var mutatorName = RowMutatorName(table, ownerSimpleName);
@@ -592,6 +592,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    public void Delete({row} row) => table.Delete(row.{table.PrimaryKeyName});");
         sb.AppendLine($"    public {row} WithSamePrimaryKey({row} original, {row} newRow) => newRow with {{ {table.PrimaryKeyName} = original.{table.PrimaryKeyName} }};");
         sb.AppendLine("}");
+
+        if (table.Indexes.Length == 0) return;
 
         foreach (var idx in table.Indexes) {
             var className = IndexAccessorClassName(table, idx, ownerSimpleName);
@@ -831,8 +833,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        EmitFindMethod(sb, table);
-        EmitIterMethod(sb, table);
+        EmitFindMethod(sb, table, ownerSimpleName);
+        EmitIterMethod(sb, table, ownerSimpleName);
         EmitStagingMethods(sb, table);
         EmitRawSerializer(sb, table);
         EmitProtocolWrappers(sb, table);
@@ -959,8 +961,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        EmitFindMethod(sb, table);
-        EmitIterMethod(sb, table);
+        EmitFindMethod(sb, table, ownerSimpleName);
+        EmitIterMethod(sb, table, ownerSimpleName);
         EmitStagingMethods(sb, table);
         EmitRawSerializer(sb, table);
         EmitProtocolWrappers(sb, table);

@@ -21,6 +21,12 @@ public class AutoIncrementTests {
         public readonly partial record struct Gadget(
             [PrimaryKey][AutoIncrement] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
+
+        // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
+        // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
+        public static class TestHelpers {
+            public static bool GadgetFindIsOk(GadgetDbGadgetOps ops, int id) => ops.Find(id).HasRow();
+        }
         """;
 
     static private (object Db, Type TxType, System.Reflection.Assembly Assembly) NewDb() {
@@ -49,7 +55,7 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                assignedId = dtx.Gadget.Find(1).IsOk() ? 1 : -1;
+                assignedId = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Gadget, 1)! ? 1 : -1;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -75,7 +81,8 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                foundBoth = dtx.Gadget.Find(1).IsOk() && dtx.Gadget.Find(2).IsOk();
+                foundBoth = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Gadget, 1)!
+                    && (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Gadget, 2)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -93,7 +100,7 @@ public class AutoIncrementTests {
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = ((dynamic)tx).Gadget.Find(42).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)((dynamic)tx).Gadget, 42)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
@@ -114,7 +121,7 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                foundSecond = dtx.Gadget.Find(2).IsOk();
+                foundSecond = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Gadget, 2)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -147,6 +154,13 @@ public class AutoIncrementTests {
                 [PrimaryKey][AutoIncrement] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
                 [AutoIncrement] [property: MemoryPackOrder(1)] [property: Key(1)] long Sequence,
                 [property: MemoryPackOrder(2)] [property: Key(2)] string Name);
+
+            // QuerySingle is a ref struct and can never cross a dynamic call
+            // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
+            public static class TestHelpers {
+                public static bool WidgetFindIsOk(WidgetDbWidgetOps ops, int id) => ops.Find(id).HasRow();
+                public static long WidgetSequence(WidgetDbWidgetOps ops, int id) => ops.Find(id).Get().Unwrap().Sequence;
+            }
             """;
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var dbType = asm.GetType("TestNs.WidgetDb")!;
@@ -169,8 +183,7 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                var found = dtx.Widget.Find(2);
-                sequenceOfB = found.IsOk() ? (long)found.Unwrap().Sequence : -1;
+                sequenceOfB = (long)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetSequence", (object)dtx.Widget, 2)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -256,6 +269,12 @@ public class AutoIncrementTests {
             public readonly partial record struct Item(
                 [PrimaryKey][AutoIncrement] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
                 [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
+
+            // QuerySingle is a ref struct and can never cross a dynamic call
+            // boundary (see GeneratorTestHost.InvokeHelper) - typed helper instead.
+            public static class TestHelpers {
+                public static bool ItemFindIsOk(NegDbItemOps ops, int id) => ops.Find(id).HasRow();
+            }
             """;
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var dbType = asm.GetType("TestNs.NegDb")!;
@@ -271,7 +290,7 @@ public class AutoIncrementTests {
 
         var assignedPositive = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { assignedPositive = ((dynamic)tx).Item.Find(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { assignedPositive = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ItemFindIsOk", (object)((dynamic)tx).Item, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(assignedPositive, Is.True);
@@ -296,6 +315,12 @@ public class AutoIncrementTests {
             public readonly partial record struct Crate(
                 [PrimaryKey][AutoIncrement] [property: MemoryPackOrder(0)] [property: Key(0)] uint Id,
                 [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
+
+            // QuerySingle is a ref struct and can never cross a dynamic call
+            // boundary (see GeneratorTestHost.InvokeHelper) - typed helper instead.
+            public static class TestHelpers {
+                public static bool CrateFindIsOk(CrateDbCrateOps ops, uint id) => ops.Find(id).HasRow();
+            }
             """;
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var dbType = asm.GetType("TestNs.CrateDb")!;
@@ -317,10 +342,8 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                var byAuto = dtx.Crate.Find(1u);
-                var byExplicit = dtx.Crate.Find(7u);
-                autoAssignedFound = byAuto.IsOk();
-                explicitPreserved = byExplicit.IsOk();
+                autoAssignedFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CrateFindIsOk", (object)dtx.Crate, 1u)!;
+                explicitPreserved = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CrateFindIsOk", (object)dtx.Crate, 7u)!;
                 Assert.That(autoAssignedFound, Is.True);
                 Assert.That(explicitPreserved, Is.True);
                 return Result.Ok();
