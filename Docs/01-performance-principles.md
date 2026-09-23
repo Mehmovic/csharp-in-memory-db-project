@@ -172,6 +172,23 @@ blind" posture applied consistently throughout. `TableGenerator.cs` required
 zero changes — `CreateTransaction()`'s cached-singleton behavior was already
 untouched by this redesign, confirmed by a zero-diff check at the end.
 
+**Read-path attribution and the `RunContinuationsAsynchronously` decision
+(2026-09-23).** `RowAccessBenchmarks` flagged ~3.4 μs / 32 B per generated
+read; `ReadPathBenchmarks` decomposed it: the query itself is free
+(`Enqueue_NoOp` ≡ `Enqueue_Find`), so the cost belongs entirely to the
+submit-await round trip — a ~2.6 μs floor of cross-thread handoffs plus
+32 B/op of continuation dispatch. Flipping `PooledOperation`'s core to
+`RunContinuationsAsynchronously = false` measured **0 B/op**, ~850 ns off the
+single-op latency, and halved the await-each batch cost (505 → 257 ns/op),
+with all 570 tests green — but it makes every caller's post-`await`
+continuation execute **on the execution-loop thread**, so a caller that
+blocks, does heavy work, or sync-waits on the same database's context would
+stall or deadlock it. **Decision: keep `RunContinuationsAsynchronously =
+true`** — actor-thread isolation is worth 32 B/op and ~850 ns. Hot paths
+therefore submit in batches and await at the end
+(`SubmitBatch_NoAwait_*`: ~185 ns/op, 1-2 B), never await
+operation-by-operation on a per-tick path.
+
 ## 4. No LINQ on the hot path
 
 Iterator-based LINQ (`.Where()`, `.Select()`, `GroupBy`, etc.) allocates enumerator
