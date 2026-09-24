@@ -32,8 +32,8 @@ public class Milestone1Tests {
         // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
         // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
         public static class TestHelpers {
-            public static bool WidgetFindIsOk(WidgetDbWidgetOps ops, int id) => ops.Find(id).HasRow();
-            public static int WidgetStock(WidgetDbWidgetOps ops, int id) => ops.Find(id).Get().Unwrap().Stock;
+            public static bool WidgetFindIsOk(WidgetDbWidgetOps ops, int id) => ops.Primary.Find(id).HasRow();
+            public static int WidgetStock(WidgetDbWidgetOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Stock;
         }
         """;
 

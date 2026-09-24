@@ -25,7 +25,7 @@ public class AutoIncrementTests {
         // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
         // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
         public static class TestHelpers {
-            public static bool GadgetFindIsOk(GadgetDbGadgetOps ops, int id) => ops.Find(id).HasRow();
+            public static bool GadgetFindIsOk(GadgetDbGadgetOps ops, int id) => ops.Primary.Find(id).HasRow();
         }
         """;
 
@@ -158,8 +158,8 @@ public class AutoIncrementTests {
             // QuerySingle is a ref struct and can never cross a dynamic call
             // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
             public static class TestHelpers {
-                public static bool WidgetFindIsOk(WidgetDbWidgetOps ops, int id) => ops.Find(id).HasRow();
-                public static long WidgetSequence(WidgetDbWidgetOps ops, int id) => ops.Find(id).Get().Unwrap().Sequence;
+                public static bool WidgetFindIsOk(WidgetDbWidgetOps ops, int id) => ops.Primary.Find(id).HasRow();
+                public static long WidgetSequence(WidgetDbWidgetOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Sequence;
             }
             """;
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
@@ -273,7 +273,7 @@ public class AutoIncrementTests {
             // QuerySingle is a ref struct and can never cross a dynamic call
             // boundary (see GeneratorTestHost.InvokeHelper) - typed helper instead.
             public static class TestHelpers {
-                public static bool ItemFindIsOk(NegDbItemOps ops, int id) => ops.Find(id).HasRow();
+                public static bool ItemFindIsOk(NegDbItemOps ops, int id) => ops.Primary.Find(id).HasRow();
             }
             """;
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
@@ -319,7 +319,7 @@ public class AutoIncrementTests {
             // QuerySingle is a ref struct and can never cross a dynamic call
             // boundary (see GeneratorTestHost.InvokeHelper) - typed helper instead.
             public static class TestHelpers {
-                public static bool CrateFindIsOk(CrateDbCrateOps ops, uint id) => ops.Find(id).HasRow();
+                public static bool CrateFindIsOk(CrateDbCrateOps ops, uint id) => ops.Primary.Find(id).HasRow();
             }
             """;
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);

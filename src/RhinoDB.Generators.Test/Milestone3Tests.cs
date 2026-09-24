@@ -46,9 +46,9 @@ public class Milestone3Tests {
         // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
         // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
         public static class TestHelpers {
-            public static bool AccountFindIsOk(BankDbAccountOps ops, int id) => ops.Find(id).HasRow();
-            public static decimal AccountBalance(BankDbAccountOps ops, int id) => ops.Find(id).Get().Unwrap().Balance;
-            public static bool PlayerFindIsOk(BankDbPlayerOps ops, int id) => ops.Find(id).HasRow();
+            public static bool AccountFindIsOk(BankDbAccountOps ops, int id) => ops.Primary.Find(id).HasRow();
+            public static decimal AccountBalance(BankDbAccountOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Balance;
+            public static bool PlayerFindIsOk(BankDbPlayerOps ops, int id) => ops.Primary.Find(id).HasRow();
         }
         """;
 

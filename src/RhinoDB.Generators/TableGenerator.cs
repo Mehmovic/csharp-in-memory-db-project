@@ -111,7 +111,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
     static private readonly DiagnosticDescriptor ReservedIndexAccessorDiagnostic = new(
         "RHINO013",
         "Index accessor collides with a generated member",
-        "Index '{0}' on '{1}' would generate a member with the same name as the generated ops API - '{0}' is taken by the primary key accessor or by Insert/Update/Delete/Iter/Evict, so give this index a different Accessor",
+        "Index '{0}' on '{1}' would generate a member with the same name as the generated ops API - '{0}' is taken by Primary or by Insert/Update/Delete/Iter/Evict, so give this index a different Accessor",
         "RhinoDB.Generators",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
@@ -148,7 +148,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
     );
 
     static private readonly ImmutableHashSet<string> ReservedOpsMemberNames =
-        ImmutableHashSet.Create("Insert", "Update", "Delete", "Iter", "Evict");
+        ImmutableHashSet.Create("Insert", "Update", "Delete", "Iter", "Evict", "Primary");
     
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var tableResults = context.SyntaxProvider
@@ -240,10 +240,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var primaryKeyKind = primaryKeyAttribute.ConstructorArguments.Length > 0
             ? (IndexKind)(int)primaryKeyAttribute.ConstructorArguments[0].Value!
             : IndexKind.Hash;
-        var (pkAccessorProvided, pkAccessorValue) = StringNamedArg(primaryKeyAttribute, "Accessor");
-        if (pkAccessorProvided && pkAccessorValue == "")
-            rowDiagnostics.Add(Diagnostic.Create(EmptyAccessorDiagnostic, Loc(primaryKeyAttribute), $"[PrimaryKey] on '{rowType.Name}.{primaryKeyParam.Name}'"));
-        var primaryKeyAccessor = pkAccessorProvided && pkAccessorValue != "" ? pkAccessorValue! : "Find";
 
         var rowFields = SchemaWalk.ToRowFieldModels(primaryCtor.Parameters);
 
@@ -295,7 +291,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             .Select(g => {
                     var group = g.ToImmutableArray();
 
-                    if (g.Key == primaryKeyAccessor || ReservedOpsMemberNames.Contains(g.Key)) {
+                    if (ReservedOpsMemberNames.Contains(g.Key)) {
                         rowDiagnostics.Add(Diagnostic.Create(ReservedIndexAccessorDiagnostic, Loc(group[0].Attr), g.Key, rowType.Name));
                         return null;
                     }
@@ -387,7 +383,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 primaryKeyParam.Name,
                 primaryKeyParam.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 primaryKeyKind,
-                primaryKeyAccessor,
                 tableAccessor,
                 chunkSize,
                 evictable,
@@ -539,39 +534,61 @@ public sealed class TableGenerator : IIncrementalGenerator {
         foreach (var idx in table.Indexes) sb.AppendLine($"        this.{IndexFieldName(idx)} = {IndexFieldName(idx)};");
     }
 
-    static private void EmitFindMethod(StringBuilder sb, TableModel table, string ownerSimpleName) {
-        var row = table.RowTypeFullName;
-        var key = table.PrimaryKeyTypeFullName;
-        var mutatorName = RowMutatorName(table, ownerSimpleName);
-        sb.AppendLine($"    public QuerySingle<{row}, {mutatorName}> {table.PrimaryKeyAccessor}({key} id) => new(storage, primaryIndex.GetOffset(id), ref rowMutator);");
-        sb.AppendLine();
-    }
-
     static private void EmitIterMethod(StringBuilder sb, TableModel table, string ownerSimpleName) {
         var row = table.RowTypeFullName;
-        var mutatorName = RowMutatorName(table, ownerSimpleName);
-        sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Iter() {{");
+        sb.AppendLine($"    public QuerySet<{row}> Iter() {{");
         sb.AppendLine("        var count = storage.Count;");
         sb.AppendLine("        using var offsetsBuilder = StackArrayPoolContainerBuilder<int>.Create(count);");
         sb.AppendLine("        for (var i = 0; i < count; i++) offsetsBuilder.Add(i);");
-        sb.AppendLine($"        return new QuerySet<{row}, {mutatorName}>(storage, offsetsBuilder.Build().Unwrap(), ref rowMutator);");
+        sb.AppendLine($"        return new QuerySet<{row}>(storage, offsetsBuilder.Build().Unwrap(), rowMutator);");
         sb.AppendLine("    }");
         sb.AppendLine();
     }
 
     static private string RowMutatorName(TableModel table, string ownerSimpleName) => $"{ownerSimpleName}{table.Accessor}RowMutator";
+    static private string PrimaryIndexOpsClassName(TableModel table, string ownerSimpleName) => $"{ownerSimpleName}{table.Accessor}PrimaryIndexOps";
     static private string IndexCollectionName(TableModel table, string ownerSimpleName) => $"{ownerSimpleName}{table.Accessor}IndexCollection";
-    static private string IndexAccessorClassName(TableModel table, IndexModel idx, string ownerSimpleName) =>
-        $"{ownerSimpleName}{table.Accessor}{idx.AccessorName}IndexOps";
+    static private string IndexAccessorClassName(TableModel table, IndexModel idx, string ownerSimpleName) => $"{ownerSimpleName}{table.Accessor}{idx.AccessorName}IndexOps";
+
+    static private void EmitIndexAccessorClass(
+        StringBuilder sb, string className, string row, string mutatorName, string indexType,
+        string indexField, string keyType, string parameters, string keyExpr, bool isUnique, bool isRanged) {
+        sb.AppendLine($"public sealed class {className} {{");
+        sb.AppendLine($"    private readonly DenseArray<{row}> storage;");
+        sb.AppendLine($"    private readonly {mutatorName} rowMutator;");
+        sb.AppendLine($"    private readonly {indexType} {indexField};");
+        sb.AppendLine();
+        sb.AppendLine($"    public {className}(DenseArray<{row}> storage, {mutatorName} rowMutator, {indexType} {indexField}) {{");
+        sb.AppendLine("        this.storage = storage;");
+        sb.AppendLine("        this.rowMutator = rowMutator;");
+        sb.AppendLine($"        this.{indexField} = {indexField};");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine(isUnique
+            ? $"    public QuerySingle<{row}> Find({parameters}) => new(storage, {indexField}.GetOffset({keyExpr}), rowMutator);"
+            : $"    public QuerySet<{row}> Find({parameters}) => new(storage, {indexField}.GetOffsets({keyExpr}), rowMutator);");
+        sb.AppendLine($"    public QuerySet<{row}> Iter() => new(storage, {indexField}.GetOffsetsIter(), rowMutator);");
+        sb.AppendLine($"    public QuerySet<{row}> Except({parameters}) => new(storage, {indexField}.GetOffsetsExcept({keyExpr}), rowMutator);");
+        if (isRanged) {
+            sb.AppendLine($"    public QuerySet<{row}> Range({keyType} from, {keyType} to) => new(storage, {indexField}.GetOffsetsRange(from, to), rowMutator);");
+            sb.AppendLine($"    public QuerySet<{row}> Gt({keyType} value) => new(storage, {indexField}.GetOffsetsGt(value), rowMutator);");
+            sb.AppendLine($"    public QuerySet<{row}> Gte({keyType} value) => new(storage, {indexField}.GetOffsetsGte(value), rowMutator);");
+            sb.AppendLine($"    public QuerySet<{row}> Lt({keyType} value) => new(storage, {indexField}.GetOffsetsLt(value), rowMutator);");
+            sb.AppendLine($"    public QuerySet<{row}> Lte({keyType} value) => new(storage, {indexField}.GetOffsetsLte(value), rowMutator);");
+        }
+        sb.AppendLine("}");
+    }
 
     static private void EmitIndexWiringFields(StringBuilder sb, TableModel table, string ownerSimpleName) {
-        sb.AppendLine($"    private {RowMutatorName(table, ownerSimpleName)} rowMutator;");
+        sb.AppendLine($"    private readonly {RowMutatorName(table, ownerSimpleName)} rowMutator;");
+        sb.AppendLine($"    public {PrimaryIndexOpsClassName(table, ownerSimpleName)} Primary {{ get; }}");
         if (table.Indexes.Length == 0) return;
         sb.AppendLine($"    public {IndexCollectionName(table, ownerSimpleName)} Idx {{ get; }}");
     }
 
     static private void EmitIndexWiringConstruction(StringBuilder sb, TableModel table, string ownerSimpleName) {
         sb.AppendLine($"        rowMutator = new {RowMutatorName(table, ownerSimpleName)}(this);");
+        sb.AppendLine($"        Primary = new {PrimaryIndexOpsClassName(table, ownerSimpleName)}(storage, rowMutator, primaryIndex);");
         if (table.Indexes.Length == 0) return;
         sb.Append($"        Idx = new {IndexCollectionName(table, ownerSimpleName)}(storage, rowMutator");
         foreach (var idx in table.Indexes) sb.Append($", {IndexFieldName(idx)}");
@@ -585,7 +602,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var collectionName = IndexCollectionName(table, ownerSimpleName);
 
         sb.AppendLine();
-        sb.AppendLine($"public readonly struct {mutatorName} : IRowMutator<{row}> {{");
+        sb.AppendLine($"public sealed class {mutatorName} : IRowMutator<{row}> {{");
         sb.AppendLine($"    private readonly {opsName} table;");
         sb.AppendLine($"    public {mutatorName}({opsName} table) {{ this.table = table; }}");
         sb.AppendLine($"    public void Update({row} original, {row} newRow) => table.Update(original.{table.PrimaryKeyName}, newRow);");
@@ -593,42 +610,39 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    public {row} WithSamePrimaryKey({row} original, {row} newRow) => newRow with {{ {table.PrimaryKeyName} = original.{table.PrimaryKeyName} }};");
         sb.AppendLine("}");
 
+        sb.AppendLine();
+
+        EmitIndexAccessorClass(
+            sb,
+            PrimaryIndexOpsClassName(table, ownerSimpleName),
+            row,
+            mutatorName,
+            PrimaryIndexType(table),
+            "primaryIndex",
+            table.PrimaryKeyTypeFullName,
+            $"{table.PrimaryKeyTypeFullName} id",
+            "id",
+            isUnique: true,
+            isRanged: IsRangedIndex(table.PrimaryKeyKind, Uniqueness.Unique));
+
         if (table.Indexes.Length == 0) return;
 
         foreach (var idx in table.Indexes) {
-            var className = IndexAccessorClassName(table, idx, ownerSimpleName);
-            var indexType = ConcreteIndexType(idx);
-            var keyType = KeyType(idx);
-            var parameters = string.Join(", ", idx.Fields.Select(f => $"{f.FieldTypeFullName} {Camel(f.FieldName)}"));
-            var keyExpr = idx.Fields.Length == 1
-                ? Camel(idx.Fields[0].FieldName)
-                : $"({string.Join(", ", idx.Fields.Select(f => Camel(f.FieldName)))})";
-
+            EmitIndexAccessorClass(
+                sb,
+                IndexAccessorClassName(table, idx, ownerSimpleName),
+                row,
+                mutatorName,
+                ConcreteIndexType(idx),
+                IndexFieldName(idx),
+                KeyType(idx),
+                string.Join(", ", idx.Fields.Select(f => $"{f.FieldTypeFullName} {Camel(f.FieldName)}")),
+                idx.Fields.Length == 1
+                    ? Camel(idx.Fields[0].FieldName)
+                    : $"({string.Join(", ", idx.Fields.Select(f => Camel(f.FieldName)))})",
+                idx.Uniqueness == Uniqueness.Unique,
+                IsRangedIndex(idx));
             sb.AppendLine();
-            sb.AppendLine($"public sealed class {className} {{");
-            sb.AppendLine($"    private readonly DenseArray<{row}> storage;");
-            sb.AppendLine($"    private {mutatorName} rowMutator;");
-            sb.AppendLine($"    private readonly {indexType} idx;");
-            sb.AppendLine();
-            sb.AppendLine($"    public {className}(DenseArray<{row}> storage, {mutatorName} rowMutator, {indexType} idx) {{");
-            sb.AppendLine("        this.storage = storage;");
-            sb.AppendLine("        this.rowMutator = rowMutator;");
-            sb.AppendLine("        this.idx = idx;");
-            sb.AppendLine("    }");
-            sb.AppendLine();
-            sb.AppendLine(idx.Uniqueness == Uniqueness.Unique
-                ? $"    public QuerySingle<{row}, {mutatorName}> Find({parameters}) => new(storage, idx.GetOffset({keyExpr}), ref rowMutator);"
-                : $"    public QuerySet<{row}, {mutatorName}> Find({parameters}) => new(storage, idx.GetOffsets({keyExpr}), ref rowMutator);");
-            sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Iter() => new(storage, idx.GetOffsetsIter(), ref rowMutator);");
-            sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Except({parameters}) => new(storage, idx.GetOffsetsExcept({keyExpr}), ref rowMutator);");
-            if (IsRangedIndex(idx)) {
-                sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Range({keyType} from, {keyType} to) => new(storage, idx.GetOffsetsRange(from, to), ref rowMutator);");
-                sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Gt({keyType} value) => new(storage, idx.GetOffsetsGt(value), ref rowMutator);");
-                sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Gte({keyType} value) => new(storage, idx.GetOffsetsGte(value), ref rowMutator);");
-                sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Lt({keyType} value) => new(storage, idx.GetOffsetsLt(value), ref rowMutator);");
-                sb.AppendLine($"    public QuerySet<{row}, {mutatorName}> Lte({keyType} value) => new(storage, idx.GetOffsetsLte(value), ref rowMutator);");
-            }
-            sb.AppendLine("}");
         }
 
         sb.AppendLine();
@@ -657,10 +671,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"        changes.Add(new(ChangeKind.Insert, row.{table.PrimaryKeyName}, row));");
         sb.AppendLine("        Dirty = true;");
         sb.AppendLine("    }");
+        sb.AppendLine();
         sb.AppendLine($"    public void Update({key} id, {row} newRow) {{");
         sb.AppendLine("        changes.Add(new(ChangeKind.Update, id, newRow));");
         sb.AppendLine("        Dirty = true; ");
         sb.AppendLine("    }");
+        sb.AppendLine();
         sb.AppendLine($"    public void Delete({key} id) {{");
         sb.AppendLine("        changes.Add(new(ChangeKind.Delete, id, default));");
         sb.AppendLine("        Dirty = true;");
@@ -746,7 +762,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var key = table.PrimaryKeyTypeFullName;
         var pkField = table.Fields.First(f => f.FieldName == table.PrimaryKeyName);
 
-        sb.AppendLine();
         sb.AppendLine($"    internal static byte[] SerializeRow({row} row) {{");
         sb.AppendLine("        var bufferWriter = new PooledBufferWriter(256);");
         sb.AppendLine("        var writerState = MemoryPackWriterOptionalStatePool.Rent(null);");
@@ -833,7 +848,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        EmitFindMethod(sb, table, ownerSimpleName);
         EmitIterMethod(sb, table, ownerSimpleName);
         EmitStagingMethods(sb, table);
         EmitRawSerializer(sb, table);
@@ -961,7 +975,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        EmitFindMethod(sb, table, ownerSimpleName);
         EmitIterMethod(sb, table, ownerSimpleName);
         EmitStagingMethods(sb, table);
         EmitRawSerializer(sb, table);
@@ -1369,12 +1382,20 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static internal string Camel(string name) => name.Length == 0 ? name : char.ToLowerInvariant(name[0]) + name.Substring(1);
     
-    static bool IsRangedIndex(IndexModel indexModel) {
-        return indexModel.Kind is IndexKind.BTree;
+    static private bool IsRangedIndex(IndexModel indexModel) {
+        return IsRangedIndex(indexModel.Kind, indexModel.Uniqueness);
     }
     
-    static bool IsMultiReturnButNotRangedIndex(IndexModel indexModel) {
-        return (indexModel.Kind, indexModel.Uniqueness) switch {
+    static private bool IsRangedIndex(IndexKind kind, Uniqueness _) {
+        return kind is IndexKind.BTree;
+    }
+    
+    static private bool IsMultiReturnButNotRangedIndex(IndexModel indexModel) {
+        return IsMultiReturnButNotRangedIndex(indexModel.Kind, indexModel.Uniqueness);
+    }
+    
+    static private bool IsMultiReturnButNotRangedIndex(IndexKind kind, Uniqueness uniqueness) {
+        return (kind, uniqueness) switch {
             (IndexKind.Hash, Uniqueness.NonUnique) => true,
             _ => false
         };
@@ -1389,7 +1410,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         string primaryKeyName,
         string primaryKeyTypeFullName,
         IndexKind primaryKeyKind,
-        string primaryKeyAccessor,
         string accessor,
         int chunkSize,
         bool evictable,
@@ -1406,7 +1426,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public string PrimaryKeyName { get; } = primaryKeyName;
         public string PrimaryKeyTypeFullName { get; } = primaryKeyTypeFullName;
         public IndexKind PrimaryKeyKind { get; } = primaryKeyKind;
-        public string PrimaryKeyAccessor { get; } = primaryKeyAccessor;
         public string Accessor { get; } = accessor;
         public int ChunkSize { get; } = chunkSize;
         public bool Evictable { get; } = evictable;

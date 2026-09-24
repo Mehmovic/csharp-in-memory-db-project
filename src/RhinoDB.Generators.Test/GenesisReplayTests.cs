@@ -32,8 +32,8 @@ public class GenesisReplayTests {
         // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
         // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
         public static class TestHelpers {
-            public static bool ClubFindIsOk(GameDbClubOps ops, int id) => ops.Find(id).HasRow();
-            public static int ClubRating(GameDbClubOps ops, int id) => ops.Find(id).Get().Unwrap().Rating;
+            public static bool ClubFindIsOk(GameDbClubOps ops, int id) => ops.Primary.Find(id).HasRow();
+            public static int ClubRating(GameDbClubOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Rating;
         }
         """;
 

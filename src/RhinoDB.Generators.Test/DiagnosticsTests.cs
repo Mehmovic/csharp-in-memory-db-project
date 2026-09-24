@@ -54,31 +54,6 @@ public class DiagnosticsTests {
     }
 
     [Test]
-    public void EmptyPrimaryKeyAccessor_ReportsRHINO002() {
-        const string source = """
-            using MemoryPack;
-            using MessagePack;
-            using RhinoDB.Core.Tables;
-            using RhinoDB.Lib.Execution;
-
-            namespace TestNs;
-
-            [Database]
-            public partial class EmptyPkAccessorDb : DbContext<EmptyPkAccessorDbTransaction> { }
-
-            [Table(TableKind.Instant, typeof(EmptyPkAccessorDb))]
-            [MemoryPackable(GenerateType.VersionTolerant)]
-            [MessagePackObject]
-            public readonly partial record struct Widget(
-                [PrimaryKey(Accessor = "")] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
-                [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
-            """;
-
-        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
-        Assert.That(ex!.Message, Does.Contain("RHINO002"));
-    }
-
-    [Test]
     public void EmptyTableAccessor_ReportsRHINO002() {
         const string source = """
             using MemoryPack;
@@ -279,7 +254,7 @@ public class DiagnosticsTests {
     }
 
     [Test]
-    public void IndexAccessorNamedLikeThePrimaryKeyAccessor_ReportsRHINO013() {
+    public void IndexAccessorNamedPrimary_ReportsRHINO013() {
         const string source = """
             using MemoryPack;
             using MessagePack;
@@ -296,11 +271,11 @@ public class DiagnosticsTests {
             [MessagePackObject]
             public readonly partial record struct Player(
                 [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
-                [Index(IndexKind.Hash, Uniqueness.NonUnique, Accessor = "Find")] [property: MemoryPackOrder(1)] [property: Key(1)] int ClubId);
+                [Index(IndexKind.Hash, Uniqueness.NonUnique, Accessor = "Primary")] [property: MemoryPackOrder(1)] [property: Key(1)] int ClubId);
             """;
 
-        // The primary key accessor defaults to "Find" - an index accessor of the
-        // same name would emit a second Find(int) on the ops class.
+        // The primary key is exposed through the generated Primary member - an
+        // index accessor of the same name would collide with it.
         var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
         Assert.That(ex!.Message, Does.Contain("RHINO013"));
     }

@@ -45,8 +45,8 @@ public class LoaderTests {
         // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
         // boundary (see GeneratorTestHost.InvokeHelper) - typed helpers instead.
         public static class TestHelpers {
-            public static bool ClubFindIsOk(GameDbClubOps ops, int id) => ops.Find(id).HasRow();
-            public static bool AccountFindIsOk(GameDbAccountOps ops, int id) => ops.Find(id).HasRow();
+            public static bool ClubFindIsOk(GameDbClubOps ops, int id) => ops.Primary.Find(id).HasRow();
+            public static bool AccountFindIsOk(GameDbAccountOps ops, int id) => ops.Primary.Find(id).HasRow();
         }
         """;
 
@@ -208,7 +208,7 @@ public class LoaderTests {
             // QuerySingle is a ref struct and can never cross a dynamic call
             // boundary (see GeneratorTestHost.InvokeHelper) - typed helper instead.
             public static class TestHelpers {
-                public static bool ClubFindIsOk(LeagueDbClubOps ops, int id) => ops.Find(id).HasRow();
+                public static bool ClubFindIsOk(LeagueDbClubOps ops, int id) => ops.Primary.Find(id).HasRow();
             }
             """;
 

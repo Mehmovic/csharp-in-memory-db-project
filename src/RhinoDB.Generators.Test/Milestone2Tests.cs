@@ -51,7 +51,7 @@ public class Milestone2Tests {
             public static bool ShortCodeIsOk(ShopDbClubOps club, string code) => club.Idx.ShortCode.Find(code).Get().IsOk();
             public static int ClubIdCount(ShopDbPlayerOps player, int clubId) { using var r = player.Idx.ClubId.Find(clubId); return r.Count; }
             public static bool HomeAwayIsOk(ShopDbFixtureOps fixture, int awayClubId, int homeClubId) => fixture.Idx.HomeAway.Find(awayClubId, homeClubId).Get().IsOk();
-            public static bool ClubFindIsOk(ShopDbClubOps club, int id) => club.Find(id).HasRow();
+            public static bool ClubFindIsOk(ShopDbClubOps club, int id) => club.Primary.Find(id).HasRow();
         }
         """;
 

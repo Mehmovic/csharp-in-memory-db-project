@@ -33,7 +33,7 @@ public class Milestone5Tests {
         // QuerySet/QuerySingle are ref structs and can never cross a dynamic call
         // boundary (see GeneratorTestHost.InvokeHelper) - typed helper instead.
         public static class TestHelpers {
-            public static bool ClubFindIsOk(ShopDbClubOps club, int id) => club.Find(id).HasRow();
+            public static bool ClubFindIsOk(ShopDbClubOps club, int id) => club.Primary.Find(id).HasRow();
         }
         """;
 

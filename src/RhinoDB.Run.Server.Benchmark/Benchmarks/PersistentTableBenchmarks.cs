@@ -69,7 +69,7 @@ public class PersistentTableBenchmarks {
 
     [Benchmark]
     public ValueTask<Result<PersistentWidget>> Get() =>
-        db.Run<PersistentWidget>((ctx, tx) => tx.PersistentWidget.Find(lookupKey).Get(), PropagationMode.Optimistic);
+        db.Run<PersistentWidget>((ctx, tx) => tx.PersistentWidget.Primary.Find(lookupKey).Get(), PropagationMode.Optimistic);
 
     [Benchmark]
     public ValueTask<Result> InsertOptimistic() {

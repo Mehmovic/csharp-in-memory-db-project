@@ -8,7 +8,7 @@ namespace RhinoDB.Lib.Test.Tables;
 public class QueryTests {
     private readonly record struct TestRow(int Id, string Name);
 
-    private readonly struct RecordingMutator(List<(TestRow Original, TestRow NewRow)> updates, List<TestRow> deletes)
+    private sealed class RecordingMutator(List<(TestRow Original, TestRow NewRow)> updates, List<TestRow> deletes)
         : IRowMutator<TestRow> {
         public void Update(TestRow original, TestRow newRow) => updates.Add((original, newRow));
         public void Delete(TestRow row) => deletes.Add(row);
@@ -35,7 +35,7 @@ public class QueryTests {
         var updates = new List<(TestRow, TestRow)>();
         var deletes = new List<TestRow>();
         var mutator = new RecordingMutator(updates, deletes);
-        using var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(2, 0), ref mutator);
+        using var set = new QuerySet<TestRow>(storage, OffsetsOf(2, 0), mutator);
 
         var rows = set.Get().Unwrap();
 
@@ -48,7 +48,7 @@ public class QueryTests {
     public void Get_WithNoMatches_ReturnsAnEmptySpan() {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var mutator = new RecordingMutator([], []);
-        using var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(), ref mutator);
+        using var set = new QuerySet<TestRow>(storage, OffsetsOf(), mutator);
 
         Assert.That(set.Get().Unwrap().Length, Is.EqualTo(0));
     }
@@ -57,7 +57,7 @@ public class QueryTests {
     public void Get_AfterDispose_ReturnsError() {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var mutator = new RecordingMutator([], []);
-        var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(0), ref mutator);
+        var set = new QuerySet<TestRow>(storage, OffsetsOf(0), mutator);
         set.Dispose();
 
         Assert.That(set.Get().IsError(), Is.True);
@@ -67,7 +67,7 @@ public class QueryTests {
     public void Dispose_CalledTwice_IsSafe() {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var mutator = new RecordingMutator([], []);
-        var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(0), ref mutator);
+        var set = new QuerySet<TestRow>(storage, OffsetsOf(0), mutator);
 
         set.Dispose();
         set.Dispose();
@@ -82,7 +82,7 @@ public class QueryTests {
         var storage = NewStorageWith(new TestRow(1, "Ada"), new TestRow(2, "Bob"));
         var updates = new List<(TestRow Original, TestRow NewRow)>();
         var mutator = new RecordingMutator(updates, []);
-        using var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(0, 1), ref mutator);
+        using var set = new QuerySet<TestRow>(storage, OffsetsOf(0, 1), mutator);
 
         var affected = set.ExecuteUpdate(new TestRow(-1, "Stamped"));
 
@@ -98,7 +98,7 @@ public class QueryTests {
         var storage = NewStorageWith(new TestRow(1, "Ada"), new TestRow(2, "Bob"));
         var updates = new List<(TestRow Original, TestRow NewRow)>();
         var mutator = new RecordingMutator(updates, []);
-        using var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(0, 1), ref mutator);
+        using var set = new QuerySet<TestRow>(storage, OffsetsOf(0, 1), mutator);
 
         var affected = set.ExecuteUpdate(row => row with { Name = row.Name + "!" });
 
@@ -114,7 +114,7 @@ public class QueryTests {
         var storage = NewStorageWith(new TestRow(1, "Ada"), new TestRow(2, "Bob"));
         var deletes = new List<TestRow>();
         var mutator = new RecordingMutator([], deletes);
-        using var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(0, 1), ref mutator);
+        using var set = new QuerySet<TestRow>(storage, OffsetsOf(0, 1), mutator);
 
         var affected = set.ExecuteDelete();
 
@@ -128,7 +128,7 @@ public class QueryTests {
     public void Get_WithAResolvedOffset_ReturnsTheRow() {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var mutator = new RecordingMutator([], []);
-        var single = new QuerySingle<TestRow, RecordingMutator>(storage, 0, ref mutator);
+        var single = new QuerySingle<TestRow>(storage, 0, mutator);
 
         Assert.That(single.Get().Unwrap(), Is.EqualTo(new TestRow(1, "Ada")));
     }
@@ -137,7 +137,7 @@ public class QueryTests {
     public void Get_WithAnErrorOffset_PropagatesTheError() {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var mutator = new RecordingMutator([], []);
-        var single = new QuerySingle<TestRow, RecordingMutator>(storage, Result<int>.Error(DbError.IndexKeyNotFound()), ref mutator);
+        var single = new QuerySingle<TestRow>(storage, Result<int>.Error(DbError.IndexKeyNotFound()), mutator);
 
         Assert.That(single.Get().IsError(), Is.True);
     }
@@ -147,7 +147,7 @@ public class QueryTests {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var updates = new List<(TestRow Original, TestRow NewRow)>();
         var mutator = new RecordingMutator(updates, []);
-        var single = new QuerySingle<TestRow, RecordingMutator>(storage, 0, ref mutator);
+        var single = new QuerySingle<TestRow>(storage, 0, mutator);
 
         var affected = single.ExecuteUpdate(new TestRow(1, "Adaline"));
 
@@ -160,7 +160,7 @@ public class QueryTests {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var updates = new List<(TestRow, TestRow)>();
         var mutator = new RecordingMutator(updates, []);
-        var single = new QuerySingle<TestRow, RecordingMutator>(storage, Result<int>.Error(DbError.IndexKeyNotFound()), ref mutator);
+        var single = new QuerySingle<TestRow>(storage, Result<int>.Error(DbError.IndexKeyNotFound()), mutator);
 
         Assert.That(single.ExecuteUpdate(new TestRow(1, "Adaline")).IsError(), Is.True);
         Assert.That(updates, Is.Empty);
@@ -171,7 +171,7 @@ public class QueryTests {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var deletes = new List<TestRow>();
         var mutator = new RecordingMutator([], deletes);
-        var single = new QuerySingle<TestRow, RecordingMutator>(storage, 0, ref mutator);
+        var single = new QuerySingle<TestRow>(storage, 0, mutator);
 
         var affected = single.ExecuteDelete();
 
@@ -184,7 +184,7 @@ public class QueryTests {
     public void EnumerateRef_ReturnsEveryMatchedRowInOffsetOrder_WithoutCopying() {
         var storage = NewStorageWith(new TestRow(1, "Ada"), new TestRow(2, "Bob"), new TestRow(3, "Cy"));
         var mutator = new RecordingMutator([], []);
-        using var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(2, 0), ref mutator);
+        using var set = new QuerySet<TestRow>(storage, OffsetsOf(2, 0), mutator);
 
         var rows = new List<TestRow>();
         foreach (ref readonly var row in set.GetRefEnumerator().Unwrap()) {
@@ -198,7 +198,7 @@ public class QueryTests {
     public void EnumerateRef_IsALiveView_ReflectsALaterStorageMutation() {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var mutator = new RecordingMutator([], []);
-        using var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(0), ref mutator);
+        using var set = new QuerySet<TestRow>(storage, OffsetsOf(0), mutator);
 
         var enumerator = set.GetRefEnumerator().Unwrap();
         Assert.That(enumerator.MoveNext(), Is.True);
@@ -214,7 +214,7 @@ public class QueryTests {
     public void EnumerateRef_WithNoMatches_YieldsNothing() {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var mutator = new RecordingMutator([], []);
-        using var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(), ref mutator);
+        using var set = new QuerySet<TestRow>(storage, OffsetsOf(), mutator);
 
         var enumerator = set.GetRefEnumerator().Unwrap();
 
@@ -226,7 +226,7 @@ public class QueryTests {
     public void EnumerateRefResult_WhenDisposed_ReturnsQuerySetDisposedError() {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var mutator = new RecordingMutator([], []);
-        var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(0), ref mutator);
+        var set = new QuerySet<TestRow>(storage, OffsetsOf(0), mutator);
         set.Dispose();
 
         var result = set.GetRefEnumerator();
@@ -239,7 +239,7 @@ public class QueryTests {
     public void EnumerateRefResult_WhenLive_UnwrapsToAWalkableEnumerator() {
         var storage = NewStorageWith(new TestRow(1, "Ada"), new TestRow(2, "Bob"));
         var mutator = new RecordingMutator([], []);
-        using var set = new QuerySet<TestRow, RecordingMutator>(storage, OffsetsOf(1), ref mutator);
+        using var set = new QuerySet<TestRow>(storage, OffsetsOf(1), mutator);
 
         var rows = new List<TestRow>();
         var enumerator = set.GetRefEnumerator().Unwrap();
@@ -253,7 +253,7 @@ public class QueryTests {
     public void SingleGetRef_ReturnsTheLiveRowWithoutCopying() {
         var storage = NewStorageWith(new TestRow(1, "Ada"), new TestRow(2, "Bob"));
         var mutator = new RecordingMutator([], []);
-        var single = new QuerySingle<TestRow, RecordingMutator>(storage, 1, ref mutator);
+        var single = new QuerySingle<TestRow>(storage, 1, mutator);
 
         Assert.That(single.HasRow(), Is.True);
         ref readonly var view = ref single.GetRef();
@@ -270,7 +270,7 @@ public class QueryTests {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var mutator = new RecordingMutator([], []);
         var missing = Result<int>.Error(DbError.IndexKeyNotFound());
-        var single = new QuerySingle<TestRow, RecordingMutator>(storage, missing, ref mutator);
+        var single = new QuerySingle<TestRow>(storage, missing, mutator);
 
         Assert.That(single.HasRow(), Is.False);
     }
@@ -280,7 +280,7 @@ public class QueryTests {
         var storage = NewStorageWith(new TestRow(1, "Ada"));
         var mutator = new RecordingMutator([], []);
         var missing = Result<int>.Error(DbError.IndexKeyNotFound());
-        var single = new QuerySingle<TestRow, RecordingMutator>(storage, missing, ref mutator);
+        var single = new QuerySingle<TestRow>(storage, missing, mutator);
 
         // GetRef() must stay guarded by HasRow() - a ref return has no way to report
         // "no row", so bypassing the guard has to fail loudly rather than hand out a

@@ -4,16 +4,14 @@ using RhinoDB.Lib.Storage;
 
 namespace RhinoDB.Lib.Tables;
 
-public ref struct QuerySet<TRow, TMutator>
+public ref struct QuerySet<TRow>
 (
     DenseArray<TRow> storage,
     StackArrayPoolContainer<int> offsets,
-    ref TMutator mutator
+    IRowMutator<TRow> mutator
 ) : IDisposable
-    where TRow : struct
-    where TMutator : struct, IRowMutator<TRow> {
+    where TRow : struct {
     private StackArrayPoolContainer<int> offsets = offsets;
-    private readonly ref TMutator mutator = ref mutator;
     private TRow[] buffer = offsets.Count > 0 ? ArrayPool<TRow>.Shared.Rent(offsets.Count) : [];
 
     public int Count => offsets.Count;
@@ -81,11 +79,7 @@ public ref struct QuerySet<TRow, TMutator>
     private readonly bool IsDisposed() => buffer == null;
 }
 
-public readonly ref struct QuerySingle<TRow, TMutator>(DenseArray<TRow> storage, Result<int> offsetResult, ref TMutator mutator)
-    where TRow : struct
-    where TMutator : struct, IRowMutator<TRow> {
-    private readonly ref TMutator mutator = ref mutator;
-    
+public readonly ref struct QuerySingle<TRow>(DenseArray<TRow> storage, Result<int> offsetResult, IRowMutator<TRow> mutator) where TRow : struct {
     public bool HasRow() => offsetResult.IsOk();
 
     public Result<TRow> Get() => offsetResult.IsError() ? offsetResult.Void() : storage.Get(offsetResult.Unwrap());

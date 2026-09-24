@@ -30,7 +30,10 @@ public class PrimaryKeyKindTests {
         // NOTE: this fixture goes through string.Format, so every literal brace
         // below must be doubled.
         public static class TestHelpers {{
-            public static bool FindIsOk(RankingDbRankingOps ranking, int id) => ranking.Find(id).HasRow();
+            public static bool FindIsOk(RankingDbRankingOps ranking, int id) => ranking.Primary.Find(id).HasRow();
+            public static int PrimaryIterCount(RankingDbRankingOps ranking) {{ using var q = ranking.Primary.Iter(); return q.Count; }}
+            public static int PrimaryRangeCount(RankingDbRankingOps ranking, int from, int to) {{ using var q = ranking.Primary.Range(from, to); return q.Count; }}
+            public static int PrimaryGtCount(RankingDbRankingOps ranking, int value) {{ using var q = ranking.Primary.Gt(value); return q.Count; }}
         }}
         """;
 
@@ -54,5 +57,37 @@ public class PrimaryKeyKindTests {
 
         Assert.That(result.IsOk(), Is.True);
         Assert.That(found, Is.True);
+    }
+
+    [Test]
+    public async Task BTreePrimary_PrimaryIndex_ExposesIterAndRangeQueries() {
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(string.Format(Source, "BTree"));
+        var dbType = asm.GetType("TestNs.RankingDb")!;
+        var txType = asm.GetType("TestNs.RankingDbTransaction")!;
+        var rankingType = asm.GetType("TestNs.Ranking")!;
+        var db = Activator.CreateInstance(dbType)!;
+
+        for (var id = 1; id <= 4; id++) {
+            var row = Activator.CreateInstance(rankingType, id, "R" + id)!;
+            await (Task<Result>)GeneratorTestHost.RunTransactional(
+                db, txType, (ctx, tx) => { ((dynamic)tx).Ranking.Insert((dynamic)row); return Result.Ok(); },
+                PropagationMode.Optimistic);
+        }
+
+        var iterCount = 0;
+        var rangeCount = 0;
+        var gtCount = 0;
+        await (Task<Result>)GeneratorTestHost.RunTransactional(
+            db, txType, (ctx, tx) => {
+                var ops = (object)((dynamic)tx).Ranking;
+                iterCount = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "PrimaryIterCount", ops)!;
+                rangeCount = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "PrimaryRangeCount", ops, 2, 3)!;
+                gtCount = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "PrimaryGtCount", ops, 3)!;
+                return Result.Ok();
+            }, PropagationMode.Optimistic);
+
+        Assert.That(iterCount, Is.EqualTo(4), "Primary.Iter() must reach every row, like the table-level Iter().");
+        Assert.That(rangeCount, Is.EqualTo(2), "A BTree primary key must expose the ordered-index Range surface.");
+        Assert.That(gtCount, Is.EqualTo(1), "Gt() is exclusive of its bound.");
     }
 }
