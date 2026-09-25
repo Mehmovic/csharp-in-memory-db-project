@@ -184,10 +184,22 @@ with all 570 tests green — but it makes every caller's post-`await`
 continuation execute **on the execution-loop thread**, so a caller that
 blocks, does heavy work, or sync-waits on the same database's context would
 stall or deadlock it. **Decision: keep `RunContinuationsAsynchronously =
-true`** — actor-thread isolation is worth 32 B/op and ~850 ns. Hot paths
-therefore submit in batches and await at the end
-(`SubmitBatch_NoAwait_*`: ~185 ns/op, 1-2 B), never await
-operation-by-operation on a per-tick path.
+true`** — actor-thread isolation is worth 32 B/op and ~850 ns.
+**Re-measured 2026-09-24 (DefaultJob, 10k rows, 99.9% CI ±1.6%):
+`Enqueue_NoOp` 3.404 μs / 32 B, `Enqueue_Find` 3.395 μs / 32 B** — the
+per-operation cost is confirmed as a stable ~3.4 μs round trip, not noise
+(the earlier ShortRun figures carried ±8 μs error bars). This is the
+number a single-shot caller such as a transformer RPC pays.
+
+**No `RunSync`/`RunBatch` API (2026-09-24).** Both were prototyped and
+measured, then dropped: a direct-poll synchronous wait over
+`IValueTaskSource` avoids the Task/continuation entirely, but pays for it
+with a per-instance `ManualResetEventSlim` that has to be signalled from
+`Complete()` — i.e. it moves cost onto the hot asynchronous path to
+serve a synchronous caller. With no transformer that needs to avoid
+`await` in hand, `ValueTask` + `await` remains the only read-path
+surface, and batching was dropped for the same reason: no production
+caller exists for either. Revisit only when a real caller does.
 
 ## 4. No LINQ on the hot path
 
