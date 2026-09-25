@@ -1,6 +1,4 @@
 using System.Collections.Immutable;
-using System.Text;
-
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -54,7 +52,7 @@ static public class CompilationWalker {
         return new DatabaseContractDescriptor { Databases = databases, Tables = tables };
     }
 
-    static IEnumerable<INamedTypeSymbol> AllNamedTypes(Compilation compilation) {
+    static private IEnumerable<INamedTypeSymbol> AllNamedTypes(Compilation compilation) {
         var seen = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
         foreach (var tree in compilation.SyntaxTrees) {
             var model = compilation.GetSemanticModel(tree);
@@ -64,13 +62,12 @@ static public class CompilationWalker {
         }
     }
 
-    static string? StringNamedArg(AttributeData attribute, string name) {
+    static private string? StringNamedArg(AttributeData attribute, string name) {
         foreach (var kv in attribute.NamedArguments)
             if (kv.Key == name)
                 return (string?)kv.Value.Value;
         return null;
     }
 
-    static uint ComputeTableId(string accessor) =>
-        Encoding.UTF8.GetBytes(accessor).Aggregate(2166136261u, (current, b) => (current ^ b) * 16777619u);
+    static private uint ComputeTableId(string accessor) => TableIdHash.Compute(accessor);
 }

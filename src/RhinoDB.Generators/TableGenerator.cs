@@ -1,9 +1,5 @@
-using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.IO;
-using System.Linq;
 using System.Text;
-
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -633,10 +629,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private string IndexFieldName(IndexModel idx) => $"{Camel(idx.AccessorName)}Index";
 
-    static private uint ComputeTableId(string accessor) {
-        return Encoding.UTF8.GetBytes(accessor)
-            .Aggregate(2166136261u, (current, b) => (current ^ b) * 16777619u);
-    }
+    static private uint ComputeTableId(string accessor) => TableIdHash.Compute(accessor);
 
     static private string EmitOpsClass(TableModel table, DatabaseModel database, DatabaseContractDescriptor? descriptor) =>
         table.Kind == TableKind.Persistent

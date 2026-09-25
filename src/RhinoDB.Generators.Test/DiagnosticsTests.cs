@@ -164,8 +164,8 @@ public class DiagnosticsTests {
         // here as a precondition, so the pair can never silently stop colliding. A collision would
         // make ColdStore.OpenTable overwrite a tableDbisById entry silently and would misroute WAL
         // recovery data, so it has to fail the build rather than surface at runtime.
-        Assert.That(RhinoDB.Lib.Durability.TableIdHash.Compute("Tblj3vu"), Is.EqualTo(1420640043u), "Precondition: this pair must collide under the runtime hash.");
-        Assert.That(RhinoDB.Lib.Durability.TableIdHash.Compute("Tbl4tea"), Is.EqualTo(1420640043u), "Precondition: this pair must collide under the runtime hash.");
+        Assert.That(RhinoDB.SchemaContracts.TableIdHash.Compute("Tblj3vu"), Is.EqualTo(1420640043u), "Precondition: this pair must collide under the runtime hash.");
+        Assert.That(RhinoDB.SchemaContracts.TableIdHash.Compute("Tbl4tea"), Is.EqualTo(1420640043u), "Precondition: this pair must collide under the runtime hash.");
 
         const string source = """
             using MemoryPack;

@@ -3,6 +3,7 @@ using RhinoDB.Core;
 using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Execution;
 using RhinoDB.Lib.Tables;
+using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Lib.Cold.Test;
 

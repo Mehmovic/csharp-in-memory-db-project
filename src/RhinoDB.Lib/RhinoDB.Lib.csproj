@@ -16,6 +16,7 @@
     <ItemGroup>
         <ProjectReference Include="..\RhinoDB.Core\RhinoDB.Core.csproj"/>
         <ProjectReference Include="..\RhinoDB.Native\RhinoDB.Native.csproj"/>
+        <ProjectReference Include="..\RhinoDB.SchemaContracts\RhinoDB.SchemaContracts.csproj"/>
     </ItemGroup>
 
 </Project>

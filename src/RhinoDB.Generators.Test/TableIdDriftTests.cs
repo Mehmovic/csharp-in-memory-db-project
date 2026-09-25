@@ -1,4 +1,4 @@
-using RhinoDB.Lib.Durability;
+using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Generators.Test;
 
