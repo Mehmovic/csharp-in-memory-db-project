@@ -1,0 +1,21 @@
+{
+  "Databases": [],
+  "TypeRevisions": {},
+  "CustomTypes": {},
+  "Tables": [
+    {
+      "DatabaseFullName": "global::CreateSampleProject.SampleDb",
+      "Accessor": "Widget",
+      "RowTypeFullName": "global::CreateSampleProject.Widget",
+      "Kind": "Persistent",
+      "TableIdHash": 0,
+      "Revision": 0,
+      "PrimaryKey": { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" },
+      "Fields": [
+        { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" },
+        { "Path": "Name", "TypeFullName": "int", "Kind": "Unmanaged" }
+      ],
+      "Indexes": []
+    }
+  ]
+}

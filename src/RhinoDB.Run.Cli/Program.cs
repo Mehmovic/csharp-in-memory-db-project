@@ -1,0 +1,43 @@
+using Microsoft.Build.Locator;
+
+namespace RhinoDB.Run.Cli;
+
+static class Program {
+    static int Main(string[] args) {
+        MSBuildLocator.RegisterDefaults();
+        return Dispatch(args);
+    }
+
+    // Split from Main so MSBuildLocator.RegisterDefaults() runs before the JIT needs to resolve any
+    // Microsoft.Build.*/Microsoft.CodeAnalysis.MSBuild type reference - those assemblies don't exist at a
+    // fixed, discoverable location until MSBuildLocator finds the installed SDK and registers it. Dispatch
+    // itself, and everything it calls into (RhinoDB.Tools.Migration included), must stay out of Main's own
+    // method body for the same reason.
+    static int Dispatch(string[] args) {
+        if (args.Length == 0) {
+            PrintUsage();
+            return 1;
+        }
+
+        return args[0] switch {
+            "migration" => RhinoDB.Tools.Migration.MigrationTool.Run(args[1..]),
+            _ => Unknown(args[0]),
+        };
+    }
+
+    static int Unknown(string tool) {
+        Console.Error.WriteLine($"rhinodb: unknown command '{tool}'");
+        PrintUsage();
+        return 1;
+    }
+
+    static void PrintUsage() {
+        Console.WriteLine("""
+            rhinodb - RhinoDB's unified CLI
+
+            Usage:
+              rhinodb migration status [--project <path>]
+              rhinodb migration create <Name> [--project <path>]
+            """);
+    }
+}
