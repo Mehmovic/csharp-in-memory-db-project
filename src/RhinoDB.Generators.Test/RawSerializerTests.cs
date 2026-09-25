@@ -1,4 +1,4 @@
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // TableGenerator's hand-rolled Raw/positional serializer (SerializeRow/DeserializeRow/SerializeKey/
 // DeserializeKey) - field-by-field via MemoryPack's own low-level writer/reader primitives, no

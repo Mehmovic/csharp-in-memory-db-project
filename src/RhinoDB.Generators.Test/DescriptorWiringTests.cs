@@ -1,6 +1,6 @@
 using System.Linq;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // AdditionalTextsProvider wiring for Descriptor.json (Phase 2, step 13) + RHINO019/020/023 (step 14).
 public class DescriptorWiringTests {

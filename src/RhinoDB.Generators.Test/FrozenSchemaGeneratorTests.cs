@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // [FrozenSchema(Revision=N)] - a captured old row shape, decoded purely via the hand-rolled Raw pipeline
 // (no [MemoryPackable]/[MessagePackObject] required, unlike [Table]/[CustomType] - a frozen row never

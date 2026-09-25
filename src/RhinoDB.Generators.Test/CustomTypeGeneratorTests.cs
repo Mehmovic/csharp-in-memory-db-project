@@ -1,4 +1,4 @@
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // CustomTypeGenerator (task #85): [CustomType] gives a standalone, non-[Table] record struct the same
 // three-pipeline treatment a table row gets - a composable hand-rolled Raw writer/reader plus

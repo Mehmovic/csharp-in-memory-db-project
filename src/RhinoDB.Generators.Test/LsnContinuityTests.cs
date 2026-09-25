@@ -5,7 +5,7 @@ using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Proves the LSN-ownership refactor's cross-cutting invariants end to end (tasks #75-79, redesigned
 // per-table in task #84): the union of every ring-enabled table's OWN ChangeRingBuffer sees every dirty

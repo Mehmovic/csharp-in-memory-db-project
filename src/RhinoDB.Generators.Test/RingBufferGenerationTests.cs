@@ -5,7 +5,7 @@ using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Execution;
 using RhinoDB.Lib.Tables;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Proves EmitRingBufferRecordCall's wiring (task #79) under the per-table ring buffer redesign (task
 // #84): Insert/Update/Delete on both an Instant and a Persistent table push a matching entry into that

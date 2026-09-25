@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace RhinoDB.Test.Tools.Migration;
+namespace RhinoDB.Tools.Migration.Test;
 
 // The one real end-to-end case (per Phase 3, step 17): drives a genuine MSBuildWorkspace load against a
 // small fixture .csproj checked into this project, through the actual MigrationTool.Run entry point - not

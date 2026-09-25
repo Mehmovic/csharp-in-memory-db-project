@@ -6,7 +6,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
-        <RootNamespace>RhinoDB.Test.Tools.Migration</RootNamespace>
+        <RootNamespace>RhinoDB.Tools.Migration.Test</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

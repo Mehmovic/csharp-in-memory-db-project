@@ -2,7 +2,7 @@ using RhinoDB.Core;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // LoadFromGenesis reconstructs in-memory state purely from WAL history (archived + live tail),
 // entirely bypassing libmdbx and the live WAL - see WalArchiveTests.cs for the underlying

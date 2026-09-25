@@ -2,7 +2,7 @@ using RhinoDB.Core;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Milestone 3: TableKind.Persistent + .Storage (Load/Evict/Peek) wired
 // through the generated Apply() path. These tests exercise real

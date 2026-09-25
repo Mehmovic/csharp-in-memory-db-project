@@ -1,4 +1,4 @@
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // [Table].Evictable (default false, Persistent-kind only) - false means
 // .Storage isn't generated on that table's Ops class at all (compile-time

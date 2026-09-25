@@ -2,7 +2,7 @@ using RhinoDB.Core;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // PersistentTable<TKey,TRow> is gone from the codebase entirely (retired
 // 2026-09-12, the same "hand-prove then delete the scaffold" treatment

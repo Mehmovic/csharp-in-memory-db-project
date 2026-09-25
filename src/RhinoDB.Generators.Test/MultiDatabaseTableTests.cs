@@ -1,7 +1,7 @@
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 public class MultiDatabaseTableTests {
     private const string Source = """

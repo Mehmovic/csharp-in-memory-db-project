@@ -1,7 +1,7 @@
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Ports the staging-semantics edge cases ChangeSetTests.cs proved against the
 // now-superseded hand-written ChangeSet<TKey,TRow> onto the real generated

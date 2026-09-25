@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using RhinoDB.PreBuild;
 
-namespace RhinoDB.Test.PreBuild;
+namespace RhinoDB.PreBuild.Test;
 
 public class PackIdNumbererTests {
     static ParsedShorthandField Field(string name, int? explicitPackId = null) =>

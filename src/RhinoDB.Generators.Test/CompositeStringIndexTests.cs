@@ -2,7 +2,7 @@ using System.Reflection;
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Composite indexes whose second column is a string. A composite key is just TKey
 // being a value tuple, but a string element adds: reference-type equality on the

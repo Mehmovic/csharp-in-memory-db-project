@@ -1,6 +1,4 @@
-using RhinoDB.PreBuild;
-
-namespace RhinoDB.Test.PreBuild;
+namespace RhinoDB.PreBuild.Test;
 
 public class ContractViolationCheckerTests {
     static ParsedShorthandFile ParseTable(string fields) => ShorthandParser.Parse($$"""

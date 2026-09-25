@@ -1,6 +1,6 @@
 using RhinoDB.SchemaContracts;
 
-namespace RhinoDB.Test.SchemaContracts;
+namespace RhinoDB.SchemaContracts.Test;
 
 public class ContractDescriptorJsonTests {
     static DatabaseContractDescriptor FullDescriptor() {

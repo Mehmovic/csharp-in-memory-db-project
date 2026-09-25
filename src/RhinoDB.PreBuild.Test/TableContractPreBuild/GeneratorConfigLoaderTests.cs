@@ -1,6 +1,6 @@
 using RhinoDB.PreBuild;
 
-namespace RhinoDB.Test.PreBuild;
+namespace RhinoDB.PreBuild.Test;
 
 public class GeneratorConfigLoaderTests {
     string tempDir = "";

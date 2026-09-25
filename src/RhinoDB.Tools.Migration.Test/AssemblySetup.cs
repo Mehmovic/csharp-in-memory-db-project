@@ -1,6 +1,6 @@
 using Microsoft.Build.Locator;
 
-namespace RhinoDB.Test.Tools.Migration;
+namespace RhinoDB.Tools.Migration.Test;
 
 // MSBuildLocator.RegisterDefaults() must run before any code in this assembly touches
 // Microsoft.Build.*/Microsoft.CodeAnalysis.MSBuild types - NUnit guarantees OneTimeSetUp completes before

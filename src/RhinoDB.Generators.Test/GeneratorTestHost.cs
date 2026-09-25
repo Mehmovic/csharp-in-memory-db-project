@@ -10,7 +10,7 @@ using RhinoDB.Generators;
 using RhinoDB.Lib.Execution;
 using RhinoDB.Lib.Tables;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Compiles a small source snippet through the real TableGenerator, emits it to
 // an in-memory assembly, and loads it into a collectible AssemblyLoadContext -

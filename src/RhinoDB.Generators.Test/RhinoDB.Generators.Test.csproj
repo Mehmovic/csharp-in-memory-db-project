@@ -6,7 +6,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
-        <RootNamespace>RhinoDB.Test.Generators</RootNamespace>
+        <RootNamespace>RhinoDB.Generators.Test</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

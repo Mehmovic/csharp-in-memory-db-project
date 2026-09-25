@@ -1,6 +1,6 @@
 using RhinoDB.Tools.Migration;
 
-namespace RhinoDB.Test.Tools.Migration;
+namespace RhinoDB.Tools.Migration.Test;
 
 public class CompilationWalkerTests {
     [Test]

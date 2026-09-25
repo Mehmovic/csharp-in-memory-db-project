@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using RhinoDB.PreBuild;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Proves ShorthandExpander's output is accepted by TableGenerator/CustomTypeGenerator - real attributed
 // source with no RHINO015/016/017 diagnostics, not a snapshot/string comparison. Deliberately uses plain

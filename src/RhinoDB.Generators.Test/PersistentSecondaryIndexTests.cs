@@ -2,7 +2,7 @@ using RhinoDB.Core;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Secondary indexes on Persistent-kind tables (the RHINO006 restriction is
 // gone). As of 2026-09-12, Persistent-kind Ops classes inline their own

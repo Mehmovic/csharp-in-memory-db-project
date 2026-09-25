@@ -2,7 +2,7 @@ using RhinoDB.Core;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // {Db}Loader.LoadAsync eager-loads every non-Evictable Persistent-kind
 // table's entire cold-storage contents at startup - the only way such a

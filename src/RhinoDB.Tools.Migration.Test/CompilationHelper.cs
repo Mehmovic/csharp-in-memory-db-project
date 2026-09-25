@@ -5,7 +5,7 @@ using Microsoft.CodeAnalysis.CSharp;
 
 using RhinoDB.Core.Tables;
 
-namespace RhinoDB.Test.Tools.Migration;
+namespace RhinoDB.Tools.Migration.Test;
 
 // Minimal in-memory compilation over a source snippet using the REAL RhinoDB.Core.Tables attributes
 // (not stubs) - CompilationWalker's own checks are name-based like SchemaWalk's, but referencing the real

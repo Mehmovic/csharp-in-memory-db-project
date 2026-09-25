@@ -1,6 +1,6 @@
 using RhinoDB.Lib.Durability;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // The generator emits `private const uint TableId = <FNV-1a of Accessor>` (computed at compile time),
 // while the runtime computes TableIdHash.Compute(accessor) from the accessor string handed to

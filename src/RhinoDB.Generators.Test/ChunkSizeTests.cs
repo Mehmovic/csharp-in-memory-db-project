@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // [Table(...)].ChunkSize sets the generated DenseArray<TRow> storage field's
 // chunk size (default 4096, rounded up to the next power of 2 by DenseArray

@@ -1,6 +1,6 @@
 using RhinoDB.SchemaContracts;
 
-namespace RhinoDB.Test.SchemaContracts;
+namespace RhinoDB.SchemaContracts.Test;
 
 public class DescriptorBuilderTests {
     // Shared stub attributes matching the exact fully-qualified names SchemaWalk checks for by string -

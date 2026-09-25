@@ -1,6 +1,6 @@
 using Microsoft.CodeAnalysis;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Every rule TableGenerator relies on is a diagnostic, not a silent
 // assumption or a generator crash - see the file-level comment on

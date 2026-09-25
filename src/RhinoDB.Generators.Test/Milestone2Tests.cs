@@ -1,7 +1,7 @@
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Milestone 2: secondary indexes (unique + non-unique) wired into the
 // generated Ops class, and real pre-apply Validate() proving cross-table

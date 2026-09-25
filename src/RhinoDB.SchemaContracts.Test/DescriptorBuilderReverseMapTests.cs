@@ -4,7 +4,7 @@ using Microsoft.CodeAnalysis;
 
 using RhinoDB.SchemaContracts;
 
-namespace RhinoDB.Test.SchemaContracts;
+namespace RhinoDB.SchemaContracts.Test;
 
 public class DescriptorBuilderReverseMapTests {
     const string Prelude = """

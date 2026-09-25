@@ -3,7 +3,7 @@ using System.Reflection;
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // One field may carry more than one [Index] attribute (IndexAttribute allows
 // multiple), so a single row field can feed several independent indexes, each with

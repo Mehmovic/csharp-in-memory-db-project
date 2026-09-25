@@ -1,7 +1,7 @@
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // [PrimaryKey(Accessor = ...)] renames the generated Get method;
 // [Table(..., Accessor = ...)] renames the generated property exposing a

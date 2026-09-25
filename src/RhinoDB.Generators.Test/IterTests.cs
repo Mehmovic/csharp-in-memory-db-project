@@ -2,7 +2,7 @@ using RhinoDB.Core;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Every generated Ops class (Instant and Persistent kind alike) exposes
 // Iter(), a sequential enumeration of every row currently in memory in

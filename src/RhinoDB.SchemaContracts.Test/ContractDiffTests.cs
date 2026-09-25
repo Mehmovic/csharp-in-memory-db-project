@@ -1,6 +1,6 @@
 using RhinoDB.SchemaContracts;
 
-namespace RhinoDB.Test.SchemaContracts;
+namespace RhinoDB.SchemaContracts.Test;
 
 public class ContractDiffTests {
     static FieldDescriptor Field(string path, string typeFullName, RowFieldKind kind = RowFieldKind.Unmanaged) =>

@@ -1,7 +1,7 @@
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Milestone 1 [CHECK IN]: the smallest possible vertical slice through the
 // entire pipeline - one Instant-kind table, primary key only, no secondary

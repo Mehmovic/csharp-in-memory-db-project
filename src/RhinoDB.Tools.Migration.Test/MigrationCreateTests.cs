@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace RhinoDB.Test.Tools.Migration;
+namespace RhinoDB.Tools.Migration.Test;
 
 // `rhinodb migration create` end-to-end. The fixture's committed Descriptor.json (checked into git,
 // never mutated in place) describes Widget.Name as `int`; the live fixture source declares it `string` -

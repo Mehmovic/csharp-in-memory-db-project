@@ -1,4 +1,4 @@
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 public class InvalidGenerationsTests {
     [Test]

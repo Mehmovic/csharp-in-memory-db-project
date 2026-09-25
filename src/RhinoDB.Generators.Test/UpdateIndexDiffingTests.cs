@@ -1,7 +1,7 @@
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Apply()'s Update case only touches an index whose own field(s) actually
 // changed (compares oldRow's key expression against the new row's via

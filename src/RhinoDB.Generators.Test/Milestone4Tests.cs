@@ -1,7 +1,7 @@
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Milestone 4 originally proved secondary-index accessors were overlay-aware
 // (saw this operation's own staged-but-not-yet-applied writes). That overlay

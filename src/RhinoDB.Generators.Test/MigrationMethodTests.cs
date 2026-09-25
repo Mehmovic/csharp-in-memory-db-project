@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // [Migration(FromRevision=N)] discovery (Persistent-kind tables only, per point E of the schema-migration
 // design - Instant tables have no persisted Raw data to transform, so their Ops class never emits a

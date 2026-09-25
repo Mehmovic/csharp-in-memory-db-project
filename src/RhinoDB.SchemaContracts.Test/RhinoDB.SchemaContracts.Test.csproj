@@ -6,7 +6,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
-        <RootNamespace>RhinoDB.Test.SchemaContracts</RootNamespace>
+        <RootNamespace>RhinoDB.SchemaContracts.Test</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

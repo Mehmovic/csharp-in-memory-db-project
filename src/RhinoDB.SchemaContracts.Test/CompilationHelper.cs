@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
-namespace RhinoDB.Test.SchemaContracts;
+namespace RhinoDB.SchemaContracts.Test;
 
 // Minimal in-memory compilation over a source snippet, purely to get real Roslyn symbols
 // (INamedTypeSymbol/IParameterSymbol) to test SchemaContracts' pure symbol-walking logic against -

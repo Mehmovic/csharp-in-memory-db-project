@@ -1,7 +1,7 @@
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
 
-namespace RhinoDB.Test.Generators;
+namespace RhinoDB.Generators.Test;
 
 // Proves PrimaryKeyAttribute's new Kind parameter (defaulting to Hash) is
 // actually read by TableGenerator, not just declared - an OrderedIndex-backed
