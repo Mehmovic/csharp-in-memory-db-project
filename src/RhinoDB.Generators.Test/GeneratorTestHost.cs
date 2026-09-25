@@ -23,7 +23,15 @@ static internal class GeneratorTestHost {
 
     static public (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoad(
         string source, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
-        CompileAndLoad(source, ImmutableArray<IIncrementalGenerator>.Empty, testName);
+        CompileAndLoad(source, ImmutableArray<IIncrementalGenerator>.Empty, testName, ImmutableArray<AdditionalText>.Empty);
+
+    // Descriptor.json is consumed via AdditionalTextsProvider (Phase 2, step 13) - a real MSBuild build
+    // supplies it as an <AdditionalFiles> item, so tests need an in-memory AdditionalText stand-in rather
+    // than a real file on disk, matching this harness's existing "no filesystem, no MSBuild host" approach.
+    static public (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoadWithDescriptor(
+        string source, string descriptorJson, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
+        CompileAndLoad(source, ImmutableArray<IIncrementalGenerator>.Empty, testName,
+            ImmutableArray.Create<AdditionalText>(new InMemoryAdditionalText("Descriptor.json", descriptorJson)));
 
     // Also runs MemoryPack.Generator/MessagePackAnalyzer's real generators alongside TableGenerator,
     // proving end-to-end that a correctly-attributed row (or CustomType field) gets a REAL generated
@@ -36,10 +44,10 @@ static internal class GeneratorTestHost {
     // correctness in the first place.
     static public (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoadWithSerializationGenerators(
         string source, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
-        CompileAndLoad(source, SerializationGenerators, testName);
+        CompileAndLoad(source, SerializationGenerators, testName, ImmutableArray<AdditionalText>.Empty);
 
     static private (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoad(
-        string source, ImmutableArray<IIncrementalGenerator> extraGenerators, string testName) {
+        string source, ImmutableArray<IIncrementalGenerator> extraGenerators, string testName, ImmutableArray<AdditionalText> additionalTexts) {
         var assemblyName = $"Gen_{testName}_{Guid.NewGuid():N}";
         var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest));
 
@@ -50,7 +58,7 @@ static internal class GeneratorTestHost {
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         var generators = ImmutableArray.Create<IIncrementalGenerator>(new TableGenerator(), new CustomTypeGenerator(), new FrozenSchemaGenerator()).AddRange(extraGenerators);
-        var driver = CSharpGeneratorDriver.Create(generators.ToArray());
+        var driver = CSharpGeneratorDriver.Create(generators.ToArray()).AddAdditionalTexts(additionalTexts);
         driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var generatorDiagnostics);
 
         var generatorErrors = generatorDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToImmutableArray();
@@ -156,6 +164,12 @@ static internal class GeneratorTestHost {
         var method = type.GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException($"Method '{methodName}' not found on '{typeName}'.");
         return method.Invoke(null, args);
+    }
+
+    private sealed class InMemoryAdditionalText(string path, string text) : AdditionalText {
+        public override string Path { get; } = path;
+        public override Microsoft.CodeAnalysis.Text.SourceText GetText(CancellationToken cancellationToken = default) =>
+            Microsoft.CodeAnalysis.Text.SourceText.From(text);
     }
 
     static private ImmutableArray<MetadataReference> BuildReferences() {

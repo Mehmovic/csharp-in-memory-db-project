@@ -3,24 +3,27 @@
 
 ### New Rules
 
-| Rule ID  | Category           | Severity | Notes          |
-|----------|--------------------|----------|----------------|
-| RHINO001 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO002 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO003 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO004 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO005 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO007 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO008 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO009 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO010 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO011 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO012 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO013 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO014 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO015 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO016 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO017 | RhinoDB.Generators | Error    | CustomTypeGenerator |
-| RHINO018 | RhinoDB.Generators | Error    | TableGenerator |
-| RHINO021 | RhinoDB.Generators | Error    | TableGenerator |
+| Rule ID  | Category           | Severity | Notes                 |
+|----------|--------------------|----------|-----------------------|
+| RHINO001 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO002 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO003 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO004 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO005 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO007 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO008 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO009 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO010 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO011 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO012 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO013 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO014 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO015 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO016 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO017 | RhinoDB.Generators | Error    | CustomTypeGenerator   |
+| RHINO018 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO019 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO020 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO021 | RhinoDB.Generators | Error    | TableGenerator        |
 | RHINO022 | RhinoDB.Generators | Error    | FrozenSchemaGenerator |
+| RHINO023 | RhinoDB.Generators | Warning  | TableGenerator        |

@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.IO;
 using System.Linq;
 using System.Text;
 
@@ -159,6 +161,30 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
+    static private readonly DiagnosticDescriptor MigrationChainGapDiagnostic = new(
+        "RHINO020",
+        "[Migration] chain has an internal gap",
+        "'{0}' has [Migration(FromRevision=N)] methods registered for revisions {1}, but revision {2} is "
+        + "missing in between - the chain must be hole-free (N -> N+1 -> N+2 -> ...), or a database still "
+        + "behind on an older revision would have no way to bridge across the gap",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
+    static private readonly DiagnosticDescriptor MissingMigrationForBreakingChangeDiagnostic = new(
+        "RHINO019",
+        "Breaking schema change has no matching [Migration]",
+        "'{0}.{1}' changed in a way that breaks Raw decoding of its already-persisted rows (a field "
+        + "added/removed/reordered/retyped, primary key type changed, or table kind changed), but no "
+        + "[Migration(FromRevision = {2})] was found on '{3}' to bridge from the previously-committed "
+        + "shape - register one, or if this is genuinely a pure trailing-field append, double check nothing "
+        + "in the middle actually changed",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
     static private readonly DiagnosticDescriptor InvalidGenerationValueDiagnostic = new(
         "RHINO021",
         "[Database(InvalidGenerations=)] contains a nonsensical generation number",
@@ -170,9 +196,20 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
+    static private readonly DiagnosticDescriptor MalformedDescriptorDiagnostic = new(
+        "RHINO023",
+        "Descriptor.json is malformed",
+        "The committed Descriptor.json additional file failed to parse: {0} - fix or regenerate it; until "
+        + "then it's treated as absent, so RHINO019/020 and G_binary fall back to their no-descriptor "
+        + "defaults rather than blocking the build outright",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true
+    );
+
     static private readonly ImmutableHashSet<string> ReservedOpsMemberNames =
         ImmutableHashSet.Create("Insert", "Update", "Delete", "Iter", "Evict", "Primary");
-    
+
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var tableResults = context.SyntaxProvider
             .ForAttributeWithMetadataName(
@@ -198,8 +235,25 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 transform: static (ctx, _) => ToDatabaseModel(ctx)
             );
 
-        var combined = databases.Combine(tables);
-        context.RegisterSourceOutput(combined, static (spc, pair) => Emit(spc, pair.Left, pair.Right));
+        var descriptor = context.AdditionalTextsProvider
+            .Where(static t => Path.GetFileName(t.Path) == "Descriptor.json")
+            .Collect()
+            .Select(static (texts, ct) => {
+                if (texts.Length == 0) return (Parsed: (DatabaseContractDescriptor?)null, ParseError: (Diagnostic?)null);
+                var text = texts[0].GetText(ct)?.ToString();
+                if (string.IsNullOrEmpty(text)) return (Parsed: (DatabaseContractDescriptor?)null, ParseError: (Diagnostic?)null);
+                try {
+                    return (Parsed: ContractDescriptorJson.Parse(text!), ParseError: (Diagnostic?)null);
+                } catch (Exception ex) {
+                    return (Parsed: (DatabaseContractDescriptor?)null, ParseError: Diagnostic.Create(MalformedDescriptorDiagnostic, Location.None, ex.Message));
+                }
+            });
+
+        var combined = databases.Combine(tables).Combine(descriptor);
+        context.RegisterSourceOutput(combined, static (spc, pair) => {
+            if (pair.Right.ParseError is { } diagnostic) spc.ReportDiagnostic(diagnostic);
+            Emit(spc, pair.Left.Left, pair.Left.Right, pair.Right.Parsed);
+        });
     }
 
     static private (bool Provided, string? Value) StringNamedArg(AttributeData attr, string name) {
@@ -400,6 +454,16 @@ public sealed class TableGenerator : IIncrementalGenerator {
             ));
         }
 
+        var sortedRevisions = migrationMethods.Select(m => m.FromRevision).Distinct().OrderBy(r => r).ToImmutableArray();
+        for (var i = 1; i < sortedRevisions.Length; i++) {
+            if (sortedRevisions[i] - sortedRevisions[i - 1] == 1) continue;
+            for (var missing = sortedRevisions[i - 1] + 1; missing < sortedRevisions[i]; missing++)
+                rowDiagnostics.Add(Diagnostic.Create(
+                    MigrationChainGapDiagnostic, ctx.TargetNode.GetLocation(), rowType.Name, string.Join(", ", sortedRevisions), missing));
+        }
+
+        var descriptorFields = DescriptorBuilder.FlattenFields(primaryCtor.Parameters);
+
         if (rowDiagnostics.Count > 0) return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
 
         var results = ImmutableArray.CreateBuilder<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)>();
@@ -445,6 +509,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 indexes,
                 validateMethodNames.ToImmutable(),
                 migrationMethods.ToImmutable(),
+                descriptorFields,
                 rowFields
             );
             results.Add((model, ImmutableArray<Diagnostic>.Empty));
@@ -463,7 +528,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         );
     }
 
-    static private void Emit(SourceProductionContext context, DatabaseModel database, ImmutableArray<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)> allResults) {
+    static private void Emit(
+        SourceProductionContext context, DatabaseModel database,
+        ImmutableArray<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)> allResults, DatabaseContractDescriptor? descriptor
+    ) {
         var tables = allResults
             .Select(r => r.Model)
             .Where(m => m is not null)
@@ -493,11 +561,42 @@ public sealed class TableGenerator : IIncrementalGenerator {
             }
             return;
         }
-        
+
+        CheckBreakingChangesHaveMigrations(context, database, tables, descriptor);
+
         foreach (var table in tables)
             context.AddSource($"{database.SimpleName}{table.Accessor}Ops.g.cs", EmitOpsClass(table, database.SimpleName));
 
-        context.AddSource($"{database.SimpleName}.g.cs", EmitDatabase(database, tables));
+        context.AddSource($"{database.SimpleName}.g.cs", EmitDatabase(database, tables, descriptor));
+    }
+
+    static private void CheckBreakingChangesHaveMigrations(
+        SourceProductionContext context, DatabaseModel database, ImmutableArray<TableModel> tables, DatabaseContractDescriptor? descriptor
+    ) {
+        if (descriptor is null) return;
+
+        foreach (var table in tables) {
+            if (table.Kind != TableKind.Persistent) continue;
+
+            var oldTable = descriptor.Tables.FirstOrDefault(t => t.DatabaseFullName == database.FullName && t.Accessor == table.Accessor);
+            if (oldTable is null) continue;
+
+            var newTable = new TableDescriptor {
+                DatabaseFullName = database.FullName,
+                Accessor = table.Accessor,
+                RowTypeFullName = table.RowTypeFullName,
+                Kind = "Persistent",
+                PrimaryKey = new FieldDescriptor { Path = table.PrimaryKeyName, TypeFullName = table.PrimaryKeyTypeFullName },
+                Fields = table.DescriptorFields,
+            };
+
+            if (ContractDiff.Diff(oldTable, newTable) != DiffClassification.Breaking) continue;
+            if (table.MigrationMethods.Any(m => m.FromRevision == oldTable.Revision)) continue;
+
+            context.ReportDiagnostic(Diagnostic.Create(
+                MissingMigrationForBreakingChangeDiagnostic, Location.None,
+                database.SimpleName, table.Accessor, oldTable.Revision, table.RowTypeFullName));
+        }
     }
 
     static private string PrimaryIndexType(TableModel table) {
@@ -1273,7 +1372,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
     }
 
-    static private string EmitDatabase(DatabaseModel database, ImmutableArray<TableModel> tables) {
+    static private string EmitDatabase(DatabaseModel database, ImmutableArray<TableModel> tables, DatabaseContractDescriptor? descriptor) {
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated>");
         sb.AppendLine("#nullable enable");
@@ -1334,7 +1433,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var instantTables = tables.Where(t => t.Kind == TableKind.Instant).ToImmutableArray();
         var persistentTables = tables.Where(t => t.Kind == TableKind.Persistent).ToImmutableArray();
 
+        var gBinary = descriptor?.Databases.FirstOrDefault(d => d.FullName == database.FullName)?.Generation ?? 0;
+
         sb.AppendLine($"public partial class {database.SimpleName} {{");
+        sb.AppendLine($"    public const int G_binary = {gBinary};");
         sb.AppendLine($"    private static readonly HashSet<int> InvalidGenerations = new HashSet<int> {{ {string.Join(", ", database.InvalidGenerations)} }};");
         sb.AppendLine("    public static bool IsGenerationInvalid(int generation) => InvalidGenerations.Contains(generation);");
         sb.AppendLine();
@@ -1493,6 +1595,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         ImmutableArray<IndexModel> indexes,
         ImmutableArray<string> validateMethodNames,
         ImmutableArray<MigrationMethodModel> migrationMethods,
+        List<FieldDescriptor> descriptorFields,
         ImmutableArray<RowFieldModel> fields
     ) {
         public string RowTypeFullName { get; } = rowTypeFullName;
@@ -1510,6 +1613,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public ImmutableArray<IndexModel> Indexes { get; } = indexes;
         public ImmutableArray<string> ValidateMethodNames { get; } = validateMethodNames;
         public ImmutableArray<MigrationMethodModel> MigrationMethods { get; } = migrationMethods;
+        public List<FieldDescriptor> DescriptorFields { get; } = descriptorFields;
         public ImmutableArray<RowFieldModel> Fields { get; } = fields;
     }
 
