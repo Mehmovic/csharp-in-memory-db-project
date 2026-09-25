@@ -1,4 +1,6 @@
 namespace RhinoDB.Core.Tables;
 
 [AttributeUsage(AttributeTargets.Class)]
-public sealed class DatabaseAttribute : Attribute { }
+public sealed class DatabaseAttribute : Attribute {
+    public int[]? InvalidGenerations { get; set; }
+}

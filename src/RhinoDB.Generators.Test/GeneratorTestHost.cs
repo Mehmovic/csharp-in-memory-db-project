@@ -49,7 +49,7 @@ static internal class GeneratorTestHost {
             References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        var generators = ImmutableArray.Create<IIncrementalGenerator>(new TableGenerator(), new CustomTypeGenerator()).AddRange(extraGenerators);
+        var generators = ImmutableArray.Create<IIncrementalGenerator>(new TableGenerator(), new CustomTypeGenerator(), new FrozenSchemaGenerator()).AddRange(extraGenerators);
         var driver = CSharpGeneratorDriver.Create(generators.ToArray());
         driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var generatorDiagnostics);
 

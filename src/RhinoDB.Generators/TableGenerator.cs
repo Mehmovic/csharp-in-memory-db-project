@@ -17,6 +17,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
     private const string AutoIncrementAttributeFullName = "RhinoDB.Core.Tables.AutoIncrementAttribute";
     private const string IndexAttributeFullName = "RhinoDB.Core.Tables.IndexAttribute";
     private const string ValidateAttributeFullName = "RhinoDB.Core.Tables.ValidateAttribute";
+    private const string MigrationAttributeFullName = "RhinoDB.Core.Tables.MigrationAttribute";
     private const string DbErrorFullName = "RhinoDB.Core.DbError";
 
     static private readonly DiagnosticDescriptor MissingPrimaryKeyDiagnostic = new(
@@ -147,6 +148,28 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
+    static private readonly DiagnosticDescriptor InvalidMigrationMethodSignatureDiagnostic = new(
+        "RHINO018",
+        "Invalid [Migration] method signature",
+        "'{0}.{1}' is [Migration(FromRevision=N)] but must be an at-least-internal static method taking "
+        + "exactly one parameter and returning a non-void type - it transforms one revision's row shape "
+        + "into the next revision's shape",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
+    static private readonly DiagnosticDescriptor InvalidGenerationValueDiagnostic = new(
+        "RHINO021",
+        "[Database(InvalidGenerations=)] contains a nonsensical generation number",
+        "'{0}' declares InvalidGenerations containing {1}, which is <= 0 - generation 0 is a database's "
+        + "starting point (nothing preceded it to have failed a migration into it), so it can never be a "
+        + "genuinely-invalidated past generation",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
     static private readonly ImmutableHashSet<string> ReservedOpsMemberNames =
         ImmutableHashSet.Create("Insert", "Update", "Delete", "Iter", "Evict", "Primary");
     
@@ -191,6 +214,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
             if (kv.Key == name)
                 return (true, (int)kv.Value.Value!);
         return (false, 0);
+    }
+
+    static private ImmutableArray<int> IntArrayNamedArg(AttributeData attr, string name) {
+        foreach (var kv in attr.NamedArguments)
+            if (kv.Key == name)
+                return kv.Value.IsNull ? ImmutableArray<int>.Empty : kv.Value.Values.Select(v => (int)v.Value!).ToImmutableArray();
+        return ImmutableArray<int>.Empty;
     }
 
     static private bool BoolNamedArg(AttributeData attr, string name, bool defaultValue = false) {
@@ -346,6 +376,30 @@ public sealed class TableGenerator : IIncrementalGenerator {
             validateMethodNames.Add(member.Name);
         }
 
+        var migrationMethods = ImmutableArray.CreateBuilder<MigrationMethodModel>();
+        foreach (var member in rowType.GetMembers().OfType<IMethodSymbol>()) {
+            var migrationAttribute = member.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == MigrationAttributeFullName);
+            if (migrationAttribute is null) continue;
+
+            var validSignature = member.IsStatic
+                                 && member.DeclaredAccessibility != Accessibility.Private
+                                 && member.Parameters.Length == 1
+                                 && member.ReturnType.SpecialType != SpecialType.System_Void;
+
+            if (!validSignature) {
+                rowDiagnostics.Add(Diagnostic.Create(InvalidMigrationMethodSignatureDiagnostic, member.Locations.FirstOrDefault() ?? Location.None, rowType.Name, member.Name));
+                continue;
+            }
+
+            var fromRevision = (int)migrationAttribute.ConstructorArguments[0].Value!;
+            migrationMethods.Add(new MigrationMethodModel(
+                fromRevision,
+                member.Name,
+                member.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                member.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            ));
+        }
+
         if (rowDiagnostics.Count > 0) return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
 
         var results = ImmutableArray.CreateBuilder<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)>();
@@ -390,6 +444,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 autoIncrementFields.ToImmutable(),
                 indexes,
                 validateMethodNames.ToImmutable(),
+                migrationMethods.ToImmutable(),
                 rowFields
             );
             results.Add((model, ImmutableArray<Diagnostic>.Empty));
@@ -399,10 +454,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private DatabaseModel ToDatabaseModel(GeneratorAttributeSyntaxContext ctx) {
         var databaseType = (INamedTypeSymbol)ctx.TargetSymbol;
+        var invalidGenerations = IntArrayNamedArg(ctx.Attributes[0], "InvalidGenerations");
         return new DatabaseModel(
             databaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             databaseType.Name,
-            databaseType.ContainingNamespace.IsGlobalNamespace ? null : databaseType.ContainingNamespace.ToDisplayString()
+            databaseType.ContainingNamespace.IsGlobalNamespace ? null : databaseType.ContainingNamespace.ToDisplayString(),
+            invalidGenerations
         );
     }
 
@@ -413,6 +470,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
             .Select(m => m!)
             .Where(t => t.OwnerDatabaseFullName == database.FullName)
             .ToImmutableArray();
+
+        var nonsensicalInvalidGenerations = database.InvalidGenerations.Where(g => g <= 0).ToImmutableArray();
+        if (nonsensicalInvalidGenerations.Length > 0) {
+            foreach (var generation in nonsensicalInvalidGenerations)
+                context.ReportDiagnostic(Diagnostic.Create(InvalidGenerationValueDiagnostic, Location.None, database.SimpleName, generation));
+            return;
+        }
 
         var duplicateAccessors = tables.GroupBy(t => t.Accessor).Where(g => g.Count() > 1).Select(g => g.Key).ToImmutableArray();
         if (duplicateAccessors.Length > 0) {
@@ -748,6 +812,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine();
     }
 
+    static private void EmitMigrationWrappers(StringBuilder sb, TableModel table) {
+        foreach (var migration in table.MigrationMethods) {
+            sb.AppendLine($"    internal static {migration.ReturnTypeFullName} MigrateFromRevision{migration.FromRevision}({migration.ParamTypeFullName} old) => {table.RowTypeFullName}.{migration.MethodName}(old);");
+        }
+        if (table.MigrationMethods.Length > 0) sb.AppendLine();
+    }
+
     static private void EmitCustomValidateChecks(StringBuilder sb, TableModel table) {
         foreach (var methodName in table.ValidateMethodNames) {
             sb.AppendLine("                {");
@@ -979,6 +1050,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitStagingMethods(sb, table);
         EmitRawSerializer(sb, table);
         EmitProtocolWrappers(sb, table);
+        EmitMigrationWrappers(sb, table);
         EmitValidateMethod(sb, table);
         EmitDiscardMethod(sb);
         EmitPersistentApply(sb, table);
@@ -1263,6 +1335,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var persistentTables = tables.Where(t => t.Kind == TableKind.Persistent).ToImmutableArray();
 
         sb.AppendLine($"public partial class {database.SimpleName} {{");
+        sb.AppendLine($"    private static readonly HashSet<int> InvalidGenerations = new HashSet<int> {{ {string.Join(", ", database.InvalidGenerations)} }};");
+        sb.AppendLine("    public static bool IsGenerationInvalid(int generation) => InvalidGenerations.Contains(generation);");
+        sb.AppendLine();
         foreach (var table in instantTables) {
             sb.AppendLine($"    private readonly DenseArray<{table.RowTypeFullName}> {Camel(table.Accessor)}Storage = new(chunkSize: {table.ChunkSize});");
             sb.AppendLine($"    private readonly {PrimaryIndexType(table)} {Camel(table.Accessor)}PrimaryIndex = new();");
@@ -1417,6 +1492,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         ImmutableArray<AutoIncrementFieldModel> autoIncrementFields,
         ImmutableArray<IndexModel> indexes,
         ImmutableArray<string> validateMethodNames,
+        ImmutableArray<MigrationMethodModel> migrationMethods,
         ImmutableArray<RowFieldModel> fields
     ) {
         public string RowTypeFullName { get; } = rowTypeFullName;
@@ -1433,7 +1509,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public ImmutableArray<AutoIncrementFieldModel> AutoIncrementFields { get; } = autoIncrementFields;
         public ImmutableArray<IndexModel> Indexes { get; } = indexes;
         public ImmutableArray<string> ValidateMethodNames { get; } = validateMethodNames;
+        public ImmutableArray<MigrationMethodModel> MigrationMethods { get; } = migrationMethods;
         public ImmutableArray<RowFieldModel> Fields { get; } = fields;
+    }
+
+    private sealed class MigrationMethodModel(int fromRevision, string methodName, string paramTypeFullName, string returnTypeFullName) {
+        public int FromRevision { get; } = fromRevision;
+        public string MethodName { get; } = methodName;
+        public string ParamTypeFullName { get; } = paramTypeFullName;
+        public string ReturnTypeFullName { get; } = returnTypeFullName;
     }
 
     private sealed class AutoIncrementFieldModel(string fieldName, string fieldTypeFullName, bool isSigned) {
@@ -1454,10 +1538,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public string FieldTypeFullName { get; } = fieldTypeFullName;
     }
 
-    private sealed class DatabaseModel(string fullName, string simpleName, string? @namespace) {
+    private sealed class DatabaseModel(string fullName, string simpleName, string? @namespace, ImmutableArray<int> invalidGenerations) {
         public string FullName { get; } = fullName;
         public string SimpleName { get; } = simpleName;
         public string? Namespace { get; } = @namespace;
+        public ImmutableArray<int> InvalidGenerations { get; } = invalidGenerations;
     }
 
     private enum TableKind { Instant, Persistent }

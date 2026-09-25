@@ -21,3 +21,6 @@
 | RHINO015 | RhinoDB.Generators | Error    | TableGenerator |
 | RHINO016 | RhinoDB.Generators | Error    | TableGenerator |
 | RHINO017 | RhinoDB.Generators | Error    | CustomTypeGenerator |
+| RHINO018 | RhinoDB.Generators | Error    | TableGenerator |
+| RHINO021 | RhinoDB.Generators | Error    | TableGenerator |
+| RHINO022 | RhinoDB.Generators | Error    | FrozenSchemaGenerator |
