@@ -25,9 +25,6 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
         return getRc != 0 ? Result<long>.Ok(-1L) : Result<long>.Ok(BitConverter.ToInt64(bytes));
     }
 
-    // G_db - defaults to 0 for a database that has never recorded a generation (fresh database, or one
-    // that predates this field existing), matching G_binary's own default-0 behavior for a schema that has
-    // never had a breaking change.
     public Result<int> ReadGeneration() {
         var rc = env.BeginTxn(0, out var txn);
         if (rc != 0 || txn is null) return Result<int>.Error(MdbxErrorMapper.Map(rc));
@@ -40,10 +37,6 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
         return getRc != 0 ? Result<int>.Ok(0) : Result<int>.Ok(BitConverter.ToInt32(bytes));
     }
 
-    // Writes into an ALREADY-OPEN, caller-owned transaction rather than opening its own - per
-    // Docs/06-schema-migration.md §3, the generation must be written in the SAME transaction as the row
-    // rewrites it accompanies (the migration transaction, Phase 4 step 20), so "migrated" and "generation
-    // bumped" can never disagree. The caller commits.
     public Result WriteGeneration(Transaction txn, int generation) {
         var resolved = EnsureMetadataDbi(txn);
         if (resolved.IsError()) return resolved;

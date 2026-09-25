@@ -924,11 +924,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         if (table.MigrationMethods.Length > 0) sb.AppendLine();
     }
 
-    // Mirrors FrozenSchemaGenerator's own naming exactly ({SimpleName}FrozenSchemaOps, in the SAME namespace
-    // as the [FrozenSchema] type itself) - derived from the registered hop's ACTUAL parameter type, not
-    // guessed from the row's own name/namespace, since a [Migration(FromRevision=N)] method's earliest-hop
-    // parameter is free to live anywhere as long as it's genuinely [FrozenSchema]-attributed (the CLI's own
-    // SchemaHistory.Revision{N} convention is just where it happens to scaffold one, not a requirement).
     static private string FrozenSchemaOpsFullName(string paramTypeFullName) {
         var stripped = paramTypeFullName.StartsWith("global::") ? paramTypeFullName.Substring(8) : paramTypeFullName;
         var lastDot = stripped.LastIndexOf('.');
@@ -937,12 +932,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         return ns is null ? $"{simpleName}FrozenSchemaOps" : $"{ns}.{simpleName}FrozenSchemaOps";
     }
 
-    // The bridge between "which revision is this table's on-disk data actually at" (RevisionAtGeneration,
-    // keyed by G_db) and "the live row type" - given raw bytes captured at some historical revision, walks
-    // the registered [Migration(FromRevision=N)] chain forward to the tip. Every registered starting
-    // revision gets its own case (RHINO019/020 already guarantee the chain from the earliest registered hop
-    // to the tip is gapless, so every legitimate fromRevision this is ever called with has a matching case) -
-    // fromRevision >= tip means the bytes are already shaped like the live row, no transform needed.
     static private void EmitMigrationChain(StringBuilder sb, TableModel table) {
         var sortedHops = table.MigrationMethods.OrderBy(m => m.FromRevision).ToImmutableArray();
         var tip = sortedHops.Length == 0 ? 0 : sortedHops[sortedHops.Length - 1].FromRevision + 1;

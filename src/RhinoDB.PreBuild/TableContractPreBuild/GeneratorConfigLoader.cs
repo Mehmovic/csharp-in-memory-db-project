@@ -16,9 +16,6 @@ static public class GeneratorConfigLoader {
         return Parse(File.ReadAllText(configPath));
     }
 
-    // Best-effort - a developer editing this file later is the point (real, visible, editable
-    // settings instead of an invisible in-memory fallback), but failing to scaffold it must never
-    // fail the build, since the tool works fine without it either way.
     static void TryWriteDefaultFile(string configPath, GeneratorConfig defaultConfig) {
         try {
             var json = JsonSerializer.Serialize(defaultConfig, new JsonSerializerOptions { WriteIndented = true });

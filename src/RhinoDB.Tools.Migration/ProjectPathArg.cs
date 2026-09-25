@@ -1,8 +1,6 @@
 namespace RhinoDB.Tools.Migration;
 
 static public class ProjectPathArg {
-    // --project <path> if given; otherwise the single .csproj in the current directory. Ambiguous (0 or
-    // 2+ candidates) with no explicit --project is a clear error, not a guess.
     static public string? Resolve(string[] args, out string? error) {
         for (var i = 0; i < args.Length - 1; i++) {
             if (args[i] != "--project") continue;

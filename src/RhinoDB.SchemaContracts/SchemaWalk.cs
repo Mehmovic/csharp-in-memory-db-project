@@ -39,16 +39,10 @@ static public class SchemaWalk {
         type.OriginalDefinition.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic"
         && BuiltInFormattedGenericCollections.Contains((type.OriginalDefinition.Name, type.OriginalDefinition.Arity));
 
-    // The "real" primary constructor of a record struct, excluding the compiler-generated copy
-    // constructor (a single parameter of the record's own type) - the exact predicate TableGenerator's
-    // ToTableModels and CustomTypeGenerator's ToCustomTypeModel both already duplicate independently;
-    // consolidated here since DescriptorBuilder needs the identical lookup a third time.
     static public IMethodSymbol? FindPrimaryConstructor(INamedTypeSymbol type) =>
         type.InstanceConstructors.FirstOrDefault(c =>
             c.Parameters.Length > 0 && !(c.Parameters.Length == 1 && SymbolEqualityComparer.Default.Equals(c.Parameters[0].Type, type)));
 
-    // Shared between TableGenerator (row fields) and CustomTypeGenerator (custom type fields) - both
-    // walk a primary constructor's parameters into the exact same field shape.
     static public ImmutableArray<RowFieldModel> ToRowFieldModels(ImmutableArray<IParameterSymbol> parameters) =>
         parameters
             .Select(p => new RowFieldModel(

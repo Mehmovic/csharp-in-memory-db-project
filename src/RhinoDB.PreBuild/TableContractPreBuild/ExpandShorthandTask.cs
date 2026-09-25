@@ -56,8 +56,6 @@ public sealed class ExpandShorthandTask : Microsoft.Build.Utilities.Task {
         return success;
     }
 
-    // Mirrors a shorthand file's subdirectory structure under sourceDir into outputDir -
-    // RhinoContracts/Tables/Matches/PvPTable.cs -> Rhino/Tables/Matches/PvPTable.g.cs, not flattened.
     static public string ComputeOutputPath(string sourceDir, string outputDir, string sourceFile) {
         var normalizedSourceDir = sourceDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var relativePath = sourceFile.Substring(normalizedSourceDir.Length)

@@ -5,10 +5,6 @@ using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Tools.Migration;
 
-// `rhinodb migration status` - read-only. Loads the project, builds a fresh descriptor from its live
-// compilation, diffs every table against the last committed Descriptor.json, and prints a per-table
-// classification. Exits 1 if any table is Breaking, so it doubles as a CI gate (`rhinodb migration status
-// || exit 1`) without needing a separate --check flag.
 static public class MigrationStatusCommand {
     static public int Run(string[] args) {
         var projectPath = ProjectPathArg.Resolve(args, out var resolveError);
