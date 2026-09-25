@@ -47,7 +47,7 @@ public sealed class ExpandShorthandTask : Microsoft.Build.Utilities.Task {
                 var expanded = ShorthandExpander.Expand(File.ReadAllText(file), allProjectSources);
                 var outputPath = ComputeOutputPath(sourceDir, outputDir, file);
                 WriteIfChanged(outputPath, expanded);
-            } catch (Exception ex) when (ex is ShorthandParseException or PackIdCollisionException or ContractViolationException) {
+            } catch (Exception ex) when (ex is ShorthandParseException or PackIdCollisionException or PackIdRangeException or ContractViolationException) {
                 Log.LogError($"{file}: {ex.Message}");
                 success = false;
             }

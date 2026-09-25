@@ -76,4 +76,23 @@ public class PackIdNumbererTests {
 
         Assert.That(result, Is.Empty);
     }
+
+    [Test]
+    public void Assign_NormalizedRangeExactlyFitsAByte_DoesNotThrow() {
+        // raw 0, 255 -> normalized 0, 255 - exactly byte.MaxValue, the boundary that must still succeed.
+        var fields = ImmutableArray.Create(Field("A", explicitPackId: 0), Field("B", explicitPackId: 255));
+
+        var result = PackIdNumberer.Assign(fields);
+
+        Assert.That(result, Is.EqualTo(new byte[] { 0, 255 }));
+    }
+
+    [Test]
+    public void Assign_NormalizedRangeExceedsAByte_ThrowsPackIdRange() {
+        // Two explicit anchors far apart - no single field claims an out-of-range PackId, but the gap
+        // between anchors still produces a normalized slot > byte.MaxValue once resolved.
+        var fields = ImmutableArray.Create(Field("A", explicitPackId: 0), Field("B", explicitPackId: 256));
+
+        Assert.Throws<PackIdRangeException>(() => PackIdNumberer.Assign(fields));
+    }
 }

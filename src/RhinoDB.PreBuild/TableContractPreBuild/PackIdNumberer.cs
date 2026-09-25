@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 namespace RhinoDB.PreBuild;
 
 static public class PackIdNumberer {
-    static public ImmutableArray<int> Assign(ImmutableArray<ParsedShorthandField> fields) {
+    static public ImmutableArray<byte> Assign(ImmutableArray<ParsedShorthandField> fields) {
         var raw = new int[fields.Length];
 
         var anchorIndex = -1;
@@ -26,7 +26,14 @@ static public class PackIdNumberer {
         CheckForCollisions(fields, raw);
 
         var min = raw.Length == 0 ? 0 : raw.Min();
-        return raw.Select(v => v - min).ToImmutableArray();
+        var max = raw.Length == 0 ? 0 : raw.Max();
+        if (max - min > byte.MaxValue)
+            throw new PackIdRangeException(
+                $"Normalized PackId slots span {max - min + 1} values (0 to {max - min}), exceeding the {byte.MaxValue + 1}-field " +
+                "limit - a table/type with this many fields (or this large a gap between explicit [PackId(n)] anchors) is almost " +
+                "certainly a design mistake, or a real one worth splitting up.");
+
+        return raw.Select(v => (byte)(v - min)).ToImmutableArray();
     }
 
     static void CheckForCollisions(ImmutableArray<ParsedShorthandField> fields, int[] raw) {

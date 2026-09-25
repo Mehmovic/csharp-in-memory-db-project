@@ -50,7 +50,7 @@ static public class ShorthandExpander {
         sb.AppendLine($"[Table({kindName}, typeof({parsed.DatabaseTypeName}){namedArgs})]");
     }
 
-    static void EmitFields(StringBuilder sb, ImmutableArray<ParsedShorthandField> fields, ImmutableArray<int> slots) {
+    static void EmitFields(StringBuilder sb, ImmutableArray<ParsedShorthandField> fields, ImmutableArray<byte> slots) {
         for (var i = 0; i < fields.Length; i++) {
             var field = fields[i];
             var passThrough = string.Concat(field.PassThroughAttributes.Select(a => $"{a} "));
