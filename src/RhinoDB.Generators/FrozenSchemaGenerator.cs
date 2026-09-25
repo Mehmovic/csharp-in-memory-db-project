@@ -95,11 +95,11 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
             sb.AppendLine();
         }
 
-        sb.AppendLine($"internal static class {opsName} {{");
-        sb.AppendLine($"    internal const int Revision = {model.Revision};");
+        sb.AppendLine($"public static class {opsName} {{");
+        sb.AppendLine($"    public const int Revision = {model.Revision};");
         sb.AppendLine();
 
-        sb.AppendLine($"    internal static byte[] SerializeRow({row} row) {{");
+        sb.AppendLine($"    public static byte[] SerializeRow({row} row) {{");
         sb.AppendLine("        var bufferWriter = new PooledBufferWriter(256);");
         sb.AppendLine("        var writerState = MemoryPackWriterOptionalStatePool.Rent(null);");
         sb.AppendLine("        var writer = new MemoryPackWriter<PooledBufferWriter>(ref bufferWriter, writerState);");
@@ -111,7 +111,7 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    internal static {row} DeserializeRow(byte[] bytes) {{");
+        sb.AppendLine($"    public static {row} DeserializeRow(byte[] bytes) {{");
         sb.AppendLine("        var readerState = MemoryPackReaderOptionalStatePool.Rent(null);");
         sb.AppendLine("        var reader = new MemoryPackReader(bytes, readerState);");
         foreach (var f in model.Fields) SchemaWalk.EmitReadField(sb, f);
@@ -122,7 +122,7 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    internal static byte[] SerializeKey({key} key) {{");
+        sb.AppendLine($"    public static byte[] SerializeKey({key} key) {{");
         sb.AppendLine("        var bufferWriter = new PooledBufferWriter(32);");
         sb.AppendLine("        var writerState = MemoryPackWriterOptionalStatePool.Rent(null);");
         sb.AppendLine("        var writer = new MemoryPackWriter<PooledBufferWriter>(ref bufferWriter, writerState);");
@@ -134,7 +134,7 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    internal static {key} DeserializeKey(byte[] bytes) {{");
+        sb.AppendLine($"    public static {key} DeserializeKey(byte[] bytes) {{");
         sb.AppendLine("        var readerState = MemoryPackReaderOptionalStatePool.Rent(null);");
         sb.AppendLine("        var reader = new MemoryPackReader(bytes, readerState);");
         SchemaWalk.EmitReadField(sb, pkField);

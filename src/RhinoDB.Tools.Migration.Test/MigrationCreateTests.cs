@@ -64,6 +64,11 @@ public class MigrationCreateTests {
             Assert.That(descriptor.TypeRevisions["global::CreateSampleProject.Widget"], Is.EqualTo(1));
             Assert.That(descriptor.Tables.Single().Revision, Is.EqualTo(1));
             Assert.That(descriptor.Databases.Single(d => d.FullName == "global::CreateSampleProject.SampleDb").Generation, Is.EqualTo(1));
+
+            var history = descriptor.Tables.Single().RevisionHistory;
+            Assert.That(history, Has.Count.EqualTo(1), "the fixture's committed descriptor had no prior history - this run's hop is the only entry");
+            Assert.That(history[0].Generation, Is.EqualTo(1));
+            Assert.That(history[0].Revision, Is.EqualTo(1));
         } finally {
             Directory.Delete(projectDirectory, recursive: true);
         }
@@ -88,6 +93,35 @@ public class MigrationCreateTests {
             Assert.That(capturedOut.ToString(), Does.Contain("No breaking changes detected"));
         } finally {
             Console.SetOut(originalOut);
+            Directory.Delete(projectDirectory, recursive: true);
+        }
+    }
+
+    [Test]
+    public void MigrationCreate_TwoSuccessiveBreakingChanges_AccumulatesRevisionHistoryInsteadOfOverwritingIt() {
+        var csprojPath = CopyFixtureToTempDirectory();
+        var projectDirectory = Path.GetDirectoryName(csprojPath)!;
+        try {
+            Assert.That(RhinoDB.Tools.Migration.MigrationTool.Run(["create", "--project", csprojPath]), Is.EqualTo(0));
+
+            // A second, independent breaking change: Name goes from string to decimal.
+            var widgetPath = Path.Combine(projectDirectory, "Widget.cs");
+            File.WriteAllText(widgetPath, File.ReadAllText(widgetPath).Replace("string Name", "decimal Name"));
+
+            Assert.That(RhinoDB.Tools.Migration.MigrationTool.Run(["create", "--project", csprojPath]), Is.EqualTo(0));
+
+            var descriptorPath = Path.Combine(projectDirectory, "RhinoContracts", "Descriptor.json");
+            var descriptor = RhinoDB.SchemaContracts.ContractDescriptorJson.Parse(File.ReadAllText(descriptorPath));
+            var table = descriptor.Tables.Single();
+
+            Assert.That(table.Revision, Is.EqualTo(2));
+            Assert.That(table.RevisionHistory.Select(h => (h.Generation, h.Revision)), Is.EqualTo(new[] { (1, 1), (2, 2) }),
+                "the second run's hop must be APPENDED, not replace the first run's - the whole point of RevisionHistory " +
+                "is answering 'what revision was this table's data at generation N' for every N it's ever passed through.");
+
+            Assert.That(File.Exists(Path.Combine(projectDirectory, "Migrations", "Widget_Rev1.g.cs")), Is.True);
+            Assert.That(File.Exists(Path.Combine(projectDirectory, "Migrations", "Widget_FromRev1.cs")), Is.True);
+        } finally {
             Directory.Delete(projectDirectory, recursive: true);
         }
     }

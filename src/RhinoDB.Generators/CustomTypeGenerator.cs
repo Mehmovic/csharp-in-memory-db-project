@@ -89,14 +89,14 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
             sb.AppendLine();
         }
 
-        sb.AppendLine($"internal static class {opsName} {{");
+        sb.AppendLine($"public static class {opsName} {{");
 
-        sb.AppendLine($"    internal static void WriteRaw<TBufferWriter>(ref MemoryPackWriter<TBufferWriter> writer, {type} value) where TBufferWriter : IBufferWriter<byte> {{");
+        sb.AppendLine($"    public static void WriteRaw<TBufferWriter>(ref MemoryPackWriter<TBufferWriter> writer, {type} value) where TBufferWriter : IBufferWriter<byte> {{");
         foreach (var f in model.Fields) SchemaWalk.EmitWriteField(sb, f, $"value.{f.FieldName}");
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    internal static {type} ReadRaw(ref MemoryPackReader reader) {{");
+        sb.AppendLine($"    public static {type} ReadRaw(ref MemoryPackReader reader) {{");
         foreach (var f in model.Fields) SchemaWalk.EmitReadField(sb, f);
         sb.Append($"        return new {type}(");
         sb.Append(string.Join(", ", model.Fields.Select(f => $"{TableGenerator.Camel(f.FieldName)}Value")));
@@ -104,7 +104,7 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    internal static byte[] SerializeRow({type} value) {{");
+        sb.AppendLine($"    public static byte[] SerializeRow({type} value) {{");
         sb.AppendLine("        var bufferWriter = new PooledBufferWriter(256);");
         sb.AppendLine("        var writerState = MemoryPackWriterOptionalStatePool.Rent(null);");
         sb.AppendLine("        var writer = new MemoryPackWriter<PooledBufferWriter>(ref bufferWriter, writerState);");
@@ -116,7 +116,7 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    internal static {type} DeserializeRow(byte[] bytes) {{");
+        sb.AppendLine($"    public static {type} DeserializeRow(byte[] bytes) {{");
         sb.AppendLine("        var readerState = MemoryPackReaderOptionalStatePool.Rent(null);");
         sb.AppendLine("        var reader = new MemoryPackReader(bytes, readerState);");
         sb.AppendLine("        var result = ReadRaw(ref reader);");
@@ -125,10 +125,10 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    internal static byte[] SerializeVersionedMemoryPack({type} value) => MemoryPackSerializer.Serialize(value);");
-        sb.AppendLine($"    internal static {type} DeserializeVersionedMemoryPack(byte[] bytes) => MemoryPackSerializer.Deserialize<{type}>(bytes)!;");
-        sb.AppendLine($"    internal static byte[] SerializeMessagePack({type} value) => MessagePackSerializer.Serialize(value);");
-        sb.AppendLine($"    internal static {type} DeserializeMessagePack(byte[] bytes) => MessagePackSerializer.Deserialize<{type}>(bytes);");
+        sb.AppendLine($"    public static byte[] SerializeVersionedMemoryPack({type} value) => MemoryPackSerializer.Serialize(value);");
+        sb.AppendLine($"    public static {type} DeserializeVersionedMemoryPack(byte[] bytes) => MemoryPackSerializer.Deserialize<{type}>(bytes)!;");
+        sb.AppendLine($"    public static byte[] SerializeMessagePack({type} value) => MessagePackSerializer.Serialize(value);");
+        sb.AppendLine($"    public static {type} DeserializeMessagePack(byte[] bytes) => MessagePackSerializer.Deserialize<{type}>(bytes);");
 
         sb.AppendLine("}");
         return sb.ToString();

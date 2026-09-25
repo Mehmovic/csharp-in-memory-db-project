@@ -100,9 +100,9 @@ public class CustomTypeGeneratorTests {
         var (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
         var opsType = asm.GetType("TestNs.PlayerNameCustomTypeOps")!;
 
-        Assert.That(opsType.GetMethod("SerializeVersionedMemoryPack", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static), Is.Not.Null);
-        Assert.That(opsType.GetMethod("DeserializeVersionedMemoryPack", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static), Is.Not.Null);
-        Assert.That(opsType.GetMethod("SerializeMessagePack", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static), Is.Not.Null);
-        Assert.That(opsType.GetMethod("DeserializeMessagePack", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static), Is.Not.Null);
+        Assert.That(opsType.GetMethod("SerializeVersionedMemoryPack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Not.Null);
+        Assert.That(opsType.GetMethod("DeserializeVersionedMemoryPack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Not.Null);
+        Assert.That(opsType.GetMethod("SerializeMessagePack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Not.Null);
+        Assert.That(opsType.GetMethod("DeserializeMessagePack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Not.Null);
     }
 }

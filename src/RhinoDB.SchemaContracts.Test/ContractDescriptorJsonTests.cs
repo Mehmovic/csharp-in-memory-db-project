@@ -30,6 +30,7 @@ public class ContractDescriptorJsonTests {
                 new FieldDescriptor { Path = "Loadout.WeaponId", TypeFullName = "System.Int32", Kind = RowFieldKind.Unmanaged },
             },
             Indexes = { new IndexDescriptor { Accessor = "Name", Kind = "Hash", Uniqueness = "NonUnique", FieldPaths = { "Name" } } },
+            RevisionHistory = { new RevisionHistoryEntry { Generation = 1, Revision = 1 }, new RevisionHistoryEntry { Generation = 3, Revision = 2 } },
         });
         return descriptor;
     }
@@ -66,6 +67,7 @@ public class ContractDescriptorJsonTests {
         Assert.That(table.Indexes, Has.Count.EqualTo(1));
         Assert.That(table.Indexes[0].FieldPaths, Is.EqualTo(new[] { "Name" }));
         Assert.That(table.RemovedAtGeneration, Is.Null);
+        Assert.That(table.RevisionHistory.Select(h => (h.Generation, h.Revision)), Is.EqualTo(new[] { (1, 1), (3, 2) }));
     }
 
     [Test]

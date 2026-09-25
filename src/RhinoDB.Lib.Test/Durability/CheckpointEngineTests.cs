@@ -155,6 +155,45 @@ public class CheckpointEngineTests {
     }
 
     [Test]
+    public void ReadGeneration_BeforeAnyWrite_ReturnsZero() {
+        using var wal = CreateWal();
+        var engine = new CheckpointEngine(env, wal, archiveDir);
+
+        Assert.That(engine.ReadGeneration().Unwrap(), Is.EqualTo(0));
+    }
+
+    [Test]
+    public void WriteGeneration_ThenRead_RoundTrips() {
+        using var wal = CreateWal();
+        var engine = new CheckpointEngine(env, wal, archiveDir);
+
+        env.BeginTxn(0, out var txn);
+        using (txn) {
+            Assert.That(engine.WriteGeneration(txn!, 7).IsOk(), Is.True);
+            txn!.Commit();
+        }
+
+        Assert.That(engine.ReadGeneration().Unwrap(), Is.EqualTo(7));
+    }
+
+    [Test]
+    public void WriteGeneration_TransactionNeverCommitted_LeavesGenerationUnchanged() {
+        // Docs/06-schema-migration.md §3: the generation must be written in the SAME transaction as the
+        // row rewrites it accompanies - proving the write only takes effect on commit (not merely on the
+        // Put call) is what makes that atomicity guarantee real, not just documented intent.
+        using var wal = CreateWal();
+        var engine = new CheckpointEngine(env, wal, archiveDir);
+
+        env.BeginTxn(0, out var txn);
+        using (txn) {
+            engine.WriteGeneration(txn!, 7);
+            // Deliberately not committed - `using` aborts it on Dispose.
+        }
+
+        Assert.That(engine.ReadGeneration().Unwrap(), Is.EqualTo(0));
+    }
+
+    [Test]
     public async Task RunCheckpoint_WithAChangeForAnUnknownTable_RefusesInsteadOfDroppingItAndTruncating() {
         // Schema drift, a foreign WAL file, or a tableId hash collision all look the same here: a
         // tail entry naming a table this database never opened. Skipping it and truncating the

@@ -42,6 +42,19 @@ static public class MigrationCreateCommand {
         var descriptorPath = Path.Combine(projectDirectory, config.SchemaDescriptorPath);
         var oldDescriptor = File.Exists(descriptorPath) ? ContractDescriptorJson.Parse(File.ReadAllText(descriptorPath)) : new DatabaseContractDescriptor();
 
+        // CompilationWalker.BuildDescriptor always builds a FRESH DatabaseGenerationState per database
+        // (Generation defaults to 0, since it has no access to the committed descriptor) - carry the real,
+        // previously-persisted values forward before anything below increments them, or a second
+        // `migration create` run against an already-migrated database would silently reset its generation
+        // to 0 and increment from there instead of from its real value.
+        foreach (var newDb in newDescriptor.Databases) {
+            var oldDb = oldDescriptor.Databases.FirstOrDefault(d => d.FullName == newDb.FullName);
+            if (oldDb is null) continue;
+            newDb.Generation = oldDb.Generation;
+            newDb.InvalidGenerations = oldDb.InvalidGenerations;
+            newDb.RetainedFromGeneration = oldDb.RetainedFromGeneration;
+        }
+
         var breakingByRowType = new Dictionary<string, List<(TableDescriptor Old, TableDescriptor New)>>();
         foreach (var newTable in newDescriptor.Tables) {
             var oldTable = oldDescriptor.Tables.FirstOrDefault(t => t.DatabaseFullName == newTable.DatabaseFullName && t.Accessor == newTable.Accessor);
@@ -72,8 +85,12 @@ static public class MigrationCreateCommand {
             WriteMigrationStub(migrationsDirectory, rowTypeFullName, fromRevision, toRevision);
 
             newDescriptor.TypeRevisions[rowTypeFullName] = toRevision;
-            foreach (var (_, newTable) in pairs) newTable.Revision = toRevision;
 
+            // Bump every distinct affected database's generation FIRST, so each table below can record
+            // its OWN database's post-increment value alongside the new revision - the runtime migration
+            // engine's only way to answer "what revision is this table's on-disk data actually in?" given
+            // nothing but G_db.
+            var databaseGenerations = new Dictionary<string, int>();
             foreach (var databaseFullName in pairs.Select(p => p.New.DatabaseFullName).Distinct()) {
                 var databaseState = newDescriptor.Databases.FirstOrDefault(d => d.FullName == databaseFullName);
                 if (databaseState is null) {
@@ -81,6 +98,16 @@ static public class MigrationCreateCommand {
                     newDescriptor.Databases.Add(databaseState);
                 }
                 databaseState.Generation++;
+                databaseGenerations[databaseFullName] = databaseState.Generation;
+            }
+
+            foreach (var (oldTable, newTable) in pairs) {
+                newTable.Revision = toRevision;
+                // Carry the OLD table's history forward (it doesn't exist on the freshly-built newTable at
+                // all) before appending this run's own hop.
+                newTable.RevisionHistory = new List<RevisionHistoryEntry>(oldTable.RevisionHistory) {
+                    new RevisionHistoryEntry { Generation = databaseGenerations[newTable.DatabaseFullName], Revision = toRevision },
+                };
             }
 
             Console.WriteLine($"  Created migration for '{rowTypeFullName}': revision {fromRevision} -> {toRevision}");

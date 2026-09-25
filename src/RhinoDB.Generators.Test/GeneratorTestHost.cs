@@ -157,11 +157,12 @@ static internal class GeneratorTestHost {
         return method.Invoke(null, args);
     }
 
-    // Same as InvokeHelper, but for the private static members (e.g. the raw serializer methods
-    // TableGenerator emits on each Ops class) that a plain public-only GetMethod lookup won't find.
+    // Same as InvokeHelper, but for static members that a plain public-only GetMethod lookup might miss -
+    // some of TableGenerator's emitted Ops-class members are internal (accessibility varies per member, not
+    // uniformly public or internal), so this searches both.
     static public object? InvokePrivateStaticHelper(Assembly asm, string typeName, string methodName, params object?[] args) {
         var type = asm.GetType(typeName) ?? throw new InvalidOperationException($"Type '{typeName}' not found.");
-        var method = type.GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Static)
+        var method = type.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException($"Method '{methodName}' not found on '{typeName}'.");
         return method.Invoke(null, args);
     }

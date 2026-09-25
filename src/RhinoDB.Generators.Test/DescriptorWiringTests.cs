@@ -150,7 +150,8 @@ public class DescriptorWiringTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            public readonly record struct OldAccountShape(int Id, decimal Balance);
+            [FrozenSchema(0)]
+            public readonly record struct OldAccountShape([PrimaryKey] int Id, decimal Balance);
 
             [Table(TableKind.Persistent, typeof(VaultDb))]
             [MemoryPackable(GenerateType.VersionTolerant)]

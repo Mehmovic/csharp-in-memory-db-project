@@ -20,7 +20,8 @@ public class MigrationMethodTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            public readonly record struct OldAccountShape(int Id, decimal Balance);
+            [FrozenSchema(0)]
+            public readonly record struct OldAccountShape([PrimaryKey] int Id, decimal Balance);
 
             [Table(TableKind.Persistent, typeof(VaultDb))]
             [MemoryPackable(GenerateType.VersionTolerant)]
@@ -35,7 +36,7 @@ public class MigrationMethodTests {
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var opsType = asm.GetType("TestNs.VaultDbAccountOps")!;
-        var wrapper = opsType.GetMethod("MigrateFromRevision0", BindingFlags.NonPublic | BindingFlags.Static);
+        var wrapper = opsType.GetMethod("MigrateFromRevision0", BindingFlags.Public | BindingFlags.Static);
 
         Assert.That(wrapper, Is.Not.Null);
         Assert.That(wrapper!.ReturnType, Is.EqualTo(asm.GetType("TestNs.Account")));
@@ -62,8 +63,10 @@ public class MigrationMethodTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            public readonly record struct AccountV0(int Id);
-            public readonly record struct AccountV1(int Id, decimal Balance);
+            [FrozenSchema(0)]
+            public readonly record struct AccountV0([PrimaryKey] int Id);
+            [FrozenSchema(1)]
+            public readonly record struct AccountV1([PrimaryKey] int Id, decimal Balance);
 
             [Table(TableKind.Persistent, typeof(VaultDb))]
             [MemoryPackable(GenerateType.VersionTolerant)]
@@ -81,8 +84,8 @@ public class MigrationMethodTests {
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var opsType = asm.GetType("TestNs.VaultDbAccountOps")!;
 
-        Assert.That(opsType.GetMethod("MigrateFromRevision0", BindingFlags.NonPublic | BindingFlags.Static), Is.Not.Null);
-        Assert.That(opsType.GetMethod("MigrateFromRevision1", BindingFlags.NonPublic | BindingFlags.Static), Is.Not.Null);
+        Assert.That(opsType.GetMethod("MigrateFromRevision0", BindingFlags.Public | BindingFlags.Static), Is.Not.Null);
+        Assert.That(opsType.GetMethod("MigrateFromRevision1", BindingFlags.Public | BindingFlags.Static), Is.Not.Null);
     }
 
     [Test]
@@ -112,7 +115,7 @@ public class MigrationMethodTests {
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var opsType = asm.GetType("TestNs.VaultDbWidgetOps")!;
 
-        Assert.That(opsType.GetMethod("MigrateFromRevision0", BindingFlags.NonPublic | BindingFlags.Static), Is.Null);
+        Assert.That(opsType.GetMethod("MigrateFromRevision0", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static), Is.Null);
     }
 
     [Test]

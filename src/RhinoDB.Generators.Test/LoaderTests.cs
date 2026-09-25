@@ -173,10 +173,10 @@ public class LoaderTests {
             var loader = Activator.CreateInstance(loaderType)!;
             await (Task)loaderType.GetMethod("LoadAsync")!.Invoke(loader, [reopenedDb])!;
 
-            var createLoaderTx = dbType.GetMethod("CreateLoaderTransaction", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+            var createLoaderTx = dbType.GetMethod("CreateLoaderTransaction", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             dynamic tx = createLoaderTx.Invoke(reopenedDb, null)!;
             var accountsOps = tx.Account;
-            var bulkLoad = ((object)accountsOps).GetType().GetMethod("BulkLoadFromCold", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+            var bulkLoad = ((object)accountsOps).GetType().GetMethod("BulkLoadFromCold", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             bulkLoad.Invoke(accountsOps, null);
 
             Assert.That((bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "AccountFindIsOk", (object)accountsOps, 1)!, Is.True, "BulkLoadFromCold() must be usable directly by a custom LoadAsync override to eager-load an Evictable table too.");

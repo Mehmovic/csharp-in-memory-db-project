@@ -25,6 +25,12 @@ public sealed class TableDescriptor {
 
     public List<IndexDescriptor> Indexes { get; set; } = [];
 
+    // Cumulative, ascending-by-Generation - never overwritten, only appended to by `migration create`.
+    // The runtime migration engine looks up "the largest entry whose Generation <= G_db" to find which
+    // revision this table's ON-DISK data is actually in; an empty list (or no entry <= G_db) means
+    // revision 0 - the row type's original, never-yet-migrated shape.
+    public List<RevisionHistoryEntry> RevisionHistory { get; set; } = [];
+
     // Set once a table is observed missing from a live compilation (point 6's "Removed" classification) -
     // null while the table still exists live. Orphan retention (doc §6/§11: kept one generation, then
     // dropped): the drop condition is `RemovedAtGeneration < database's current generation` (equivalently

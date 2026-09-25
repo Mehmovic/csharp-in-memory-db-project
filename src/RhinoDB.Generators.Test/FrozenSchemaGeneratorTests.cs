@@ -60,7 +60,7 @@ public class FrozenSchemaGeneratorTests {
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var opsType = asm.GetType("TestNs.Account_Rev3FrozenSchemaOps")!;
-        var revisionField = opsType.GetField("Revision", BindingFlags.NonPublic | BindingFlags.Static);
+        var revisionField = opsType.GetField("Revision", BindingFlags.Public | BindingFlags.Static);
 
         Assert.That(revisionField, Is.Not.Null);
         Assert.That(revisionField!.GetValue(null), Is.EqualTo(3));
