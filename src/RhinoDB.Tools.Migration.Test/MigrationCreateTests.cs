@@ -183,4 +183,42 @@ public class MigrationCreateTests {
             Directory.Delete(projectDirectory, recursive: true);
         }
     }
+
+    [Test]
+    public void MigrationCreate_ATrulyFreshProjectWithNoCommittedDescriptorAtAll_WritesTheCurrentSchemaAsTheInitialBaseline() {
+        // Every other test in this file starts from the fixture's own COMMITTED Descriptor.json - this is
+        // the one case that starts from genuinely nothing (deleting it after the copy, simulating a brand
+        // new project's very first run). Real bug this guards against: with no old descriptor, every table
+        // looks "new" (nothing to diff against), so nothing is ever classified Breaking - the old early
+        // return silently wrote NOTHING, which would have permanently blocked ever detecting a real breaking
+        // change later too (the first one would have had nothing to diff against either, forever).
+        var csprojPath = CopyFixtureToTempDirectory();
+        var projectDirectory = Path.GetDirectoryName(csprojPath)!;
+        var descriptorPath = Path.Combine(projectDirectory, "RhinoContracts", "Descriptor.json");
+        var originalOut = Console.Out;
+        try {
+            File.Delete(descriptorPath);
+
+            var capturedOut = new StringWriter();
+            Console.SetOut(capturedOut);
+            var exitCode = RhinoDB.Tools.Migration.MigrationTool.Run(["create", "--project", csprojPath]);
+            Console.SetOut(originalOut);
+
+            Assert.That(exitCode, Is.EqualTo(0));
+            Assert.That(capturedOut.ToString(), Does.Contain("writing the current schema as the initial baseline"));
+            Assert.That(File.Exists(descriptorPath), Is.True, "the baseline descriptor must actually be written to disk.");
+
+            var descriptor = RhinoDB.SchemaContracts.ContractDescriptorJson.Parse(File.ReadAllText(descriptorPath));
+            var table = descriptor.Tables.Single();
+            Assert.That(table.Accessor, Is.EqualTo("Widget"));
+            Assert.That(table.Revision, Is.EqualTo(0), "a baseline write is not a migration - nothing has a revision yet.");
+
+            var migrationsDir = Path.Combine(projectDirectory, "Migrations");
+            var migrationFiles = Directory.Exists(migrationsDir) ? Directory.GetFiles(migrationsDir) : [];
+            Assert.That(migrationFiles, Is.Empty, "a baseline write needs no frozen snapshot/migration stub - nothing changed yet.");
+        } finally {
+            Console.SetOut(originalOut);
+            Directory.Delete(projectDirectory, recursive: true);
+        }
+    }
 }

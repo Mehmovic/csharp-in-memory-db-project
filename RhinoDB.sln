@@ -8,11 +8,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tools", "Tools", "{53589EF4
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Core", "src\RhinoDB.Core\RhinoDB.Core.csproj", "{93234058-4908-4BDC-B8DA-8C0C2B7DF79C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Lib", "src\RhinoDB.Lib\RhinoDB.Lib.csproj", "{2447E99B-18E3-41D7-ACC3-BBE1BA730686}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Core.Test", "src\RhinoDB.Core.Test\RhinoDB.Core.Test.csproj", "{E47D973F-ABE2-4099-B824-E0FE4DDCC6A8}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Lib.Test", "src\RhinoDB.Lib.Test\RhinoDB.Lib.Test.csproj", "{B5830303-66C8-4768-BE8B-E0368D64AE32}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Generators", "src\RhinoDB.Generators\RhinoDB.Generators.csproj", "{535380B3-D97F-46B8-8B8F-4A3C6D27C8A8}"
 EndProject
@@ -22,17 +18,23 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Native.Test", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Generators.Test", "src\RhinoDB.Generators.Test\RhinoDB.Generators.Test.csproj", "{BA84EA7A-28CF-426F-9175-B7F640F82E30}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Sandbox.Benchmark", "src\RhinoDB.Sandbox.Benchmark\RhinoDB.Sandbox.Benchmark.csproj", "{C043DCA7-8592-4CAB-BBA1-BA53A61772D5}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.PreBuild", "src\RhinoDB.PreBuild\RhinoDB.PreBuild.csproj", "{8F0DB664-BF81-416E-B5C3-4368D3D67251}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.PreBuild.Test", "src\RhinoDB.PreBuild.Test\RhinoDB.PreBuild.Test.csproj", "{BD1FA245-9949-4435-A3D7-775AAC44FF83}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Sandbox", "src\RhinoDB.Sandbox\RhinoDB.Sandbox.csproj", "{AA4AFAD0-629A-4258-A095-C04E710CBD3C}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.SchemaContracts", "src\RhinoDB.SchemaContracts\RhinoDB.SchemaContracts.csproj", "{64535DDF-41E0-498A-84A9-CF40978B6EE5}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.SchemaContracts.Test", "src\RhinoDB.SchemaContracts.Test\RhinoDB.SchemaContracts.Test.csproj", "{0E8D45C4-9A11-4D23-AE1C-A998515E8112}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Sandbox", "src\RhinoDB.Sandbox\RhinoDB.Sandbox.csproj", "{AA4AFAD0-629A-4258-A095-C04E710CBD3C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Sandbox.Benchmark", "src\RhinoDB.Sandbox.Benchmark\RhinoDB.Sandbox.Benchmark.csproj", "{C043DCA7-8592-4CAB-BBA1-BA53A61772D5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Sandbox.MigrationFixture", "src\RhinoDB.Sandbox.MigrationFixture\RhinoDB.Sandbox.MigrationFixture.csproj", "{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Tools.Dev", "src\RhinoDB.Tools.Dev\RhinoDB.Tools.Dev.csproj", "{B016AB64-780C-4410-90CD-9438B41E29A0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Tools.Dev.Test", "src\RhinoDB.Tools.Dev.Test\RhinoDB.Tools.Dev.Test.csproj", "{7643B632-DC04-4F4D-AD87-0CED9EEBF616}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Tools.Migration", "src\RhinoDB.Tools.Migration\RhinoDB.Tools.Migration.csproj", "{C393F394-4026-47B8-8604-1523BDF886FF}"
 EndProject
@@ -40,9 +42,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Tools.Migration.Tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Run.Cli", "src\RhinoDB.Run.Cli\RhinoDB.Run.Cli.csproj", "{B15DAB44-8638-42D3-8A4D-B485E82FFD8A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Tools.Dev", "src\RhinoDB.Tools.Dev\RhinoDB.Tools.Dev.csproj", "{B016AB64-780C-4410-90CD-9438B41E29A0}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Lib", "src\RhinoDB.Lib\RhinoDB.Lib.csproj", "{2447E99B-18E3-41D7-ACC3-BBE1BA730686}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Tools.Dev.Test", "src\RhinoDB.Tools.Dev.Test\RhinoDB.Tools.Dev.Test.csproj", "{7643B632-DC04-4F4D-AD87-0CED9EEBF616}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoDB.Lib.Test", "src\RhinoDB.Lib.Test\RhinoDB.Lib.Test.csproj", "{B5830303-66C8-4768-BE8B-E0368D64AE32}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -282,6 +284,18 @@ Global
 		{7643B632-DC04-4F4D-AD87-0CED9EEBF616}.Release|x64.Build.0 = Release|Any CPU
 		{7643B632-DC04-4F4D-AD87-0CED9EEBF616}.Release|x86.ActiveCfg = Release|Any CPU
 		{7643B632-DC04-4F4D-AD87-0CED9EEBF616}.Release|x86.Build.0 = Release|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Debug|x64.Build.0 = Debug|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Debug|x86.Build.0 = Debug|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Release|x64.ActiveCfg = Release|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Release|x64.Build.0 = Release|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Release|x86.ActiveCfg = Release|Any CPU
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -299,6 +313,7 @@ Global
 		{0E8D45C4-9A11-4D23-AE1C-A998515E8112} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{C043DCA7-8592-4CAB-BBA1-BA53A61772D5} = {428D3589-4659-40B2-AF39-7306B11789DD}
 		{AA4AFAD0-629A-4258-A095-C04E710CBD3C} = {428D3589-4659-40B2-AF39-7306B11789DD}
+		{42E28BC5-77F6-4546-BCE7-F55901A5A6CF} = {428D3589-4659-40B2-AF39-7306B11789DD}
 		{C393F394-4026-47B8-8604-1523BDF886FF} = {53589EF4-B4BA-4592-82F4-3F2D5DBCF654}
 		{BE967F54-EEE8-42E1-AB12-FFF166F1C4ED} = {53589EF4-B4BA-4592-82F4-3F2D5DBCF654}
 		{B016AB64-780C-4410-90CD-9438B41E29A0} = {53589EF4-B4BA-4592-82F4-3F2D5DBCF654}

@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net11.0</TargetFramework>
+        <LangVersion>latest</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>RhinoDB.Sandbox.MigrationFixture</RootNamespace>
+    </PropertyGroup>
+
+    <!-- Dedicated, standalone schema (not this repo's own) for Phase 5 step 25's real breaking-change dry
+         run - see Docs/06-schema-migration.md Section 10's anti-circularity trap: a migration test must
+         never regenerate "old" bytes with the current codegen. This project's own history (V1 -> a real
+         breaking change -> V2 + a real [Migration]) produces genuinely historical bytes once, checked in
+         as a frozen fixture consumed by RhinoDB.Generators.Test - never regenerated. No shorthand-tool
+         wiring needed (hand-written [Table] attributes throughout), so only the Descriptor.json
+         AdditionalFiles wiring is needed directly, not the full RhinoDB.PreBuild import. -->
+    <ItemGroup>
+        <AdditionalFiles Include="RhinoContracts/Descriptor.json" Condition="Exists('RhinoContracts/Descriptor.json')" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\RhinoDB.Core\RhinoDB.Core.csproj" />
+        <ProjectReference Include="..\RhinoDB.Lib\RhinoDB.Lib.csproj" />
+        <ProjectReference Include="..\RhinoDB.Generators\RhinoDB.Generators.csproj"
+                           OutputItemType="Analyzer"
+                           ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\RhinoDB.SchemaContracts\RhinoDB.SchemaContracts.csproj"
+                           OutputItemType="Analyzer"
+                           ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+</Project>

@@ -1,0 +1,54 @@
+{
+  "Databases": [
+    {
+      "FullName": "global::RhinoDB.Sandbox.MigrationFixture.LeagueDb",
+      "Generation": 1,
+      "InvalidGenerations": [],
+      "RetainedFromGeneration": 0
+    }
+  ],
+  "TypeRevisions": {
+    "global::RhinoDB.Sandbox.MigrationFixture.Player": 1
+  },
+  "CustomTypes": {},
+  "Tables": [
+    {
+      "DatabaseFullName": "global::RhinoDB.Sandbox.MigrationFixture.LeagueDb",
+      "Accessor": "Player",
+      "RowTypeFullName": "global::RhinoDB.Sandbox.MigrationFixture.Player",
+      "Kind": "Persistent",
+      "TableIdHash": 477166624,
+      "Revision": 1,
+      "PrimaryKey": {
+        "Path": "Id",
+        "TypeFullName": "int",
+        "Kind": "Unmanaged"
+      },
+      "Fields": [
+        {
+          "Path": "Id",
+          "TypeFullName": "int",
+          "Kind": "Unmanaged"
+        },
+        {
+          "Path": "Rating",
+          "TypeFullName": "int",
+          "Kind": "Unmanaged"
+        },
+        {
+          "Path": "Name",
+          "TypeFullName": "string",
+          "Kind": "String"
+        }
+      ],
+      "Indexes": [],
+      "RevisionHistory": [
+        {
+          "Generation": 1,
+          "Revision": 1
+        }
+      ],
+      "RemovedAtGeneration": null
+    }
+  ]
+}

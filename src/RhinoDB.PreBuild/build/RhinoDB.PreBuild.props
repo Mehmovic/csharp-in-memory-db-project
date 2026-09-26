@@ -6,9 +6,15 @@
         <RhinoSourceParentDirectory Condition="'$(RhinoSourceParentDirectory)' == ''">RhinoContracts</RhinoSourceParentDirectory>
         <RhinoTargetParentDirectory Condition="'$(_RhinoGeneratorConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoGeneratorConfigJson)', '"TargetParentDirectory"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoTargetParentDirectory>
         <RhinoTargetParentDirectory Condition="'$(RhinoTargetParentDirectory)' == ''">RhinoDB</RhinoTargetParentDirectory>
+        <RhinoSchemaDescriptorPath Condition="'$(_RhinoGeneratorConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoGeneratorConfigJson)', '"SchemaDescriptorPath"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoSchemaDescriptorPath>
+        <RhinoSchemaDescriptorPath Condition="'$(RhinoSchemaDescriptorPath)' == ''">RhinoContracts/Descriptor.json</RhinoSchemaDescriptorPath>
     </PropertyGroup>
     <ItemGroup>
         <Compile Remove="$(RhinoSourceParentDirectory)/**/*.cs" />
         <None Include="$(RhinoSourceParentDirectory)/**/*.cs" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <AdditionalFiles Include="$(RhinoSchemaDescriptorPath)" Condition="Exists('$(RhinoSchemaDescriptorPath)')" />
     </ItemGroup>
 </Project>

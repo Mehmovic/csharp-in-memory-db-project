@@ -28,7 +28,8 @@ static public class MigrationCreateCommand {
         var projectDirectory = Path.GetDirectoryName(projectPath!)!;
         var config = GeneratorConfigLoader.Load(projectDirectory);
         var descriptorPath = Path.Combine(projectDirectory, config.SchemaDescriptorPath);
-        var oldDescriptor = File.Exists(descriptorPath) ? ContractDescriptorJson.Parse(File.ReadAllText(descriptorPath)) : new DatabaseContractDescriptor();
+        var descriptorExistedBefore = File.Exists(descriptorPath);
+        var oldDescriptor = descriptorExistedBefore ? ContractDescriptorJson.Parse(File.ReadAllText(descriptorPath)) : new DatabaseContractDescriptor();
 
         foreach (var newDb in newDescriptor.Databases) {
             var oldDb = oldDescriptor.Databases.FirstOrDefault(d => d.FullName == newDb.FullName);
@@ -67,6 +68,12 @@ static public class MigrationCreateCommand {
         }
 
         if (breakingByRowType.Count == 0 && newlyOrphaned.Count == 0) {
+            if (!descriptorExistedBefore) {
+                Directory.CreateDirectory(Path.GetDirectoryName(descriptorPath)!);
+                File.WriteAllText(descriptorPath, ContractDescriptorJson.Serialize(newDescriptor));
+                Console.WriteLine("No committed schema history found - writing the current schema as the initial baseline.");
+                return 0;
+            }
             Console.WriteLine("No breaking changes detected - nothing to create.");
             return 0;
         }

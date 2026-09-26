@@ -27,6 +27,7 @@
         <ProjectReference Include="..\RhinoDB.Core\RhinoDB.Core.csproj"/>
         <ProjectReference Include="..\RhinoDB.Lib\RhinoDB.Lib.csproj"/>
         <ProjectReference Include="..\RhinoDB.PreBuild\RhinoDB.PreBuild.csproj"/>
+        <ProjectReference Include="..\RhinoDB.Sandbox.MigrationFixture\RhinoDB.Sandbox.MigrationFixture.csproj"/>
     </ItemGroup>
 
 </Project>
