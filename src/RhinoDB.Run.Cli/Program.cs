@@ -21,6 +21,7 @@ static class Program {
 
         return args[0] switch {
             "migration" => RhinoDB.Tools.Migration.MigrationTool.Run(args[1..]),
+            "dev" => RhinoDB.Tools.Dev.DevTool.Run(args[1..]),
             _ => Unknown(args[0]),
         };
     }
@@ -38,6 +39,7 @@ static class Program {
             Usage:
               rhinodb migration status [--project <path>]
               rhinodb migration create <Name> [--project <path>]
+              rhinodb dev reset [--project <path>] [--cold-path <path>]... [--yes]
             """);
     }
 }
