@@ -1,3 +1,4 @@
+using RhinoDB.Lib.Tables;
 using RhinoDB.Native;
 
 namespace RhinoDB.Lib.Durability;
@@ -63,10 +64,6 @@ static public class WalArchive {
         return merged;
     }
 
-    // Cheap - reads only each segment's fixed-size header, never scans/decodes its body. Used as a
-    // pre-flight check before genesis replay walks any segment: if the oldest one present needs an older
-    // reader than this binary's own retention floor guarantees, refuse immediately rather than starting a
-    // potentially-long replay only to fail partway through decoding a segment it can't actually handle.
     static public Result<Option<int>> ReadOldestRetainedGeneration(string coldStorePath) {
         var archiveDirectory = Path.Combine(coldStorePath, ArchiveDirectoryName);
         if (!Directory.Exists(archiveDirectory)) return Result<Option<int>>.Ok(Option<int>.None());
@@ -90,6 +87,102 @@ static public class WalArchive {
         }
 
         return Result<Option<int>>.Ok(oldest is { } value ? Option<int>.Some(value) : Option<int>.None());
+    }
+
+    static public Result DeleteSegmentsOlderThan(string coldStorePath, int targetGeneration) {
+        var archiveDirectory = Path.Combine(coldStorePath, ArchiveDirectoryName);
+        if (!Directory.Exists(archiveDirectory)) return Result.Ok();
+
+        foreach (var segmentPath in Directory.EnumerateFiles(archiveDirectory, $"*{SegmentExtension}")) {
+            byte[] headerBytes;
+            try {
+                using var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                headerBytes = new byte[WalFileHeaderCodec.Size];
+                var read = stream.Read(headerBytes, 0, headerBytes.Length);
+                if (read < headerBytes.Length) return Result.Error(DbError.WalCorrupted());
+            } catch (Exception ex) {
+                return Result.Error(DbError.SystemFailure(ex));
+            }
+
+            if (!WalFileHeaderCodec.TryDecode(headerBytes, out var header)) return Result.Error(DbError.WalCorrupted());
+            if ((int)header.Generation >= targetGeneration) continue;
+
+            try {
+                File.Delete(segmentPath);
+            } catch (Exception ex) {
+                return Result.Error(DbError.SystemFailure(ex));
+            }
+        }
+
+        return Result.Ok();
+    }
+
+    static public Result ConsolidateSegments(
+        string coldStorePath,
+        int targetGeneration,
+        Func<uint, int, ChangeKind, byte[], byte[]?, (byte[] Key, byte[]? Row)?> transform
+    ) {
+        var archiveDirectory = Path.Combine(coldStorePath, ArchiveDirectoryName);
+        if (!Directory.Exists(archiveDirectory)) return Result.Ok();
+
+        foreach (var segmentPath in Directory.EnumerateFiles(archiveDirectory, $"*{SegmentExtension}").OrderBy(p => p, StringComparer.Ordinal).ToArray()) {
+            byte[] originalBytes;
+            try {
+                originalBytes = File.ReadAllBytes(segmentPath);
+            } catch (Exception ex) {
+                return Result.Error(DbError.SystemFailure(ex));
+            }
+
+            if (originalBytes.Length < WalFileHeaderCodec.Size || !WalFileHeaderCodec.TryDecode(originalBytes, out var header))
+                return Result.Error(DbError.WalCorrupted());
+
+            if (header.Generation >= targetGeneration) continue;
+
+            var scan = WalRecordCodec.Scan(originalBytes.AsSpan(WalFileHeaderCodec.Size));
+            if (scan.Status != WalScanStatus.Clean) return Result.Error(DbError.WalCorrupted());
+
+            var consolidatedEntries = new List<DecodedWalEntry>();
+            foreach (var entry in scan.Entries) {
+                if (entry.Kind != WalEntryKind.Operation) continue;
+
+                var newChanges = new List<WalChange>();
+                foreach (var change in entry.Changes) {
+                    var transformed = transform(change.TableId, (int)header.Generation, change.Kind, change.Key, change.Row);
+                    if (transformed is not { } result) continue;
+
+                    newChanges.Add(new WalChange(change.TableId, change.Kind, result.Key, result.Row));
+                }
+
+                if (newChanges.Count > 0) consolidatedEntries.Add(new DecodedWalEntry(entry.Lsn, entry.Kind, newChanges.ToArray()));
+            }
+
+            try {
+                if (consolidatedEntries.Count == 0) {
+                    File.Delete(segmentPath);
+                    continue;
+                }
+
+                var tempPath = segmentPath + ".consolidating";
+                using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None)) {
+                    var newHeader = WalFileHeaderCodec.Encode(header.DatabaseId, (uint)targetGeneration);
+                    fileStream.Write(newHeader, 0, newHeader.Length);
+
+                    foreach (var entry in consolidatedEntries) {
+                        var frame = WalRecordCodec.Encode(entry.Lsn, entry.Kind, entry.Changes);
+                        fileStream.Write(frame, 0, frame.Length);
+                    }
+
+                    fileStream.Flush(flushToDisk: true);
+                }
+
+                File.Delete(segmentPath);
+                File.Move(tempPath, segmentPath);
+            } catch (Exception ex) {
+                return Result.Error(DbError.SystemFailure(ex));
+            }
+        }
+
+        return DirectorySync.TrySync(archiveDirectory, out _) ? Result.Ok() : Result.Error(DbError.WalDirectorySyncFailed());
     }
 
     static private Result<(uint Generation, DecodedWalEntry[] Entries)> ReadSegment(string path) {

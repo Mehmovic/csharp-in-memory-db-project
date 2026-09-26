@@ -123,6 +123,32 @@ public class CheckpointEngineTests {
     }
 
     [Test]
+    public async Task RunCheckpoint_AfterAMigrationBumpedTheGeneration_ArchivesTheSegmentTaggedWithTheCurrentGeneration() {
+        // Regression: RunCheckpoint used to hardcode the archived segment's generation to 0 regardless of
+        // what WriteGeneration had actually committed - silently mistagging every segment archived after a
+        // real migration, which both genesis replay and Phase 6's Prune/ConsolidateArchive depend on being
+        // accurate.
+        using var wal = CreateWal();
+        var engine = new CheckpointEngine(env, wal, archiveDir);
+        var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };
+
+        env.BeginTxn(0, out var generationTxn);
+        using (generationTxn) {
+            engine.WriteGeneration(generationTxn!, 7);
+            generationTxn!.Commit();
+        }
+
+        var entries = new[] { new DecodedWalEntry(1, WalEntryKind.Operation, [new WalChange(TableId, ChangeKind.Insert, [1], [42])]) };
+        var result = await engine.RunCheckpoint(1, tableDbis, [new CheckpointRow(TableId, [1], [42])], [], entries);
+
+        Assert.That(result.IsOk(), Is.True);
+        var oldestRetainedGeneration = WalArchive.ReadOldestRetainedGeneration(dir).Unwrap();
+        Assert.That(oldestRetainedGeneration.IsSome(), Is.True);
+        Assert.That(oldestRetainedGeneration.Get(), Is.EqualTo(7),
+            "the archived segment must be tagged with the generation actually committed at checkpoint time, not a hardcoded 0.");
+    }
+
+    [Test]
     public async Task RunCheckpoint_WhenAPutFails_AbortsWithoutChangingTheWatermarkOrData() {
         using var wal = CreateWal();
         var engine = new CheckpointEngine(env, wal, archiveDir);
@@ -213,5 +239,81 @@ public class CheckpointEngineTests {
         Assert.That(ReadRaw(widgetsDbi, [1]), Is.Null, "All-or-nothing: the known table row must not land either.");
         wal.Dispose();
         Assert.That(new FileInfo(path).Length, Is.GreaterThan(WalFileHeaderCodec.Size), "The WAL must not be truncated while it still holds changes we refused to checkpoint.");
+    }
+
+    [Test]
+    public void ReadRetainedFromGeneration_BeforeAnyWrite_ReturnsZero() {
+        using var wal = CreateWal();
+        var engine = new CheckpointEngine(env, wal, archiveDir);
+
+        Assert.That(engine.ReadRetainedFromGeneration().Unwrap(), Is.EqualTo(0));
+    }
+
+    [Test]
+    public void WriteRetainedFromGeneration_ThenRead_RoundTrips() {
+        using var wal = CreateWal();
+        var engine = new CheckpointEngine(env, wal, archiveDir);
+
+        env.BeginTxn(0, out var txn);
+        using (txn) {
+            Assert.That(engine.WriteRetainedFromGeneration(txn!, 3).IsOk(), Is.True);
+            txn!.Commit();
+        }
+
+        Assert.That(engine.ReadRetainedFromGeneration().Unwrap(), Is.EqualTo(3));
+    }
+
+    [Test]
+    public void WriteRetainedFromGeneration_TransactionNeverCommitted_LeavesItUnchanged() {
+        using var wal = CreateWal();
+        var engine = new CheckpointEngine(env, wal, archiveDir);
+
+        env.BeginTxn(0, out var txn);
+        using (txn) {
+            engine.WriteRetainedFromGeneration(txn!, 3);
+            // Deliberately not committed - `using` aborts it on Dispose.
+        }
+
+        Assert.That(engine.ReadRetainedFromGeneration().Unwrap(), Is.EqualTo(0));
+    }
+
+    [Test]
+    public void ReadOnAFreshInstance_ThenWrite_StillWorks() {
+        // Regression: a read-only call's transaction is always aborted (never committed), and libmdbx
+        // rolls back a dbi CREATE on abort. If EnsureMetadataDbi's read path opened the dbi with the CREATE
+        // flag (as it originally did, shared with the write path), the FIRST-EVER read on a truly fresh
+        // store - one that's never had anything written to __rhinodb_checkpoint__ - would cache a dbi
+        // handle that the abort had just invalidated, and every later WRITE reusing that cached handle
+        // (same CheckpointEngine instance) would fail with MDBX_BAD_DBI. RhinoRunMode.Prune's backward-guard
+        // read (ReadRetainedFromGeneration) followed by its own write is exactly this sequence on a
+        // never-checkpointed database.
+        using var wal = CreateWal();
+        var engine = new CheckpointEngine(env, wal, archiveDir);
+
+        Assert.That(engine.ReadRetainedFromGeneration().Unwrap(), Is.EqualTo(0), "read first, on a truly fresh store.");
+
+        env.BeginTxn(0, out var txn);
+        using (txn) {
+            Assert.That(engine.WriteRetainedFromGeneration(txn!, 4).IsOk(), Is.True);
+            txn!.Commit();
+        }
+
+        Assert.That(engine.ReadRetainedFromGeneration().Unwrap(), Is.EqualTo(4));
+    }
+
+    [Test]
+    public void WriteRetainedFromGeneration_IsIndependentOfGeneration() {
+        using var wal = CreateWal();
+        var engine = new CheckpointEngine(env, wal, archiveDir);
+
+        env.BeginTxn(0, out var txn);
+        using (txn) {
+            engine.WriteGeneration(txn!, 9);
+            engine.WriteRetainedFromGeneration(txn!, 3);
+            txn!.Commit();
+        }
+
+        Assert.That(engine.ReadGeneration().Unwrap(), Is.EqualTo(9));
+        Assert.That(engine.ReadRetainedFromGeneration().Unwrap(), Is.EqualTo(3));
     }
 }

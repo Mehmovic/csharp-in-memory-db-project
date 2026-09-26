@@ -252,6 +252,20 @@ public sealed class ColdStore : IDisposable {
 
     public Result<int> ReadGeneration() => checkpoint.ReadGeneration();
 
+    public Result<int> ReadRetainedFromGeneration() => checkpoint.ReadRetainedFromGeneration();
+
+    public Result WriteRetainedFromGeneration(int generation) {
+        var rc = env.BeginTxn(0, out var txn);
+        if (rc != 0 || txn is null) return Result.Error(MdbxErrorMapper.Map(rc));
+        using var _ = txn;
+
+        var writeResult = checkpoint.WriteRetainedFromGeneration(txn, generation);
+        if (writeResult.IsError()) return writeResult;
+
+        var commitRc = txn.Commit();
+        return commitRc != 0 ? Result.Error(MdbxErrorMapper.Map(commitRc)) : Result.Ok();
+    }
+
     public Result<TRow> Peek<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key)
         where TKey : IEquatable<TKey>, IComparable<TKey>
         where TRow : struct {

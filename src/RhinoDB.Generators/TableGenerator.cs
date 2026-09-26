@@ -1612,6 +1612,31 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine();
             sb.AppendLine("        return cold.RunMigration(G_binary, tableRewrites, orphanTablesToDrop);");
             sb.AppendLine("    }");
+
+            sb.AppendLine();
+            sb.AppendLine("    public Result ConsolidateArchive() {");
+            sb.AppendLine("        var currentGenerationResult = cold.ReadGeneration();");
+            sb.AppendLine("        if (currentGenerationResult.IsError()) return currentGenerationResult.Void();");
+            sb.AppendLine("        var targetGeneration = currentGenerationResult.Unwrap();");
+            sb.AppendLine();
+            sb.AppendLine("        var transformResult = WalArchive.ConsolidateSegments(cold.DirectoryPath, targetGeneration, (tableId, fromGeneration, kind, key, row) => {");
+            sb.AppendLine("            switch (tableId) {");
+            foreach (var table in persistentTables) {
+                var opsName = $"{database.SimpleName}{table.Accessor}Ops";
+                sb.AppendLine($"                case {ComputeTableId(table.Accessor)}u: {{");
+                sb.AppendLine("                    if (kind == ChangeKind.Delete) return (key, row);");
+                sb.AppendLine($"                    var fromRevision = {opsName}.RevisionAtGeneration(fromGeneration);");
+                sb.AppendLine($"                    var migratedRow = {opsName}.MigrateToCurrentRevision(fromRevision, row!);");
+                sb.AppendLine($"                    return ({opsName}.SerializeKey(migratedRow.{table.PrimaryKeyName}), {opsName}.SerializeRow(migratedRow));");
+                sb.AppendLine("                }");
+            }
+            sb.AppendLine("                default: return null;");
+            sb.AppendLine("            }");
+            sb.AppendLine("        });");
+            sb.AppendLine("        if (transformResult.IsError()) return transformResult;");
+            sb.AppendLine();
+            sb.AppendLine("        return cold.WriteRetainedFromGeneration(targetGeneration);");
+            sb.AppendLine("    }");
         }
 
         sb.AppendLine("}");

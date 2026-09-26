@@ -9,6 +9,7 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
     private const int MdbxResultTrue = -1;
     static private readonly byte[] WatermarkKey = [0];
     static private readonly byte[] GenerationKey = [1];
+    static private readonly byte[] RetainedFromGenerationKey = [2];
 
     private uint metadataDbi;
     private bool metadataDbiResolved;
@@ -18,8 +19,7 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
         if (rc != 0 || txn is null) return Result<long>.Error(MdbxErrorMapper.Map(rc));
         using var _ = txn;
 
-        var resolved = EnsureMetadataDbi(txn);
-        if (resolved.IsError()) return Result<long>.Error(resolved.GetError());
+        if (!EnsureMetadataDbiForRead(txn)) return Result<long>.Ok(-1L);
 
         var getRc = txn.Get(metadataDbi, WatermarkKey, out var bytes);
         return getRc != 0 ? Result<long>.Ok(-1L) : Result<long>.Ok(BitConverter.ToInt64(bytes));
@@ -30,8 +30,7 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
         if (rc != 0 || txn is null) return Result<int>.Error(MdbxErrorMapper.Map(rc));
         using var _ = txn;
 
-        var resolved = EnsureMetadataDbi(txn);
-        if (resolved.IsError()) return Result<int>.Error(resolved.GetError());
+        if (!EnsureMetadataDbiForRead(txn)) return Result<int>.Ok(0);
 
         var getRc = txn.Get(metadataDbi, GenerationKey, out var bytes);
         return getRc != 0 ? Result<int>.Ok(0) : Result<int>.Ok(BitConverter.ToInt32(bytes));
@@ -42,6 +41,25 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
         if (resolved.IsError()) return resolved;
 
         var putRc = txn.Put(metadataDbi, GenerationKey, BitConverter.GetBytes(generation), 0);
+        return putRc != 0 ? Result.Error(MdbxErrorMapper.Map(putRc)) : Result.Ok();
+    }
+
+    public Result<int> ReadRetainedFromGeneration() {
+        var rc = env.BeginTxn(0, out var txn);
+        if (rc != 0 || txn is null) return Result<int>.Error(MdbxErrorMapper.Map(rc));
+        using var _ = txn;
+
+        if (!EnsureMetadataDbiForRead(txn)) return Result<int>.Ok(0);
+
+        var getRc = txn.Get(metadataDbi, RetainedFromGenerationKey, out var bytes);
+        return getRc != 0 ? Result<int>.Ok(0) : Result<int>.Ok(BitConverter.ToInt32(bytes));
+    }
+
+    public Result WriteRetainedFromGeneration(Transaction txn, int generation) {
+        var resolved = EnsureMetadataDbi(txn);
+        if (resolved.IsError()) return resolved;
+
+        var putRc = txn.Put(metadataDbi, RetainedFromGenerationKey, BitConverter.GetBytes(generation), 0);
         return putRc != 0 ? Result.Error(MdbxErrorMapper.Map(putRc)) : Result.Ok();
     }
 
@@ -78,13 +96,16 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
         var watermarkRc = txn.Put(metadataDbi, WatermarkKey, BitConverter.GetBytes(boundaryLsn), 0);
         if (watermarkRc != 0) return Result.Error(MdbxErrorMapper.Map(watermarkRc));
 
+        var currentGenerationRc = txn.Get(metadataDbi, GenerationKey, out var currentGenerationBytes);
+        var currentGeneration = currentGenerationRc != 0 ? 0 : BitConverter.ToInt32(currentGenerationBytes);
+
         var commitRc = txn.Commit();
         if (commitRc != 0) return Result.Error(MdbxErrorMapper.Map(commitRc));
 
         var syncRc = env.Sync(force: true, nonblock: false);
         if (syncRc != 0 && syncRc != MdbxResultTrue) return Result.Error(MdbxErrorMapper.Map(syncRc));
 
-        var archiveError = WalArchive.WriteSegment(archiveDirectory, wal.DatabaseId, entries, 0);
+        var archiveError = WalArchive.WriteSegment(archiveDirectory, wal.DatabaseId, entries, (uint)currentGeneration);
 
         var truncateError = await wal.Truncate();
         if (truncateError is { } err) return Result.Error(err);
@@ -104,5 +125,16 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
         metadataDbi = dbi;
         metadataDbiResolved = true;
         return Result.Ok();
+    }
+
+    private bool EnsureMetadataDbiForRead(Transaction txn) {
+        if (metadataDbiResolved) return true;
+
+        var rc = txn.OpenDbi(MetadataDbiName, 0, out var dbi);
+        if (rc != 0) return false;
+
+        metadataDbi = dbi;
+        metadataDbiResolved = true;
+        return true;
     }
 }

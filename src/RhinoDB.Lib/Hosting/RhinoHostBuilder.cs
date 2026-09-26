@@ -66,11 +66,16 @@ public sealed class RhinoHostBuilder {
                     return Result<object>.Error(MissingConfig(nameof(options.LoadFromGenesis), because: "RhinoRunMode.Replay needs it"));
                 case RhinoRunMode.Migrate when options.RunMigration is null:
                     return Result<object>.Error(MissingConfig(nameof(options.RunMigration), because: "RhinoRunMode.Migrate needs it"));
+                case RhinoRunMode.Prune when parsed.PruneTargetGeneration is null:
+                    return Result<object>.Error(DbError.SystemFailure(new InvalidOperationException(
+                        $"AddDatabase(\"{Name}\"): --{Name}.prune-target-generation is required for RhinoRunMode.Prune.")));
+                case RhinoRunMode.ConsolidateArchive when options.ConsolidateArchive is null:
+                    return Result<object>.Error(MissingConfig(nameof(options.ConsolidateArchive), because: "RhinoRunMode.ConsolidateArchive needs it"));
             }
 
             var runResult = await RunOne(
                 parsed, createDb, options.LoadAsync, options.LoadFromGenesis,
-                options.RunMigration, options.GBinary, options.IsGenerationInvalid);
+                options.RunMigration, options.GBinary, options.IsGenerationInvalid, options.ConsolidateArchive);
             return runResult.IsError() ? runResult.Void() : Result<object>.Ok(runResult.Unwrap());
         }
 
@@ -85,7 +90,8 @@ public sealed class RhinoHostBuilder {
         Func<TDb, ColdStore, long?, Result>? loadFromGenesis,
         Func<TDb, Result>? runMigration,
         int? binaryGeneration,
-        Func<int, bool>? isGenerationInvalid
+        Func<int, bool>? isGenerationInvalid,
+        Func<TDb, Result>? consolidateArchive
     ) where TDb : notnull {
         var coldResult = ColdStore.Open(options.ColdPath);
         if (coldResult.IsError()) return coldResult.Void();
@@ -141,6 +147,40 @@ public sealed class RhinoHostBuilder {
                 if (migrateResult.IsError()) {
                     cold.Dispose();
                     return migrateResult;
+                }
+                break;
+            }
+            case RhinoRunMode.Prune: {
+                var targetGeneration = options.PruneTargetGeneration!.Value;
+
+                var retainedFromGenerationResult = cold.ReadRetainedFromGeneration();
+                if (retainedFromGenerationResult.IsError()) {
+                    cold.Dispose();
+                    return retainedFromGenerationResult.Void();
+                }
+                if (targetGeneration < retainedFromGenerationResult.Unwrap()) {
+                    cold.Dispose();
+                    return Result<TDb>.Error(DbError.RetentionFloorCannotMoveBackward());
+                }
+
+                var deleteResult = WalArchive.DeleteSegmentsOlderThan(cold.DirectoryPath, targetGeneration);
+                if (deleteResult.IsError()) {
+                    cold.Dispose();
+                    return deleteResult;
+                }
+
+                var writeFloorResult = cold.WriteRetainedFromGeneration(targetGeneration);
+                if (writeFloorResult.IsError()) {
+                    cold.Dispose();
+                    return writeFloorResult;
+                }
+                break;
+            }
+            case RhinoRunMode.ConsolidateArchive: {
+                var consolidateResult = consolidateArchive!(db);
+                if (consolidateResult.IsError()) {
+                    cold.Dispose();
+                    return consolidateResult;
                 }
                 break;
             }

@@ -14,4 +14,5 @@ public sealed class DatabaseOptions<TDb, TTx>
     public Func<TDb, Result>? RunMigration { get; set; }
     public int? GBinary { get; set; }
     public Func<int, bool>? IsGenerationInvalid { get; set; }
+    public Func<TDb, Result>? ConsolidateArchive { get; set; }
 }
