@@ -194,7 +194,7 @@ generated code: wrong signature, or an accessibility below `internal`
 (generated code calls it from a sibling class in the same assembly, so
 `private` can never work).
 
-2026-09-13: **`RhinoDB.Run.Server.Benchmark`** — BenchmarkDotNet project,
+2026-09-13: **`RhinoDB.Sandbox.Benchmark`** — BenchmarkDotNet project,
 `[MemoryDiagnoser]`, exercising real generated Instant- and Persistent-kind
 tables (not a hand-rolled stand-in) through `Get`/`Insert`/`Update` and, for
 Persistent, both `Optimistic` and `Confirmed` propagation. `RecordCount` scales
@@ -280,7 +280,7 @@ about the benchmark itself and one about the engine:
 
 - **Benchmark change**: `ColdStore.Open` gained a `sizeNowBytes` parameter
   (default `-1`, same backward-compatible pattern as `sizeUpperBytes`) so
-  `RhinoDB.Run.Server.Benchmark` can pre-size libmdbx's geometry past the
+  `RhinoDB.Sandbox.Benchmark` can pre-size libmdbx's geometry past the
   seeded data. Kept as a real, correct improvement (pre-sizing known-future
   geometry is a legitimate thing to want on its own merits), but it turned
   out **not** to be what explained the anomaly below - recorded here for
@@ -440,7 +440,7 @@ closes gets its own).
 floor, not a design flaw.** A coalescing window can only ever help the one
 pattern it's built for - several `Confirmed` calls in flight without each
 being individually awaited first (a purely serial caller never has a second
-commit to piggyback with). `RhinoDB.Run.Server.Benchmark`'s new
+commit to piggyback with). `RhinoDB.Sandbox.Benchmark`'s new
 `ConfirmedCoalescingBenchmarks` fires 16 such concurrent writes two ways:
 against fresh keys (`ConcurrentConfirmedInserts`), dominated by the
 2026-09-13 fresh-page-write cost above (which happens inside `Commit()`,
@@ -469,7 +469,7 @@ concurrent-`Confirmed` throughput ever becomes a real production
 bottleneck, not before. Full writeup:
 `Docs/02-architecture.md`'s "Confirmed commit batching",
 `Docs/Dev/RhinoDB.Lib/Cold/ColdStore.md`, and
-`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/ConfirmedCoalescingBenchmarks.md`.
+`Docs/Dev/RhinoDB.Sandbox.Benchmark/Benchmarks/ConfirmedCoalescingBenchmarks.md`.
 Full solution reverified 308/308 (2 new `ColdStoreTests.cs` cases), zero
 regressions.
 
@@ -627,7 +627,7 @@ caveat about this benchmark's own numbers: its allocation figures
 `Task.WhenAll` requires real `Task`s, so every concurrent call pays `.AsTask()`
 - the documented, intentional cost of genuine fan-out, not a regression in
 the underlying mechanism. Full writeup:
-`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/ThroughputBenchmarks.md`.
+`Docs/Dev/RhinoDB.Sandbox.Benchmark/Benchmarks/ThroughputBenchmarks.md`.
 Benchmark-only addition, no production code touched - full solution still
 319/319.
 
@@ -742,7 +742,7 @@ pages on the hot path at all. Persistent throughput now clears the ~300k/sec
 external comparison point too (previously only non-durable Instant tables
 did) — Persistent is now within ~2.5-2.7x of Instant's own throughput, down
 from ~3,000x slower. Full writeup:
-`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/ThroughputBenchmarks.md`.
+`Docs/Dev/RhinoDB.Sandbox.Benchmark/Benchmarks/ThroughputBenchmarks.md`.
 Also did a scoped gen-0-allocation pass first (per-transaction closure in
 `PooledOperation.Complete`, `ColdStore.EndScope`'s per-transaction
 `WalChange[]` copy, `DenseArray<T>`'s row-storage indexing switched to

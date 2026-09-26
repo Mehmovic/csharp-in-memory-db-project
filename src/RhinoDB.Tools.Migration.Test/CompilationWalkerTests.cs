@@ -149,7 +149,7 @@ public class CompilationWalkerTests {
     [Test]
     public void PartialTypeDeclaredAcrossTwoFragmentsInOneCompilation_IsCountedOnce() {
         // Guards the real duplicate-table bug caught via a manual smoke test against
-        // RhinoDB.Run.Server.Sandbox under MSBuildWorkspace - a partial type's declaration spanning more
+        // RhinoDB.Sandbox under MSBuildWorkspace - a partial type's declaration spanning more
         // than one syntax node must never be double-counted as two tables.
         var compilation = CompilationHelper.Compile("""
             using RhinoDB.Core.Tables;

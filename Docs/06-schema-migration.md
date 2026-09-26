@@ -188,7 +188,7 @@ different, more complex design. Not built until a measured startup time demands
 it. Same evidence gate as UDP, ART and the algebraic client codec.
 
 **Measured, 2026-09-26** (Phase 4 step 20's required perf gate, not a guess anymore):
-`RhinoDB.Run.Server.Benchmark`'s `MigrationBenchmarks.RunMigration` - the real generated
+`RhinoDB.Sandbox.Benchmark`'s `MigrationBenchmarks.RunMigration` - the real generated
 drop-recreate-copy transaction (scratch dbi, drop, reopen, copy back, drop scratch, atomic
 `G_binary` write), against a real `PersistentWidget` table with no actual breaking change
 in play (a no-op-shape rewrite, isolating the mechanical I/O cost from any per-row transform

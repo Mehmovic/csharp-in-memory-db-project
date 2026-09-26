@@ -15,7 +15,7 @@ Excerpts of the trailing comments trimmed from this file during the
 `-1` everywhere = "keep current or use default" (per `mdbx.h`). `sizeUpperBytes`
 (2026-09-13, default `-1` preserving the prior always-default behavior for
 every existing caller) is the max-map-size ceiling. Needed for
-`RhinoDB.Run.Server.Benchmark`'s billion-record persistent-table tier:
+`RhinoDB.Sandbox.Benchmark`'s billion-record persistent-table tier:
 libmdbx's default geometry doesn't reserve nearly enough address space for
 that scale, and `sizeUpper` is a virtual-address-space reservation (mmap-based,
 pages fault in lazily), not an upfront disk allocation — safe to set
@@ -27,7 +27,7 @@ small default, so a caller that knows its expected data size up front (like
 a benchmark's `GlobalSetup`) can pre-size past it and avoid paying for a
 growth/remap event mid-measurement. **Not** what explained the small-tier-
 slower-than-large-tier `Insert`/`Update` pattern first observed in
-`RhinoDB.Run.Server.Benchmark` - see `Docs/03-roadmap.md`'s 2026-09-13
+`RhinoDB.Sandbox.Benchmark` - see `Docs/03-roadmap.md`'s 2026-09-13
 entry for the real cause (a first-write-to-a-region cost, unrelated to
 libmdbx geometry; originally suspected Windows Defender, since **disproven**
 by a direct exclusion test on 2026-09-14 - root cause still open). Kept as
@@ -62,7 +62,7 @@ awaits `previous` - the pre-existing `pendingSync` chain - before calling
 concurrently, mirroring the un-coalesced path's own invariant.
 
 **Not usable on Windows at its originally-intended 0-2 ms scale**, found by
-benchmarking (`RhinoDB.Run.Server.Benchmark`'s `ConfirmedCoalescingBenchmarks`,
+benchmarking (`RhinoDB.Sandbox.Benchmark`'s `ConfirmedCoalescingBenchmarks`,
 full writeup there and in `Docs/03-roadmap.md`'s 2026-09-13 entry): plain
 `Task.Delay` cannot reliably wait for less than Windows' default ~15.6 ms
 system timer tick, so any window in that range adds a flat ~15 ms tax

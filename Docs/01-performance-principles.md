@@ -78,7 +78,7 @@ Two places this bit us, both caught in design review rather than after being bui
 
 **A third case, first measured 2026-09-14, then fully resolved the same day
 once the user decided to build the fix rather than accept the floor.** After
-Milestone 5's long-lived-`Ops` fix (above), `RhinoDB.Run.Server.Benchmark`'s
+Milestone 5's long-lived-`Ops` fix (above), `RhinoDB.Sandbox.Benchmark`'s
 `InstantTableBenchmarks` still showed ~353 B (`Get`) to ~362 B (`Insert`) per
 call. Decomposed with two isolation benchmarks rather than assumed:
 `SubmissionOverheadBenchmarks.BareTaskCompletionSource` (a bare `new

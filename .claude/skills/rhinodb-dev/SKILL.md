@@ -46,7 +46,7 @@ src/RhinoDB.Core     — pure contracts (Result/Option/DbError/exceptions), zero
 src/RhinoDB.Lib      — the engine: Storage/, Indexing/, Tables/, Execution/ (DbContext, DbExecutionLoop)
 src/RhinoDB.Native   — raw P/Invoke to vendored libmdbx; the ONLY project with AllowUnsafeBlocks
 src/RhinoDB.Generators — Roslyn source generators (netstandard2.0), referenced as an Analyzer
-src/RhinoDB.Run.Server — console host
+src/RhinoDB.Sandbox, RhinoDB.Sandbox.Benchmark — sandbox/benchmark playgrounds, not shipped hosts
 src/*.Test           — one NUnit project per production project above
 ```
 

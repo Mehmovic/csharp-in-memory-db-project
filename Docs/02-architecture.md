@@ -685,7 +685,7 @@ within the window return the literal same `Task<int>`, one arriving after it
 closes gets its own). **Whether it *helps* turned out to depend entirely on
 which cost dominates, and on this platform, at the originally-suggested
 0-2ms scale, it doesn't help at all — not because the mechanism is wrong, but
-because of a Windows platform floor**: `RhinoDB.Run.Server.Benchmark`'s new
+because of a Windows platform floor**: `RhinoDB.Sandbox.Benchmark`'s new
 `ConfirmedCoalescingBenchmarks` fired 16 concurrent `Confirmed` writes (the
 only pattern coalescing can affect — a purely serial caller never has a
 second commit to piggyback with) two ways. Against fresh, never-before-
@@ -713,7 +713,7 @@ worth a dedicated look there specifically if sustained concurrent-`Confirmed`
 throughput ever becomes a real bottleneck in production, not before. Full
 writeup: `Docs/03-roadmap.md`'s 2026-09-13 entry,
 `Docs/Dev/RhinoDB.Lib/Cold/ColdStore.md`, and
-`Docs/Dev/RhinoDB.Run.Server.Benchmark/Benchmarks/ConfirmedCoalescingBenchmarks.md`.
+`Docs/Dev/RhinoDB.Sandbox.Benchmark/Benchmarks/ConfirmedCoalescingBenchmarks.md`.
 
 **Secondary-index uniqueness is enforced only against whatever's currently
 loaded — the library does not, and today cannot, extend it into libmdbx.** A

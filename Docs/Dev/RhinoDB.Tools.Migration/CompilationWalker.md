@@ -13,5 +13,5 @@ agrees with what the generator would compute for the same source.
 
 A partial type's declaration can span several syntax trees (e.g. a shorthand-expanded row type and, under
 MSBuildWorkspace specifically, a duplicate Compile-item inclusion of its own generated output - confirmed
-by a real smoke test against `RhinoDB.Run.Server.Sandbox`) - dedupe by symbol identity so one logical type
+by a real smoke test against `RhinoDB.Sandbox`) - dedupe by symbol identity so one logical type
 is never counted twice regardless of how many syntax nodes declare it.

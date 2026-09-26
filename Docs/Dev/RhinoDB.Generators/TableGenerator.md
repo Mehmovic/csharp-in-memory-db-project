@@ -420,7 +420,7 @@ Idempotent: a row not currently in memory is treated as already evicted.
 fresh inside `CreateTransaction()`, meaning every single `Run` call
 allocated one `Ops` object *and* its `List<Change<TKey,TRow>>` per table
 declared on the database - regardless of whether that operation touched the
-table at all. Found via `RhinoDB.Run.Server.Benchmark`'s `MemoryDiagnoser`
+table at all. Found via `RhinoDB.Sandbox.Benchmark`'s `MemoryDiagnoser`
 output (400-1200 bytes allocated per operation on tables with zero payload
 of their own), not assumed.
 

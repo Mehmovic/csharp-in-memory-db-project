@@ -6,7 +6,7 @@ using RhinoDB.Lib.Tables;
 namespace RhinoDB.Lib.Durability.Test;
 
 // Diagnostic-style test, not a BenchmarkDotNet benchmark - WriteAheadLog is internal,
-// deliberately not exposed to RhinoDB.Run.Server.Benchmark (it's meant to stay an
+// deliberately not exposed to RhinoDB.Sandbox.Benchmark (it's meant to stay an
 // implementation detail wired through ColdStore, not a public API surface - adding it as
 // an InternalsVisibleTo friend broke the generator's protected-vs-protected-internal
 // override accessibility for every generated {Db} class in that project). Validates the
