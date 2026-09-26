@@ -46,8 +46,8 @@ public class WalArchiveTests {
         var error = WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2), Entry(3)], 0);
 
         Assert.That(error, Is.Null);
-        var history = WalArchive.ReadHistory(dir, []).Unwrap();
-        Assert.That(history.Select(e => e.Lsn), Is.EqualTo(new long[] { 1, 2, 3 }));
+        var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 1, 2, 3 }));
     }
 
     [Test]
@@ -61,7 +61,7 @@ public class WalArchiveTests {
 
     [Test]
     public void ReadHistory_WithNothingArchivedAndNoLiveTail_ReturnsEmptyHistory() {
-        var history = WalArchive.ReadHistory(dir, []).Unwrap();
+        var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
 
         Assert.That(history, Is.Empty);
     }
@@ -71,9 +71,9 @@ public class WalArchiveTests {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)], 0);
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(3), Entry(4)], 0);
 
-        var history = WalArchive.ReadHistory(dir, [Entry(5), Entry(6)]).Unwrap();
+        var history = WalArchive.ReadHistory(dir, [Entry(5), Entry(6)], 0).Unwrap();
 
-        Assert.That(history.Select(e => e.Lsn), Is.EqualTo(new long[] { 1, 2, 3, 4, 5, 6 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 1, 2, 3, 4, 5, 6 }));
     }
 
     [Test]
@@ -84,9 +84,9 @@ public class WalArchiveTests {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)], 0);
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(3)], 0);
 
-        var history = WalArchive.ReadHistory(dir, []).Unwrap();
+        var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
 
-        Assert.That(history.Select(e => e.Lsn), Is.EqualTo(new long[] { 1, 2, 3 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 1, 2, 3 }));
     }
 
     [Test]
@@ -95,9 +95,9 @@ public class WalArchiveTests {
         // point, whatever its LSN. Simulates a user deleting 00000001.wal by hand.
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(4), Entry(5)], 0);
 
-        var history = WalArchive.ReadHistory(dir, []).Unwrap();
+        var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
 
-        Assert.That(history.Select(e => e.Lsn), Is.EqualTo(new long[] { 4, 5 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 4, 5 }));
     }
 
     [Test]
@@ -108,18 +108,56 @@ public class WalArchiveTests {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)], 0);
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(5), Entry(6)], 0);
 
-        var history = WalArchive.ReadHistory(dir, []).Unwrap();
+        var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
 
-        Assert.That(history.Select(e => e.Lsn), Is.EqualTo(new long[] { 1, 2, 5, 6 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 1, 2, 5, 6 }));
     }
 
     [Test]
     public void ReadHistory_WithAGapBetweenTheArchiveAndTheLiveTail_TreatsItTheSameWay() {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)], 0);
 
-        var history = WalArchive.ReadHistory(dir, [Entry(5), Entry(6)]).Unwrap();
+        var history = WalArchive.ReadHistory(dir, [Entry(5), Entry(6)], 0).Unwrap();
 
-        Assert.That(history.Select(e => e.Lsn), Is.EqualTo(new long[] { 1, 2, 5, 6 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 1, 2, 5, 6 }));
+    }
+
+    [Test]
+    public void ReadHistory_TagsEachEntryWithItsOwnSegmentsGeneration_NotAUniformValue() {
+        // Genesis replay (TableGenerator's generated LoadFromGenesis) needs to know which generation each
+        // entry was WRITTEN under, not just the database's current one - a long-lived archive can span
+        // several past generations, and each segment keeps whatever it was tagged with at write time.
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1), Entry(2)], generation: 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(3), Entry(4)], generation: 1);
+
+        var history = WalArchive.ReadHistory(dir, [Entry(5)], liveGeneration: 2).Unwrap();
+
+        Assert.That(history.Select(e => (e.Entry.Lsn, e.Generation)),
+            Is.EqualTo(new[] { (1L, 0), (2L, 0), (3L, 1), (4L, 1), (5L, 2) }));
+    }
+
+    [Test]
+    public void ReadOldestRetainedGeneration_WithNothingArchived_ReturnsNone() {
+        Assert.That(WalArchive.ReadOldestRetainedGeneration(dir).Unwrap().IsNone(), Is.True);
+    }
+
+    [Test]
+    public void ReadOldestRetainedGeneration_ReturnsTheMinimumAcrossEverySegment() {
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1)], generation: 3);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(2)], generation: 1);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(3)], generation: 2);
+
+        Assert.That(WalArchive.ReadOldestRetainedGeneration(dir).Unwrap().Get(), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void ReadOldestRetainedGeneration_OnlyReadsTheHeader_ACorruptedBodyDoesNotFailIt() {
+        // The whole point of this method is being cheap - a pre-flight check that never scans/decodes a
+        // segment's body. A torn/corrupted body (which WOULD fail ReadHistory) must not affect this at all.
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1)], generation: 5);
+        File.AppendAllText(Path.Combine(archiveDir, "00000001.wal"), "garbage-tail-bytes");
+
+        Assert.That(WalArchive.ReadOldestRetainedGeneration(dir).Unwrap().Get(), Is.EqualTo(5));
     }
 
     [Test]
@@ -129,7 +167,7 @@ public class WalArchiveTests {
         Directory.CreateDirectory(archiveDir);
         File.WriteAllBytes(Path.Combine(archiveDir, "00000001.wal"), [1, 2, 3]);
 
-        var history = WalArchive.ReadHistory(dir, []);
+        var history = WalArchive.ReadHistory(dir, [], 0);
 
         Assert.That(history.IsError(), Is.True);
         Assert.That(history.GetError().Kind, Is.EqualTo(ErrorKind.WalCorrupted));

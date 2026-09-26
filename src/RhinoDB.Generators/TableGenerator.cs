@@ -1481,10 +1481,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var instantTables = tables.Where(t => t.Kind == TableKind.Instant).ToImmutableArray();
         var persistentTables = tables.Where(t => t.Kind == TableKind.Persistent).ToImmutableArray();
 
-        var gBinary = descriptor?.Databases.FirstOrDefault(d => d.FullName == database.FullName)?.Generation ?? 0;
+        var databaseDescriptor = descriptor?.Databases.FirstOrDefault(d => d.FullName == database.FullName);
+        var gBinary = databaseDescriptor?.Generation ?? 0;
+        var retainedFromGeneration = databaseDescriptor?.RetainedFromGeneration ?? 0;
 
         sb.AppendLine($"public partial class {database.SimpleName} {{");
         sb.AppendLine($"    public const int G_binary = {gBinary};");
+        sb.AppendLine($"    public const int RetainedFromGeneration = {retainedFromGeneration};");
         sb.AppendLine($"    private static readonly HashSet<int> InvalidGenerations = new HashSet<int> {{ {string.Join(", ", database.InvalidGenerations)} }};");
         sb.AppendLine("    public static bool IsGenerationInvalid(int generation) => InvalidGenerations.Contains(generation);");
         sb.AppendLine();
@@ -1560,12 +1563,25 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
         if (persistentTables.Length > 0) {
             sb.AppendLine();
-            sb.AppendLine("    public void ReplayChange(WalChange change) {");
+            sb.AppendLine("    public void ReplayChange(WalChange change, int generation) {");
             sb.AppendLine("        switch (change.TableId) {");
-            foreach (var table in persistentTables)
-                sb.AppendLine($"            case {ComputeTableId(table.Accessor)}u: {Camel(table.Accessor)}Ops.ReplayApply(change.Kind, change.Key, change.Row); break;");
+            foreach (var table in persistentTables) {
+                var opsName = $"{database.SimpleName}{table.Accessor}Ops";
+                sb.AppendLine($"            case {ComputeTableId(table.Accessor)}u: {{");
+                sb.AppendLine($"                var fromRevision = {opsName}.RevisionAtGeneration(generation);");
+                sb.AppendLine("                var oldRowBytes = change.Row;");
+                sb.AppendLine($"                var rowBytes = oldRowBytes is null ? null : {opsName}.SerializeRow({opsName}.MigrateToCurrentRevision(fromRevision, oldRowBytes));");
+                sb.AppendLine($"                {Camel(table.Accessor)}Ops.ReplayApply(change.Kind, change.Key, rowBytes);");
+                sb.AppendLine("                break;");
+                sb.AppendLine("            }");
+            }
             sb.AppendLine("        }");
             sb.AppendLine("    }");
+        }
+
+        if (persistentTables.Length > 0) {
+            sb.AppendLine();
+            sb.AppendLine("    public Result<int> CurrentGeneration() => cold.ReadGeneration();");
         }
 
         if (persistentTables.Length > 0) {
@@ -1621,12 +1637,17 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine();
 
         sb.AppendLine($"    public virtual Result LoadFromGenesis({database.SimpleName} db, ColdStore cold, long? upToLsn = null, Action<DecodedWalEntry>? onEntryApplied = null) {{");
-        sb.AppendLine("        var historyResult = WalArchive.ReadHistory(cold.DirectoryPath, cold.PendingWalTail);");
+        sb.AppendLine("        var oldestGenerationResult = WalArchive.ReadOldestRetainedGeneration(cold.DirectoryPath);");
+        sb.AppendLine("        if (oldestGenerationResult.IsError()) return oldestGenerationResult.Void();");
+        sb.AppendLine($"        if (oldestGenerationResult.Unwrap().TryGet(out var oldestGeneration) && oldestGeneration < {database.SimpleName}.RetainedFromGeneration)");
+        sb.AppendLine("            return Result.Error(DbError.ArchiveOlderThanRetentionFloor());");
+        sb.AppendLine();
+        sb.AppendLine("        var historyResult = WalArchive.ReadHistory(cold.DirectoryPath, cold.PendingWalTail, cold.WalGeneration);");
         sb.AppendLine("        if (historyResult.IsError()) return historyResult.Void();");
         sb.AppendLine();
-        sb.AppendLine("        foreach (var entry in historyResult.Unwrap()) {");
+        sb.AppendLine("        foreach (var (entry, generation) in historyResult.Unwrap()) {");
         sb.AppendLine("            if (upToLsn is { } stop && entry.Lsn > stop) break;");
-        sb.AppendLine("            foreach (var change in entry.Changes) db.ReplayChange(change);");
+        sb.AppendLine("            foreach (var change in entry.Changes) db.ReplayChange(change, generation);");
         sb.AppendLine("            onEntryApplied?.Invoke(entry);");
         sb.AppendLine("        }");
         sb.AppendLine();

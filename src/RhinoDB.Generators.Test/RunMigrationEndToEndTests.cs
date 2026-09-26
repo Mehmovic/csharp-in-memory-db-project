@@ -85,6 +85,10 @@ public class RunMigrationEndToEndTests {
             Assert.That(runMigrationResult.IsOk(), Is.True);
             Assert.That(cold.ReadGeneration().Unwrap(), Is.EqualTo(1));
 
+            var currentGenerationResult = (Result<int>)dbType.GetMethod("CurrentGeneration")!.Invoke(db, null)!;
+            Assert.That(currentGenerationResult.Unwrap(), Is.EqualTo(1),
+                "the public db.CurrentGeneration() wrapper must agree with cold.ReadGeneration() - it's a thin passthrough.");
+
             var loader = Activator.CreateInstance(loaderType)!;
             await (Task)loaderType.GetMethod("LoadAsync")!.Invoke(loader, [db])!;
 

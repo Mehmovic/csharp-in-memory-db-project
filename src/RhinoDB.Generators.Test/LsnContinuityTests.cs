@@ -104,9 +104,9 @@ public class LsnContinuityTests {
         // wal.dat is held open (FileShare.None) by the ColdStore that wrote it - reopen fresh to read
         // PendingWalTail as it stands now, matching how a real recovery/replay would observe it.
         using var reopenedCold = ColdStore.Open(dir).Unwrap();
-        var walHistory = WalArchive.ReadHistory(reopenedCold.DirectoryPath, reopenedCold.PendingWalTail).Unwrap();
+        var walHistory = WalArchive.ReadHistory(reopenedCold.DirectoryPath, reopenedCold.PendingWalTail, reopenedCold.WalGeneration).Unwrap();
 
-        Assert.That(walHistory.Select(e => e.Lsn), Is.EqualTo(new long[] { 0, 2 }),
+        Assert.That(walHistory.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 0, 2 }),
             "The WAL only ever sees Persistent-table transactions - Lsn 1 (Instant-only) is a real, expected gap, not corruption.");
     }
 
