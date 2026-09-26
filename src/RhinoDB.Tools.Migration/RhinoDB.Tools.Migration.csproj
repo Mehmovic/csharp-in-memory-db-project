@@ -8,14 +8,6 @@
         <RootNamespace>RhinoDB.Tools.Migration</RootNamespace>
     </PropertyGroup>
 
-    <!-- Microsoft.CodeAnalysis.Workspaces.MSBuild transitively pulls Microsoft.Build.Tasks.Core 17.7.2
-         (NU1903, GHSA-h4j7-5rxr-p4wc). Pinning a newer version was tried and made it worse - it pulls in
-         additional vulnerable transitive packages from the same MSBuild family instead of resolving
-         anything. This is the standard, accepted MSBuildWorkspace + MSBuildLocator shape: RhinoDB.Run.Cli's
-         Program.cs calls MSBuildLocator.RegisterDefaults() before any MSBuild-touching code runs, which
-         redirects actual assembly loading to the real installed SDK's own MSBuild binaries at runtime - the
-         NuGet-restored (and vulnerable) copy referenced here is never actually loaded. -->
-
     <ItemGroup>
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.11.0" />
         <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="4.11.0" />
