@@ -2,8 +2,8 @@ using Microsoft.Build.Locator;
 
 namespace RhinoDB.Run.Cli;
 
-static class Program {
-    static int Main(string[] args) {
+static internal class Program {
+    static private int Main(string[] args) {
         MSBuildLocator.RegisterDefaults();
         return Dispatch(args);
     }
@@ -13,7 +13,7 @@ static class Program {
     // fixed, discoverable location until MSBuildLocator finds the installed SDK and registers it. Dispatch
     // itself, and everything it calls into (RhinoDB.Tools.Migration included), must stay out of Main's own
     // method body for the same reason.
-    static int Dispatch(string[] args) {
+    static private int Dispatch(string[] args) {
         if (args.Length == 0) {
             PrintUsage();
             return 1;
@@ -26,13 +26,13 @@ static class Program {
         };
     }
 
-    static int Unknown(string tool) {
+    static private int Unknown(string tool) {
         Console.Error.WriteLine($"rhinodb: unknown command '{tool}'");
         PrintUsage();
         return 1;
     }
 
-    static void PrintUsage() {
+    static private void PrintUsage() {
         Console.WriteLine("""
             rhinodb - RhinoDB's unified CLI
 

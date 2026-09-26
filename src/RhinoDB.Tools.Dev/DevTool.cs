@@ -13,13 +13,13 @@ static public class DevTool {
         };
     }
 
-    static int Unknown(string verb) {
+    static private int Unknown(string verb) {
         Console.Error.WriteLine($"rhinodb dev: unknown command '{verb}'");
         PrintUsage();
         return 1;
     }
 
-    static void PrintUsage() {
+    static private void PrintUsage() {
         Console.WriteLine("""
             Usage:
               rhinodb dev reset [--project <path>] [--cold-path <path>]... [--yes]

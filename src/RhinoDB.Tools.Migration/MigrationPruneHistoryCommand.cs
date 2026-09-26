@@ -1,6 +1,5 @@
 using System.Text.RegularExpressions;
 
-using RhinoDB.PreBuild;
 using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Tools.Migration;
@@ -84,7 +83,7 @@ static public class MigrationPruneHistoryCommand {
         return result;
     }
 
-    static (string? Namespace, string SimpleName) SplitFullName(string fullyQualifiedName) {
+    static private (string? Namespace, string SimpleName) SplitFullName(string fullyQualifiedName) {
         var stripped = fullyQualifiedName.StartsWith("global::") ? fullyQualifiedName[8..] : fullyQualifiedName;
         var lastDot = stripped.LastIndexOf('.');
         return lastDot < 0 ? (null, stripped) : (stripped[..lastDot], stripped[(lastDot + 1)..]);

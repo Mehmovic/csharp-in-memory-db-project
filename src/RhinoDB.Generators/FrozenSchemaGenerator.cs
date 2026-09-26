@@ -25,21 +25,50 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
+    static private readonly DiagnosticDescriptor MissingSerializationAttributesDiagnostic = new(
+        "RHINO025",
+        "Frozen schema row missing mandatory client-protocol serialization attribute",
+        "Row type '{0}' is [FrozenSchema]-attributed but is missing {1} - this project's ClientProtocol "
+        + "(config.json's Generator section) requires it here too, since CompatAdapter's upgrade path needs to decode "
+        + "this old shape in the project's own client wire format, not just Raw",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
     public void Initialize(IncrementalGeneratorInitializationContext context) {
+        var configProtocol = context.AdditionalTextsProvider
+            .Where(static t => Path.GetFileName(t.Path) == "config.json")
+            .Collect()
+            .Select(static (texts, ct) => {
+                if (texts.Length == 0) return ClientProtocolKind.Raw;
+                var text = texts[0].GetText(ct)?.ToString();
+                if (string.IsNullOrEmpty(text)) return ClientProtocolKind.Raw;
+                try {
+                    var parsedConfig = GeneratorConfigLoader.Parse(text!);
+                    return ClientProtocolParser.Parse(parsedConfig.ClientProtocol);
+                } catch {
+                    return ClientProtocolKind.Raw;
+                }
+            });
+
         var results = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 FrozenSchemaAttributeFullName,
                 predicate: static (node, _) => node is StructDeclarationSyntax or RecordDeclarationSyntax,
-                transform: static (ctx, _) => ToFrozenSchemaModel(ctx)
-            );
+                transform: static (ctx, _) => ctx
+            )
+            .Combine(configProtocol)
+            .Select(static (pair, _) => ToFrozenSchemaModel(pair.Left, pair.Right));
 
         context.RegisterSourceOutput(results, static (spc, result) => {
             foreach (var diagnostic in result.Diagnostics) spc.ReportDiagnostic(diagnostic);
-            if (result.Model is not null) spc.AddSource($"{result.Model.SimpleName}.FrozenSchema.g.cs", Emit(result.Model));
+            if (result.Model is not null) spc.AddSource($"{result.Model.SimpleName}.FrozenSchema.g.cs", Emit(result.Model, result.ClientProtocol));
         });
     }
 
-    static private (FrozenSchemaModel? Model, ImmutableArray<Diagnostic> Diagnostics) ToFrozenSchemaModel(GeneratorAttributeSyntaxContext ctx) {
+    static private (FrozenSchemaModel? Model, ImmutableArray<Diagnostic> Diagnostics, ClientProtocolKind ClientProtocol) ToFrozenSchemaModel(
+        GeneratorAttributeSyntaxContext ctx, ClientProtocolKind clientProtocol) {
         var type = (INamedTypeSymbol)ctx.TargetSymbol;
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
@@ -49,11 +78,20 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
         );
         if (primaryCtor is null || primaryKeyParam is null) {
             diagnostics.Add(Diagnostic.Create(MissingPrimaryKeyDiagnostic, ctx.TargetNode.GetLocation(), type.Name));
-            return (null, diagnostics.ToImmutable());
+            return (null, diagnostics.ToImmutable(), clientProtocol);
         }
 
-        diagnostics.AddRange(SchemaWalk.CheckOtherKindFieldAttributes(primaryCtor.Parameters, type.Name, ctx.TargetNode.GetLocation()));
-        if (diagnostics.Count > 0) return (null, diagnostics.ToImmutable());
+        var missingSerializationAttrs = ImmutableArray.CreateBuilder<string>();
+        if (clientProtocol == ClientProtocolKind.VersionedMemoryPack && !SchemaWalk.HasMemoryPackable(type)) missingSerializationAttrs.Add("[MemoryPackable]");
+        if (clientProtocol == ClientProtocolKind.MessagePack && !SchemaWalk.HasMessagePackObject(type)) missingSerializationAttrs.Add("[MessagePackObject]");
+        if (missingSerializationAttrs.Count > 0) {
+            diagnostics.Add(Diagnostic.Create(
+                MissingSerializationAttributesDiagnostic, ctx.TargetNode.GetLocation(), type.Name, string.Join(" and ", missingSerializationAttrs)));
+            return (null, diagnostics.ToImmutable(), clientProtocol);
+        }
+
+        diagnostics.AddRange(SchemaWalk.CheckOtherKindFieldAttributes(primaryCtor.Parameters, type.Name, ctx.TargetNode.GetLocation(), clientProtocol));
+        if (diagnostics.Count > 0) return (null, diagnostics.ToImmutable(), clientProtocol);
 
         var fields = SchemaWalk.ToRowFieldModels(primaryCtor.Parameters);
         var revision = (int)ctx.Attributes[0].ConstructorArguments[0].Value!;
@@ -67,10 +105,10 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
             primaryKeyParam.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             fields
         );
-        return (model, diagnostics.ToImmutable());
+        return (model, diagnostics.ToImmutable(), clientProtocol);
     }
 
-    static private string Emit(FrozenSchemaModel model) {
+    static private string Emit(FrozenSchemaModel model, ClientProtocolKind clientProtocol) {
         var sb = new StringBuilder();
         var row = model.FullName;
         var key = model.PrimaryKeyTypeFullName;
@@ -81,6 +119,7 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
         sb.AppendLine("using MemoryPack;");
+        sb.AppendLine("using MessagePack;");
         sb.AppendLine("using RhinoDB.Core;");
         sb.AppendLine();
         if (model.Namespace is not null) {
@@ -134,6 +173,9 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
         sb.AppendLine("        reader.Dispose();");
         sb.AppendLine($"        return {TableGenerator.Camel(pkField.FieldName)}Value;");
         sb.AppendLine("    }");
+        sb.AppendLine();
+
+        SchemaWalk.EmitProtocolWrapperMethods(sb, row, clientProtocol);
 
         sb.AppendLine("}");
         return sb.ToString();

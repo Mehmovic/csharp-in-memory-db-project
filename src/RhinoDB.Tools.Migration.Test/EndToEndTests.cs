@@ -6,7 +6,7 @@ namespace RhinoDB.Tools.Migration.Test;
 // small fixture .csproj checked into this project, through the actual MigrationTool.Run entry point - not
 // CompilationWalker in isolation (already covered by CompilationWalkerTests.cs's in-memory compilations).
 public class EndToEndTests {
-    static string FixtureProjectPath([CallerFilePath] string here = "") =>
+    static private string FixtureProjectPath([CallerFilePath] string here = "") =>
         Path.Combine(Path.GetDirectoryName(here)!, "Fixtures", "SampleProject", "SampleProject.csproj");
 
     [Test]

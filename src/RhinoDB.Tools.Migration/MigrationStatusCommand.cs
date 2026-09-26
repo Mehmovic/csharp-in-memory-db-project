@@ -1,6 +1,5 @@
 using Microsoft.CodeAnalysis.MSBuild;
 
-using RhinoDB.PreBuild;
 using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Tools.Migration;

@@ -1,14 +1,14 @@
 namespace RhinoDB.PreBuild.Test;
 
 public class ContractViolationCheckerTests {
-    static ParsedShorthandFile ParseTable(string fields) => ShorthandParser.Parse($$"""
-        namespace TestNs;
+    static private ParsedShorthandFile ParseTable(string fields) => ShorthandParser.Parse($$"""
+                                                                                            namespace TestNs;
 
-        [InstantTable(typeof(GameDb))]
-        public readonly partial record struct Row(
-            {{fields}}
-        );
-        """);
+                                                                                            [InstantTable(typeof(GameDb))]
+                                                                                            public readonly partial record struct Row(
+                                                                                                {{fields}}
+                                                                                            );
+                                                                                            """);
 
     [Test]
     public void Check_AppendingAFieldAtTheEnd_IsSafe() {

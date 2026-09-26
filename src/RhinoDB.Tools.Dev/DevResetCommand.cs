@@ -1,4 +1,4 @@
-using RhinoDB.PreBuild;
+using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Tools.Dev;
 

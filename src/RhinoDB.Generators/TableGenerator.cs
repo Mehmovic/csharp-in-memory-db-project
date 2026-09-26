@@ -16,6 +16,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
     private const string IndexAttributeFullName = "RhinoDB.Core.Tables.IndexAttribute";
     private const string ValidateAttributeFullName = "RhinoDB.Core.Tables.ValidateAttribute";
     private const string MigrationAttributeFullName = "RhinoDB.Core.Tables.MigrationAttribute";
+    private const string ClientDowngradeAttributeFullName = "RhinoDB.Core.Tables.ClientDowngradeAttribute";
+    private const string InvalidRevisionsAttributeFullName = "RhinoDB.Core.Tables.InvalidRevisionsAttribute";
+    private const string InvalidClientAppVersionsAttributeFullName = "RhinoDB.Core.Tables.InvalidClientAppVersionsAttribute";
     private const string DbErrorFullName = "RhinoDB.Core.DbError";
 
     static private readonly DiagnosticDescriptor MissingPrimaryKeyDiagnostic = new(
@@ -135,12 +138,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private readonly DiagnosticDescriptor MissingSerializationAttributesDiagnostic = new(
         "RHINO015",
-        "Table row missing mandatory IDC/client serialization attributes",
-        "Row type '{0}' is [Table]-attributed but is missing {1} - every table row must carry both "
-        + "[MemoryPackable] (GenerateType.VersionTolerant if the row has any reference-typed field - "
-        + "MemoryPack rejects VersionTolerant on a fully-unmanaged struct) and [MessagePackObject], so "
-        + "IDC and client access (Stage 6/8) always have a real, source-generated formatter available, "
-        + "with zero reflection fallback",
+        "Table row missing mandatory client-protocol serialization attribute",
+        "Row type '{0}' is [Table]-attributed but is missing {1} - this project's ClientProtocol "
+        + "(config.json's Generator section) requires it on every table row ([MemoryPackable] needs "
+        + "GenerateType.VersionTolerant if the row has any reference-typed field - MemoryPack rejects "
+        + "VersionTolerant on a fully-unmanaged struct), so client access always has a real, "
+        + "source-generated formatter available for whichever protocol this project chose",
         "RhinoDB.Generators",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
@@ -203,16 +206,67 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
+    static private readonly DiagnosticDescriptor InvalidDowngradeMethodSignatureDiagnostic = new(
+        "RHINO026",
+        "Invalid [ClientDowngrade] method signature",
+        "'{0}.{1}' is [ClientDowngrade(ToRevision=N)] but must be an at-least-internal static method taking "
+        + "exactly one parameter and returning a non-void type - it transforms one revision's row shape "
+        + "into the previous revision's shape, the reverse direction of [Migration]",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
+    static private readonly DiagnosticDescriptor InvalidRevisionValueDiagnostic = new(
+        "RHINO027",
+        "[InvalidRevisions(Revisions=)] contains a nonsensical revision number",
+        "'{0}' declares InvalidRevisions containing {1}, which is <= 0 - revision 0 is a row type's "
+        + "starting shape (nothing preceded it to have failed a migration into it), so it can never be a "
+        + "genuinely-invalidated past revision",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
+    static private readonly DiagnosticDescriptor MalformedGeneratorConfigDiagnostic = new(
+        "RHINO024",
+        "config.json is malformed",
+        "The committed config.json additional file failed to parse: {0} - fix or regenerate it; "
+        + "until then ClientProtocol falls back to its default (Raw) rather than blocking the build outright",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true
+    );
+
     static private readonly ImmutableHashSet<string> ReservedOpsMemberNames =
         ImmutableHashSet.Create("Insert", "Update", "Delete", "Iter", "Evict", "Primary");
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
+        var configResult = context.AdditionalTextsProvider
+            .Where(static t => Path.GetFileName(t.Path) == "config.json")
+            .Collect()
+            .Select(static (texts, ct) => {
+                if (texts.Length == 0) return (Protocol: ClientProtocolKind.Raw, ParseError: (Diagnostic?)null);
+                var text = texts[0].GetText(ct)?.ToString();
+                if (string.IsNullOrEmpty(text)) return (Protocol: ClientProtocolKind.Raw, ParseError: (Diagnostic?)null);
+                try {
+                    var parsedConfig = GeneratorConfigLoader.Parse(text!);
+                    return (Protocol: ClientProtocolParser.Parse(parsedConfig.ClientProtocol), ParseError: (Diagnostic?)null);
+                } catch (Exception ex) {
+                    return (Protocol: ClientProtocolKind.Raw, ParseError: Diagnostic.Create(MalformedGeneratorConfigDiagnostic, Location.None, ex.Message));
+                }
+            });
+
+        var configProtocol = configResult.Select(static (r, _) => r.Protocol);
+
         var tableResults = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 TableAttributeFullName,
                 predicate: static (node, _) => node is StructDeclarationSyntax or RecordDeclarationSyntax,
-                transform: static (ctx, _) => ToTableModels(ctx)
+                transform: static (ctx, _) => ctx
             )
+            .Combine(configProtocol)
+            .Select(static (pair, _) => ToTableModels(pair.Left, pair.Right))
             .SelectMany(static (results, _) => results);
 
         context.RegisterSourceOutput(
@@ -245,11 +299,48 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 }
             });
 
-        var combined = databases.Combine(tables).Combine(descriptor);
+        var combined = databases.Combine(tables).Combine(descriptor).Combine(configResult);
         context.RegisterSourceOutput(combined, static (spc, pair) => {
-            if (pair.Right.ParseError is { } diagnostic) spc.ReportDiagnostic(diagnostic);
-            Emit(spc, pair.Left.Left, pair.Left.Right, pair.Right.Parsed);
+            if (pair.Left.Right.ParseError is { } descriptorDiagnostic) spc.ReportDiagnostic(descriptorDiagnostic);
+            if (pair.Right.ParseError is { } configDiagnostic) spc.ReportDiagnostic(configDiagnostic);
+            Emit(spc, pair.Left.Left.Left, pair.Left.Left.Right, pair.Left.Right.Parsed, pair.Right.Protocol);
         });
+
+        var clientAppVersionRules = context.CompilationProvider.Select(static (compilation, _) => {
+            var attribute = compilation.Assembly.GetAttributes()
+                .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == InvalidClientAppVersionsAttributeFullName);
+            return attribute is null
+                ? (Whitelist: ImmutableArray<uint>.Empty, LessThanOrEqualTo: ImmutableArray<uint>.Empty, NotEqualTo: ImmutableArray<uint>.Empty)
+                : (
+                    Whitelist: UIntArrayNamedArg(attribute, "Whitelist"),
+                    LessThanOrEqualTo: UIntArrayNamedArg(attribute, "LessThanOrEqualTo"),
+                    NotEqualTo: UIntArrayNamedArg(attribute, "NotEqualTo")
+                );
+        });
+        context.RegisterSourceOutput(clientAppVersionRules, static (spc, rules) => {
+            spc.AddSource("RhinoClientCompat.g.cs", EmitClientCompatHolder(rules));
+        });
+    }
+
+    static private string EmitClientCompatHolder((ImmutableArray<uint> Whitelist, ImmutableArray<uint> LessThanOrEqualTo, ImmutableArray<uint> NotEqualTo) rules) {
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated>");
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine();
+        sb.AppendLine("using System.Collections.Generic;");
+        sb.AppendLine("using System.Linq;");
+        sb.AppendLine();
+        sb.AppendLine("public static class RhinoClientCompat {");
+        sb.AppendLine($"    private static readonly HashSet<uint> Whitelist = new HashSet<uint> {{ {string.Join(", ", rules.Whitelist.Select(v => $"{v}u"))} }};");
+        sb.AppendLine($"    private static readonly uint[] LessThanOrEqualTo = new uint[] {{ {string.Join(", ", rules.LessThanOrEqualTo.Select(v => $"{v}u"))} }};");
+        sb.AppendLine($"    private static readonly HashSet<uint> NotEqualTo = new HashSet<uint> {{ {string.Join(", ", rules.NotEqualTo.Select(v => $"{v}u"))} }};");
+        sb.AppendLine("    public static bool IsAppVersionInvalid(uint version) {");
+        sb.AppendLine("        if (Whitelist.Contains(version)) return false;");
+        sb.AppendLine("        if (LessThanOrEqualTo.Any(floor => version <= floor)) return true;");
+        sb.AppendLine("        return NotEqualTo.Count > 0 && !NotEqualTo.Contains(version);");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
     }
 
     static private (bool Provided, string? Value) StringNamedArg(AttributeData attr, string name) {
@@ -273,6 +364,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
         return ImmutableArray<int>.Empty;
     }
 
+    static private ImmutableArray<uint> UIntArrayNamedArg(AttributeData attr, string name) {
+        foreach (var kv in attr.NamedArguments)
+            if (kv.Key == name)
+                return kv.Value.IsNull ? ImmutableArray<uint>.Empty : kv.Value.Values.Select(v => (uint)v.Value!).ToImmutableArray();
+        return ImmutableArray<uint>.Empty;
+    }
+
     static private bool BoolNamedArg(AttributeData attr, string name, bool defaultValue = false) {
         foreach (var kv in attr.NamedArguments)
             if (kv.Key == name)
@@ -288,7 +386,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         _ => null,
     };
 
-    static private ImmutableArray<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)> ToTableModels(GeneratorAttributeSyntaxContext ctx) {
+    static private ImmutableArray<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)> ToTableModels(GeneratorAttributeSyntaxContext ctx, ClientProtocolKind clientProtocol) {
         var rowDiagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         var rowType = (INamedTypeSymbol)ctx.TargetSymbol;
 
@@ -305,15 +403,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
         }
 
         var missingSerializationAttrs = ImmutableArray.CreateBuilder<string>();
-        if (!SchemaWalk.HasMemoryPackable(rowType)) missingSerializationAttrs.Add("[MemoryPackable]");
-        if (!SchemaWalk.HasMessagePackObject(rowType)) missingSerializationAttrs.Add("[MessagePackObject]");
+        if (clientProtocol == ClientProtocolKind.VersionedMemoryPack && !SchemaWalk.HasMemoryPackable(rowType)) missingSerializationAttrs.Add("[MemoryPackable]");
+        if (clientProtocol == ClientProtocolKind.MessagePack && !SchemaWalk.HasMessagePackObject(rowType)) missingSerializationAttrs.Add("[MessagePackObject]");
         if (missingSerializationAttrs.Count > 0) {
             rowDiagnostics.Add(Diagnostic.Create(
                 MissingSerializationAttributesDiagnostic, ctx.TargetNode.GetLocation(), rowType.Name, string.Join(" and ", missingSerializationAttrs)));
             return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
         }
 
-        rowDiagnostics.AddRange(SchemaWalk.CheckOtherKindFieldAttributes(primaryCtor.Parameters, rowType.Name, ctx.TargetNode.GetLocation()));
+        rowDiagnostics.AddRange(SchemaWalk.CheckOtherKindFieldAttributes(primaryCtor.Parameters, rowType.Name, ctx.TargetNode.GetLocation(), clientProtocol));
         if (rowDiagnostics.Count > 0) return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
 
         var primaryKeyAttribute = primaryKeyParam.GetAttributes().First(a => a.AttributeClass?.ToDisplayString() == PrimaryKeyAttributeFullName);
@@ -458,6 +556,40 @@ public sealed class TableGenerator : IIncrementalGenerator {
                     MigrationChainGapDiagnostic, ctx.TargetNode.GetLocation(), rowType.Name, string.Join(", ", sortedRevisions), missing));
         }
 
+        var downgradeMethods = ImmutableArray.CreateBuilder<DowngradeMethodModel>();
+        foreach (var member in rowType.GetMembers().OfType<IMethodSymbol>()) {
+            var downgradeAttribute = member.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == ClientDowngradeAttributeFullName);
+            if (downgradeAttribute is null) continue;
+
+            var validSignature = member.IsStatic
+                                 && member.DeclaredAccessibility != Accessibility.Private
+                                 && member.Parameters.Length == 1
+                                 && member.ReturnType.SpecialType != SpecialType.System_Void;
+
+            if (!validSignature) {
+                rowDiagnostics.Add(Diagnostic.Create(InvalidDowngradeMethodSignatureDiagnostic, member.Locations.FirstOrDefault() ?? Location.None, rowType.Name, member.Name));
+                continue;
+            }
+
+            var toRevision = (int)downgradeAttribute.ConstructorArguments[0].Value!;
+            downgradeMethods.Add(new DowngradeMethodModel(
+                toRevision,
+                member.Name,
+                member.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                member.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            ));
+        }
+
+        // [InvalidRevisions(Revisions=)] - row-type-scoped sibling of [Database(InvalidGenerations=)],
+        // resolved directly off the attribute at compile time (no Descriptor.json round-trip needed, exactly
+        // like InvalidGenerations doesn't need one either).
+        var invalidRevisionsAttribute = rowType.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == InvalidRevisionsAttributeFullName);
+        var invalidRevisions = invalidRevisionsAttribute is null
+            ? ImmutableArray<int>.Empty
+            : IntArrayNamedArg(invalidRevisionsAttribute, "Revisions");
+        foreach (var revision in invalidRevisions.Where(r => r <= 0))
+            rowDiagnostics.Add(Diagnostic.Create(InvalidRevisionValueDiagnostic, ctx.TargetNode.GetLocation(), rowType.Name, revision));
+
         var descriptorFields = DescriptorBuilder.FlattenFields(primaryCtor.Parameters);
 
         if (rowDiagnostics.Count > 0) return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
@@ -505,6 +637,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 indexes,
                 validateMethodNames.ToImmutable(),
                 migrationMethods.ToImmutable(),
+                downgradeMethods.ToImmutable(),
+                invalidRevisions,
                 descriptorFields,
                 rowFields
             );
@@ -526,7 +660,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private void Emit(
         SourceProductionContext context, DatabaseModel database,
-        ImmutableArray<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)> allResults, DatabaseContractDescriptor? descriptor
+        ImmutableArray<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)> allResults, DatabaseContractDescriptor? descriptor,
+        ClientProtocolKind clientProtocol
     ) {
         var tables = allResults
             .Select(r => r.Model)
@@ -561,7 +696,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         CheckBreakingChangesHaveMigrations(context, database, tables, descriptor);
 
         foreach (var table in tables)
-            context.AddSource($"{database.SimpleName}{table.Accessor}Ops.g.cs", EmitOpsClass(table, database, descriptor));
+            context.AddSource($"{database.SimpleName}{table.Accessor}Ops.g.cs", EmitOpsClass(table, database, descriptor, clientProtocol));
 
         context.AddSource($"{database.SimpleName}.g.cs", EmitDatabase(database, tables, descriptor));
     }
@@ -631,10 +766,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private uint ComputeTableId(string accessor) => TableIdHash.Compute(accessor);
 
-    static private string EmitOpsClass(TableModel table, DatabaseModel database, DatabaseContractDescriptor? descriptor) =>
+    static private string EmitOpsClass(TableModel table, DatabaseModel database, DatabaseContractDescriptor? descriptor, ClientProtocolKind clientProtocol) =>
         table.Kind == TableKind.Persistent
-            ? EmitPersistentOpsClass(table, database.SimpleName, FindRevisionHistory(database, table, descriptor))
-            : EmitInstantOpsClass(table, database.SimpleName);
+            ? EmitPersistentOpsClass(table, database.SimpleName, FindRevisionHistory(database, table, descriptor), clientProtocol)
+            : EmitInstantOpsClass(table, database.SimpleName, clientProtocol);
 
     static private List<RevisionHistoryEntry> FindRevisionHistory(DatabaseModel database, TableModel table, DatabaseContractDescriptor? descriptor) =>
         descriptor?.Tables.FirstOrDefault(t => t.DatabaseFullName == database.FullName && t.Accessor == table.Accessor)?.RevisionHistory
@@ -947,6 +1082,81 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine();
     }
 
+    static private void EmitClientMigrationChain(StringBuilder sb, TableModel table, ClientProtocolKind clientProtocol) {
+        if (clientProtocol == ClientProtocolKind.Raw) return;
+
+        var formatName = clientProtocol == ClientProtocolKind.VersionedMemoryPack ? "VersionedMemoryPack" : "MessagePack";
+        var sortedHops = table.MigrationMethods.OrderBy(m => m.FromRevision).ToImmutableArray();
+        var tip = sortedHops.Length == 0 ? 0 : sortedHops[sortedHops.Length - 1].FromRevision + 1;
+        var row = table.RowTypeFullName;
+
+        sb.AppendLine($"    internal static {row} MigrateClientBytesToCurrentRevision(int fromRevision, byte[] clientBytes) {{");
+        sb.AppendLine($"        if (fromRevision >= {tip}) return Deserialize{formatName}(clientBytes);");
+        if (sortedHops.Length > 0) {
+            sb.AppendLine("        switch (fromRevision) {");
+            for (var i = 0; i < sortedHops.Length; i++) {
+                var startRevision = sortedHops[i].FromRevision;
+                var expr = $"{FrozenSchemaOpsFullName(sortedHops[i].ParamTypeFullName)}.Deserialize{formatName}(clientBytes)";
+                for (var j = i; j < sortedHops.Length; j++) expr = $"MigrateFromRevision{sortedHops[j].FromRevision}({expr})";
+                sb.AppendLine($"            case {startRevision}: return {expr};");
+            }
+            sb.AppendLine("        }");
+        }
+        sb.AppendLine($"        throw new InvalidOperationException($\"No registered client migration chain for {row} starting at revision {{fromRevision}}.\");");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+    }
+
+    // CompatAdapter's downgrade direction - the reverse of EmitClientMigrationChain, and unlike it, always
+    // emitted regardless of protocol (Raw clients need downgraded bytes too, just Raw-encoded ones - there's
+    // no pre-existing "downgrade" pipeline for Raw to fall back on the way upgrade falls back to
+    // MigrateToCurrentRevision). An incomplete chain is expected (not every transform is invertible) -
+    // CanDowngradeTo lets a caller check first; DowngradeToRevisionBytes throws only if that check was
+    // skipped or wrong.
+    static private void EmitDowngradeChain(StringBuilder sb, TableModel table, ClientProtocolKind clientProtocol) {
+        var migrationHops = table.MigrationMethods.OrderBy(m => m.FromRevision).ToImmutableArray();
+        var tip = migrationHops.Length == 0 ? 0 : migrationHops[migrationHops.Length - 1].FromRevision + 1;
+        var row = table.RowTypeFullName;
+        var serializeMethodName = clientProtocol switch {
+            ClientProtocolKind.VersionedMemoryPack => "SerializeVersionedMemoryPack",
+            ClientProtocolKind.MessagePack => "SerializeMessagePack",
+            _ => "SerializeRow",
+        };
+
+        var downgradesByToRevision = table.DowngradeMethods.ToDictionary(d => d.ToRevision);
+        var reachable = ImmutableArray.CreateBuilder<int>();
+        for (var revision = tip - 1; downgradesByToRevision.ContainsKey(revision); revision--) reachable.Add(revision);
+
+        sb.AppendLine($"    private static readonly HashSet<int> DowngradableToRevisions = new HashSet<int> {{ {string.Join(", ", reachable)} }};");
+        sb.AppendLine($"    internal static bool CanDowngradeTo(int toRevision) => toRevision >= {tip} || DowngradableToRevisions.Contains(toRevision);");
+        sb.AppendLine();
+
+        sb.AppendLine($"    internal static byte[] DowngradeToRevisionBytes(int toRevision, {row} current) {{");
+        sb.AppendLine($"        if (toRevision >= {tip}) return {serializeMethodName}(current);");
+        if (reachable.Count > 0) {
+            sb.AppendLine("        switch (toRevision) {");
+            foreach (var target in reachable) {
+                var expr = "current";
+                for (var r = tip - 1; r >= target; r--) expr = $"{row}.{downgradesByToRevision[r].MethodName}({expr})";
+                var targetOpsName = FrozenSchemaOpsFullName(downgradesByToRevision[target].ReturnTypeFullName);
+                sb.AppendLine($"            case {target}: return {targetOpsName}.{serializeMethodName}({expr});");
+            }
+            sb.AppendLine("        }");
+        }
+        sb.AppendLine($"        throw new InvalidOperationException($\"No registered downgrade chain for {row} down to revision {{toRevision}} - check CanDowngradeTo first.\");");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+    }
+
+    // Row-type-scoped sibling of EmitDatabase's IsGenerationInvalid - duplicated per table exactly like
+    // Revision/RevisionHistory/MigrateFromRevision{N} already are, when one row type backs several tables
+    // (no new "one emission per row-type-symbol" infrastructure needed - confirmed with the user).
+    static private void EmitIsRevisionInvalid(StringBuilder sb, TableModel table) {
+        sb.AppendLine($"    private static readonly HashSet<int> InvalidRevisions = new HashSet<int> {{ {string.Join(", ", table.InvalidRevisions)} }};");
+        sb.AppendLine("    public static bool IsRevisionInvalid(int revision) => InvalidRevisions.Contains(revision);");
+        sb.AppendLine();
+    }
+
     static private void EmitRevisionAtGeneration(StringBuilder sb, List<RevisionHistoryEntry> revisionHistory) {
         sb.AppendLine("    private static readonly (int Generation, int Revision)[] RevisionHistory = new (int, int)[] {");
         foreach (var entry in revisionHistory)
@@ -1023,17 +1233,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine();
     }
 
-    static private void EmitProtocolWrappers(StringBuilder sb, TableModel table) {
-        var row = table.RowTypeFullName;
-
-        sb.AppendLine($"    public static byte[] SerializeVersionedMemoryPack({row} row) => MemoryPackSerializer.Serialize(row);");
-        sb.AppendLine($"    public static {row} DeserializeVersionedMemoryPack(byte[] bytes) => MemoryPackSerializer.Deserialize<{row}>(bytes)!;");
-        sb.AppendLine($"    public static byte[] SerializeMessagePack({row} row) => MessagePackSerializer.Serialize(row);");
-        sb.AppendLine($"    public static {row} DeserializeMessagePack(byte[] bytes) => MessagePackSerializer.Deserialize<{row}>(bytes);");
-        sb.AppendLine();
-    }
-
-    static private string EmitInstantOpsClass(TableModel table, string ownerSimpleName) {
+    static private string EmitInstantOpsClass(TableModel table, string ownerSimpleName, ClientProtocolKind clientProtocol) {
         var sb = new StringBuilder();
         var row = table.RowTypeFullName;
         var key = table.PrimaryKeyTypeFullName;
@@ -1067,7 +1267,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitIterMethod(sb, table, ownerSimpleName);
         EmitStagingMethods(sb, table);
         EmitRawSerializer(sb, table);
-        EmitProtocolWrappers(sb, table);
+        SchemaWalk.EmitProtocolWrapperMethods(sb, table.RowTypeFullName, clientProtocol);
         EmitValidateMethod(sb, table);
         EmitDiscardMethod(sb);
         EmitInstantApply(sb, table);
@@ -1152,7 +1352,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        }");
     }
 
-    static private string EmitPersistentOpsClass(TableModel table, string ownerSimpleName, List<RevisionHistoryEntry> revisionHistory) {
+    static private string EmitPersistentOpsClass(TableModel table, string ownerSimpleName, List<RevisionHistoryEntry> revisionHistory, ClientProtocolKind clientProtocol) {
         var sb = new StringBuilder();
         var row = table.RowTypeFullName;
         var key = table.PrimaryKeyTypeFullName;
@@ -1194,9 +1394,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitIterMethod(sb, table, ownerSimpleName);
         EmitStagingMethods(sb, table);
         EmitRawSerializer(sb, table);
-        EmitProtocolWrappers(sb, table);
+        SchemaWalk.EmitProtocolWrapperMethods(sb, table.RowTypeFullName, clientProtocol);
         EmitMigrationWrappers(sb, table);
         EmitMigrationChain(sb, table);
+        EmitClientMigrationChain(sb, table, clientProtocol);
+        EmitDowngradeChain(sb, table, clientProtocol);
+        EmitIsRevisionInvalid(sb, table);
         EmitRevisionAtGeneration(sb, revisionHistory);
         EmitValidateMethod(sb, table);
         EmitDiscardMethod(sb);
@@ -1719,6 +1922,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         ImmutableArray<IndexModel> indexes,
         ImmutableArray<string> validateMethodNames,
         ImmutableArray<MigrationMethodModel> migrationMethods,
+        ImmutableArray<DowngradeMethodModel> downgradeMethods,
+        ImmutableArray<int> invalidRevisions,
         List<FieldDescriptor> descriptorFields,
         ImmutableArray<RowFieldModel> fields
     ) {
@@ -1737,12 +1942,21 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public ImmutableArray<IndexModel> Indexes { get; } = indexes;
         public ImmutableArray<string> ValidateMethodNames { get; } = validateMethodNames;
         public ImmutableArray<MigrationMethodModel> MigrationMethods { get; } = migrationMethods;
+        public ImmutableArray<DowngradeMethodModel> DowngradeMethods { get; } = downgradeMethods;
+        public ImmutableArray<int> InvalidRevisions { get; } = invalidRevisions;
         public List<FieldDescriptor> DescriptorFields { get; } = descriptorFields;
         public ImmutableArray<RowFieldModel> Fields { get; } = fields;
     }
 
     private sealed class MigrationMethodModel(int fromRevision, string methodName, string paramTypeFullName, string returnTypeFullName) {
         public int FromRevision { get; } = fromRevision;
+        public string MethodName { get; } = methodName;
+        public string ParamTypeFullName { get; } = paramTypeFullName;
+        public string ReturnTypeFullName { get; } = returnTypeFullName;
+    }
+
+    private sealed class DowngradeMethodModel(int toRevision, string methodName, string paramTypeFullName, string returnTypeFullName) {
+        public int ToRevision { get; } = toRevision;
         public string MethodName { get; } = methodName;
         public string ParamTypeFullName { get; } = paramTypeFullName;
         public string ReturnTypeFullName { get; } = returnTypeFullName;

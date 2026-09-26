@@ -15,7 +15,6 @@
 
     <ItemGroup>
         <ProjectReference Include="..\RhinoDB.SchemaContracts\RhinoDB.SchemaContracts.csproj" />
-        <ProjectReference Include="..\RhinoDB.PreBuild\RhinoDB.PreBuild.csproj" />
     </ItemGroup>
 
 </Project>

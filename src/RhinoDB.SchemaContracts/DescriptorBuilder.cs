@@ -62,7 +62,7 @@ static public class DescriptorBuilder {
         return map;
     }
 
-    static void CollectCustomTypes(
+    static private void CollectCustomTypes(
         ImmutableArray<IParameterSymbol> parameters,
         (string DatabaseFullName, string Accessor) table,
         Dictionary<string, HashSet<(string, string)>> map,

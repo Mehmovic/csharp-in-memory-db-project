@@ -15,46 +15,46 @@ namespace RhinoDB.Generators.Test;
 // that directory and LoadFromGenesis is run with NO migration having ever executed - the row must still
 // come out correctly migrated, purely from replaying history.
 public class GenesisReplayGenerationAwareTests {
-    const string Descriptor = """
-        {
-          "Databases": [ { "FullName": "global::TestNs.VaultDb", "Generation": 1, "InvalidGenerations": [], "RetainedFromGeneration": 0 } ],
-          "TypeRevisions": {},
-          "CustomTypes": {},
-          "Tables": []
-        }
-        """;
+    private const string Descriptor = """
+                                      {
+                                        "Databases": [ { "FullName": "global::TestNs.VaultDb", "Generation": 1, "InvalidGenerations": [], "RetainedFromGeneration": 0 } ],
+                                        "TypeRevisions": {},
+                                        "CustomTypes": {},
+                                        "Tables": []
+                                      }
+                                      """;
 
-    const string Source = """
-        using MemoryPack;
-        using MessagePack;
-        using RhinoDB.Core.Tables;
-        using RhinoDB.Lib.Execution;
+    private const string Source = """
+                                  using MemoryPack;
+                                  using MessagePack;
+                                  using RhinoDB.Core.Tables;
+                                  using RhinoDB.Lib.Execution;
 
-        namespace TestNs;
+                                  namespace TestNs;
 
-        [Database]
-        public partial class VaultDb : DbContext<VaultDbTransaction> { }
+                                  [Database]
+                                  public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-        [FrozenSchema(0)]
-        public readonly record struct AccountV0([PrimaryKey] int Id, decimal Balance);
+                                  [FrozenSchema(0)]
+                                  public readonly record struct AccountV0([PrimaryKey] int Id, decimal Balance);
 
-        [Table(TableKind.Persistent, typeof(VaultDb))]
-        [MemoryPackable(GenerateType.VersionTolerant)]
-        [MessagePackObject]
-        public readonly partial record struct Account(
-            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
-            [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance,
-            [property: MemoryPackOrder(2)] [property: Key(2)] string Tier) {
-            [Migration(0)]
-            internal static Account UpgradeFromV0(AccountV0 old) => new Account(old.Id, old.Balance, "Bronze");
-        }
+                                  [Table(TableKind.Persistent, typeof(VaultDb))]
+                                  [MemoryPackable(GenerateType.VersionTolerant)]
+                                  [MessagePackObject]
+                                  public readonly partial record struct Account(
+                                      [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                                      [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance,
+                                      [property: MemoryPackOrder(2)] [property: Key(2)] string Tier) {
+                                      [Migration(0)]
+                                      internal static Account UpgradeFromV0(AccountV0 old) => new Account(old.Id, old.Balance, "Bronze");
+                                  }
 
-        public static class TestHelpers {
-            public static bool AccountFound(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).HasRow();
-            public static decimal AccountBalance(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Balance;
-            public static string AccountTier(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Tier;
-        }
-        """;
+                                  public static class TestHelpers {
+                                      public static bool AccountFound(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).HasRow();
+                                      public static decimal AccountBalance(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Balance;
+                                      public static string AccountTier(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Tier;
+                                  }
+                                  """;
 
     [Test]
     public async Task LoadFromGenesis_AnArchivedSegmentTaggedWithAnOldGeneration_MigratesItBeforeApplying() {
@@ -103,14 +103,14 @@ public class GenesisReplayGenerationAwareTests {
         }
     }
 
-    const string DescriptorWithFloorAtOne = """
-        {
-          "Databases": [ { "FullName": "global::TestNs.VaultDb", "Generation": 1, "InvalidGenerations": [], "RetainedFromGeneration": 1 } ],
-          "TypeRevisions": {},
-          "CustomTypes": {},
-          "Tables": []
-        }
-        """;
+    private const string DescriptorWithFloorAtOne = """
+                                                    {
+                                                      "Databases": [ { "FullName": "global::TestNs.VaultDb", "Generation": 1, "InvalidGenerations": [], "RetainedFromGeneration": 1 } ],
+                                                      "TypeRevisions": {},
+                                                      "CustomTypes": {},
+                                                      "Tables": []
+                                                    }
+                                                    """;
 
     [Test]
     public void LoadFromGenesis_AnArchivedSegmentOlderThanTheRetentionFloor_RefusesBeforeDecodingAnything() {

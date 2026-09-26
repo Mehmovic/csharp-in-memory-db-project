@@ -36,7 +36,7 @@ static public class PackIdNumberer {
         return raw.Select(v => (byte)(v - min)).ToImmutableArray();
     }
 
-    static void CheckForCollisions(ImmutableArray<ParsedShorthandField> fields, int[] raw) {
+    static private void CheckForCollisions(ImmutableArray<ParsedShorthandField> fields, int[] raw) {
         var seen = new Dictionary<int, string>();
         foreach (var (field, value) in fields.Zip(raw, (f, v) => (f, v))) {
             if (seen.TryGetValue(value, out var existingFieldName))

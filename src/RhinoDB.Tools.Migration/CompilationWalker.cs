@@ -7,9 +7,9 @@ using RhinoDB.SchemaContracts;
 namespace RhinoDB.Tools.Migration;
 
 static public class CompilationWalker {
-    const string DatabaseAttributeFullName = "RhinoDB.Core.Tables.DatabaseAttribute";
-    const string TableAttributeFullName = "RhinoDB.Core.Tables.TableAttribute";
-    const string PrimaryKeyAttributeFullName = "RhinoDB.Core.Tables.PrimaryKeyAttribute";
+    private const string DatabaseAttributeFullName = "RhinoDB.Core.Tables.DatabaseAttribute";
+    private const string TableAttributeFullName = "RhinoDB.Core.Tables.TableAttribute";
+    private const string PrimaryKeyAttributeFullName = "RhinoDB.Core.Tables.PrimaryKeyAttribute";
 
     static public DatabaseContractDescriptor BuildDescriptor(Compilation compilation) {
         var types = AllNamedTypes(compilation).ToList();

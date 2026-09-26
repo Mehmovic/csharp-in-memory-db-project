@@ -1,12 +1,13 @@
 using RhinoDB.PreBuild;
+using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.PreBuild.Test;
 
 public class ShorthandExpanderTests {
-    static readonly Dictionary<string, string> NoProjectSources = new();
+    static private readonly Dictionary<string, string> NoProjectSources = new();
 
     [Test]
-    public void Expand_TableWithAReferenceTypedField_UsesVersionTolerantAndMatchesTheHandWrittenFixtureShape() {
+    public void Expand_VersionedMemoryPackProtocol_ReferenceTypedField_UsesVersionTolerantAndNoMessagePack() {
         var shorthand = """
             using RhinoDB.PreBuild.Shorthand;
 
@@ -22,7 +23,7 @@ public class ShorthandExpanderTests {
             );
             """;
 
-        var expanded = ShorthandExpander.Expand(shorthand, NoProjectSources);
+        var expanded = ShorthandExpander.Expand(shorthand, NoProjectSources, ClientProtocolKind.VersionedMemoryPack);
 
         var expected = """
             using MemoryPack;
@@ -34,7 +35,6 @@ public class ShorthandExpanderTests {
 
             [Table(TableKind.Instant, typeof(GameDb))]
             [MemoryPackable(GenerateType.VersionTolerant)]
-            [MessagePackObject]
             public readonly partial record struct Metric(
                 [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
                 [property: MemoryPackOrder(1)] [property: Key(1)] uint Count,
@@ -49,7 +49,7 @@ public class ShorthandExpanderTests {
     }
 
     [Test]
-    public void Expand_FullyUnmanagedTable_UsesPlainMemoryPackable() {
+    public void Expand_VersionedMemoryPackProtocol_FullyUnmanagedTable_UsesPlainMemoryPackable() {
         var shorthand = """
             namespace TestNs;
 
@@ -61,7 +61,7 @@ public class ShorthandExpanderTests {
             );
             """;
 
-        var expanded = ShorthandExpander.Expand(shorthand, NoProjectSources);
+        var expanded = ShorthandExpander.Expand(shorthand, NoProjectSources, ClientProtocolKind.VersionedMemoryPack);
 
         var expected = """
             using MemoryPack;
@@ -72,7 +72,6 @@ public class ShorthandExpanderTests {
 
             [Table(TableKind.Instant, typeof(UnmanagedDb))]
             [MemoryPackable]
-            [MessagePackObject]
             public readonly partial record struct Point(
                 [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
                 [property: MemoryPackOrder(1)] [property: Key(1)] int X,
@@ -82,6 +81,42 @@ public class ShorthandExpanderTests {
             """;
 
         Assert.That(Normalize(expanded), Is.EqualTo(Normalize(expected)));
+    }
+
+    [Test]
+    public void Expand_MessagePackProtocol_EmitsOnlyMessagePackObject() {
+        var shorthand = """
+            namespace TestNs;
+
+            [InstantTable(typeof(GameDb))]
+            public readonly partial record struct Point(
+                [PrimaryKey] int Id,
+                int X
+            );
+            """;
+
+        var expanded = ShorthandExpander.Expand(shorthand, NoProjectSources, ClientProtocolKind.MessagePack);
+
+        Assert.That(expanded, Does.Contain("[MessagePackObject]"));
+        Assert.That(expanded, Does.Not.Contain("[MemoryPackable"));
+    }
+
+    [Test]
+    public void Expand_RawProtocol_EmitsNeitherMandatoryAttribute() {
+        var shorthand = """
+            namespace TestNs;
+
+            [InstantTable(typeof(GameDb))]
+            public readonly partial record struct Point(
+                [PrimaryKey] int Id,
+                int X
+            );
+            """;
+
+        var expanded = ShorthandExpander.Expand(shorthand, NoProjectSources, ClientProtocolKind.Raw);
+
+        Assert.That(expanded, Does.Not.Contain("[MemoryPackable"));
+        Assert.That(expanded, Does.Not.Contain("[MessagePackObject]"));
     }
 
     [Test]
@@ -96,7 +131,7 @@ public class ShorthandExpanderTests {
             );
             """;
 
-        var expanded = ShorthandExpander.Expand(shorthand, NoProjectSources);
+        var expanded = ShorthandExpander.Expand(shorthand, NoProjectSources, ClientProtocolKind.Raw);
 
         Assert.That(expanded, Does.Contain("[Table(TableKind.Persistent, typeof(GameDb), Accessor = \"Widgets\", ChunkSize = 8192)]"));
     }
@@ -113,7 +148,7 @@ public class ShorthandExpanderTests {
             );
             """;
 
-        var expanded = ShorthandExpander.Expand(shorthand, NoProjectSources);
+        var expanded = ShorthandExpander.Expand(shorthand, NoProjectSources, ClientProtocolKind.VersionedMemoryPack);
 
         Assert.That(expanded, Does.Contain("[CustomType]"));
         Assert.That(expanded, Does.Not.Contain("[Table("));
@@ -139,11 +174,11 @@ public class ShorthandExpanderTests {
             );
             """;
 
-        var expanded = ShorthandExpander.Expand(shorthand, projectSources);
+        var expanded = ShorthandExpander.Expand(shorthand, projectSources, ClientProtocolKind.VersionedMemoryPack);
 
         Assert.That(expanded, Does.Contain("[MemoryPackable]"));
         Assert.That(expanded, Does.Not.Contain("GenerateType.VersionTolerant"));
     }
 
-    static string Normalize(string text) => text.Replace("\r\n", "\n").Trim();
+    static private string Normalize(string text) => text.Replace("\r\n", "\n").Trim();
 }

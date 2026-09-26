@@ -36,7 +36,7 @@ public class MigrationTransactionTests {
         await store.EndScope(commit: true, PropagationMode.Confirmed, lsn);
     }
 
-    static (byte[] Key, byte[] Row) DoubleBalance(byte[] keyBytes, byte[] rowBytes) {
+    static private (byte[] Key, byte[] Row) DoubleBalance(byte[] keyBytes, byte[] rowBytes) {
         var account = MemoryPackSerializer.Deserialize<Account>(rowBytes);
         var doubled = new Account(account.Id, account.Owner, account.Balance * 2);
         return (keyBytes, MemoryPackSerializer.Serialize(doubled));

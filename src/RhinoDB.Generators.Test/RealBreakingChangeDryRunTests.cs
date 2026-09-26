@@ -16,10 +16,10 @@ namespace RhinoDB.Generators.Test;
 // not a per-test synthetic schema. LeagueDb/Player/LeagueDbLoader are therefore real, statically-typed
 // classes here - no reflection needed anywhere in this file.
 public class RealBreakingChangeDryRunTests {
-    static string FixtureBinPath([System.Runtime.CompilerServices.CallerFilePath] string here = "") =>
+    static private string FixtureBinPath([System.Runtime.CompilerServices.CallerFilePath] string here = "") =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(here)!, "Fixtures", "SchemaMigration", "Generation0", "Player.bin");
 
-    static List<(byte[] Key, byte[] Row)> ReadFrozenEntries(string path) {
+    static private List<(byte[] Key, byte[] Row)> ReadFrozenEntries(string path) {
         using var stream = File.OpenRead(path);
         using var reader = new BinaryReader(stream);
         var count = reader.ReadInt32();

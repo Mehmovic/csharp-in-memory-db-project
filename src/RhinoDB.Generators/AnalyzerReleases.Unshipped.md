@@ -27,3 +27,7 @@
 | RHINO021 | RhinoDB.Generators | Error    | TableGenerator        |
 | RHINO022 | RhinoDB.Generators | Error    | FrozenSchemaGenerator |
 | RHINO023 | RhinoDB.Generators | Warning  | TableGenerator        |
+| RHINO024 | RhinoDB.Generators | Warning  | TableGenerator        |
+| RHINO025 | RhinoDB.Generators | Error    | FrozenSchemaGenerator |
+| RHINO026 | RhinoDB.Generators | Error    | TableGenerator        |
+| RHINO027 | RhinoDB.Generators | Error    | TableGenerator        |

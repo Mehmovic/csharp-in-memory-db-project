@@ -1,0 +1,8 @@
+{
+  "Generator": {
+    "SourceParentDirectory": "RhinoContracts",
+    "TargetParentDirectory": "RhinoDB",
+    "SchemaDescriptorPath": "RhinoContracts/Descriptor.json",
+    "MigrationsOutputDirectory": "Migrations"
+  }
+}

@@ -1,5 +1,7 @@
 using Microsoft.Build.Framework;
 
+using RhinoDB.SchemaContracts;
+
 namespace RhinoDB.PreBuild;
 
 public sealed class ExpandShorthandTask : Microsoft.Build.Utilities.Task {
@@ -8,8 +10,10 @@ public sealed class ExpandShorthandTask : Microsoft.Build.Utilities.Task {
 
     public override bool Execute() {
         GeneratorConfig config;
+        ClientProtocolKind clientProtocol;
         try {
             config = GeneratorConfigLoader.Load(ProjectDirectory);
+            clientProtocol = ClientProtocolParser.Parse(config.ClientProtocol);
         } catch (GeneratorConfigException ex) {
             Log.LogError(ex.Message);
             return false;
@@ -25,12 +29,12 @@ public sealed class ExpandShorthandTask : Microsoft.Build.Utilities.Task {
             .ToDictionary(f => f, File.ReadAllText);
 
         var targetRoot = Path.Combine(ProjectDirectory, config.TargetParentDirectory);
-        var tablesOk = ExpandDirectory(tablesSourceDir, Path.Combine(targetRoot, "Tables"), allProjectSources);
-        var typesOk = ExpandDirectory(typesSourceDir, Path.Combine(targetRoot, "Types"), allProjectSources);
+        var tablesOk = ExpandDirectory(tablesSourceDir, Path.Combine(targetRoot, "Tables"), allProjectSources, clientProtocol);
+        var typesOk = ExpandDirectory(typesSourceDir, Path.Combine(targetRoot, "Types"), allProjectSources, clientProtocol);
         return tablesOk && typesOk;
     }
 
-    static IEnumerable<string> EnumerateProjectSourceFiles(string projectDirectory) {
+    static private IEnumerable<string> EnumerateProjectSourceFiles(string projectDirectory) {
         var binDir = Path.Combine(projectDirectory, "bin") + Path.DirectorySeparatorChar;
         var objDir = Path.Combine(projectDirectory, "obj") + Path.DirectorySeparatorChar;
 
@@ -38,13 +42,13 @@ public sealed class ExpandShorthandTask : Microsoft.Build.Utilities.Task {
             .Where(f => !f.StartsWith(binDir, StringComparison.OrdinalIgnoreCase) && !f.StartsWith(objDir, StringComparison.OrdinalIgnoreCase));
     }
 
-    bool ExpandDirectory(string sourceDir, string outputDir, IReadOnlyDictionary<string, string> allProjectSources) {
+    private bool ExpandDirectory(string sourceDir, string outputDir, IReadOnlyDictionary<string, string> allProjectSources, ClientProtocolKind clientProtocol) {
         if (!Directory.Exists(sourceDir)) return true;
 
         var success = true;
         foreach (var file in Directory.EnumerateFiles(sourceDir, "*.cs", SearchOption.AllDirectories)) {
             try {
-                var expanded = ShorthandExpander.Expand(File.ReadAllText(file), allProjectSources);
+                var expanded = ShorthandExpander.Expand(File.ReadAllText(file), allProjectSources, clientProtocol);
                 var outputPath = ComputeOutputPath(sourceDir, outputDir, file);
                 WriteIfChanged(outputPath, expanded);
             } catch (Exception ex) when (ex is ShorthandParseException or PackIdCollisionException or PackIdRangeException or ContractViolationException) {
@@ -64,7 +68,7 @@ public sealed class ExpandShorthandTask : Microsoft.Build.Utilities.Task {
         return Path.Combine(outputDir, relativeDir, Path.GetFileNameWithoutExtension(sourceFile) + ".g.cs");
     }
 
-    static void WriteIfChanged(string path, string content) {
+    static private void WriteIfChanged(string path, string content) {
         if (File.Exists(path) && File.ReadAllText(path) == content) return;
 
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

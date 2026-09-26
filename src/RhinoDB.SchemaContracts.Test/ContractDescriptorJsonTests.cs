@@ -3,7 +3,7 @@ using RhinoDB.SchemaContracts;
 namespace RhinoDB.SchemaContracts.Test;
 
 public class ContractDescriptorJsonTests {
-    static DatabaseContractDescriptor FullDescriptor() {
+    static private DatabaseContractDescriptor FullDescriptor() {
         var descriptor = new DatabaseContractDescriptor();
         descriptor.Databases.Add(new DatabaseGenerationState {
             FullName = "TestNs.GameDb",

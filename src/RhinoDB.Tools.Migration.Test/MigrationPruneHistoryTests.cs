@@ -7,20 +7,20 @@ namespace RhinoDB.Tools.Migration.Test;
 // find, a hand-built Descriptor.json, and a Migrations/ folder with files matching the naming convention
 // MigrationCreateCommand's own WriteFrozenSnapshot/WriteMigrationStub already produce.
 public class MigrationPruneHistoryTests {
-    static string CreateProjectDirectory() {
+    static private string CreateProjectDirectory() {
         var projectDirectory = Path.Combine(Path.GetTempPath(), "RhinoDBPruneHistoryTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(projectDirectory);
         File.WriteAllText(Path.Combine(projectDirectory, "Sample.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>");
         return projectDirectory;
     }
 
-    static void WriteDescriptor(string projectDirectory, DatabaseContractDescriptor descriptor) {
+    static private void WriteDescriptor(string projectDirectory, DatabaseContractDescriptor descriptor) {
         var descriptorDirectory = Path.Combine(projectDirectory, "RhinoContracts");
         Directory.CreateDirectory(descriptorDirectory);
         File.WriteAllText(Path.Combine(descriptorDirectory, "Descriptor.json"), ContractDescriptorJson.Serialize(descriptor));
     }
 
-    static string WriteMigrationFile(string projectDirectory, string fileName, string content = "// stub") {
+    static private string WriteMigrationFile(string projectDirectory, string fileName, string content = "// stub") {
         var migrationsDirectory = Path.Combine(projectDirectory, "Migrations");
         Directory.CreateDirectory(migrationsDirectory);
         var path = Path.Combine(migrationsDirectory, fileName);
@@ -28,7 +28,7 @@ public class MigrationPruneHistoryTests {
         return path;
     }
 
-    static DatabaseContractDescriptor DescriptorWithOneTable(int retainedFromGeneration, List<RevisionHistoryEntry> history) =>
+    static private DatabaseContractDescriptor DescriptorWithOneTable(int retainedFromGeneration, List<RevisionHistoryEntry> history) =>
         new DatabaseContractDescriptor {
             Databases = [new DatabaseGenerationState { FullName = "global::Test.Db", Generation = history.Count, RetainedFromGeneration = retainedFromGeneration }],
             Tables = [

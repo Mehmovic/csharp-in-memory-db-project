@@ -6,11 +6,11 @@ public class DescriptorBuilderTests {
     // Shared stub attributes matching the exact fully-qualified names SchemaWalk checks for by string -
     // deliberately NOT the real RhinoDB.Core/MemoryPack/MessagePack packages, since SchemaWalk's checks
     // are purely name-based and this project doesn't reference those packages at all.
-    const string Prelude = """
-        namespace RhinoDB.Core.Tables { public class CustomTypeAttribute : System.Attribute { } }
-        namespace MemoryPack { public class MemoryPackableAttribute : System.Attribute { } }
-        namespace MessagePack { public class MessagePackObjectAttribute : System.Attribute { } }
-        """;
+    private const string Prelude = """
+                                   namespace RhinoDB.Core.Tables { public class CustomTypeAttribute : System.Attribute { } }
+                                   namespace MemoryPack { public class MemoryPackableAttribute : System.Attribute { } }
+                                   namespace MessagePack { public class MessagePackObjectAttribute : System.Attribute { } }
+                                   """;
 
     [Test]
     public void FlattenFields_NoCustomTypeFields_ReturnsFlatFieldList() {

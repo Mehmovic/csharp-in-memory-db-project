@@ -1,5 +1,7 @@
 using Microsoft.CodeAnalysis;
 
+using RhinoDB.SchemaContracts;
+
 namespace RhinoDB.Generators.Test;
 
 // Every rule TableGenerator relies on is a diagnostic, not a silent
@@ -360,7 +362,10 @@ public class DiagnosticsTests {
     }
 
     [Test]
-    public void MissingBothSerializationAttributes_ReportsRHINO015() {
+    public void RawProtocol_NeitherSerializationAttributeIsMandatory() {
+        // Raw is the default (no config.json at all) - a row with zero serialization
+        // attributes compiles fine, since Raw's own SerializeRow/DeserializeRow is the whole client
+        // pipeline for that project; RHINO015 never fires under Raw.
         const string source = """
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
@@ -374,14 +379,32 @@ public class DiagnosticsTests {
             public readonly partial record struct Widget([PrimaryKey] int Id, string Name);
             """;
 
-        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
-        Assert.That(ex!.Message, Does.Contain("RHINO015"));
-        Assert.That(ex.Message, Does.Contain("[MemoryPackable]"));
-        Assert.That(ex.Message, Does.Contain("[MessagePackObject]"));
+        Assert.DoesNotThrow(() => GeneratorTestHost.CompileAndLoad(source));
     }
 
     [Test]
-    public void MissingOnlyMessagePackObject_ReportsRHINO015MentioningOnlyThatOne() {
+    public void VersionedMemoryPackProtocol_MissingMemoryPackable_ReportsRHINO015() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class NoSerializationDb : DbContext<NoSerializationDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(NoSerializationDb))]
+            public readonly partial record struct Widget([PrimaryKey] int Id, string Name);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            GeneratorTestHost.CompileAndLoadWithClientProtocol(source, ClientProtocolKind.VersionedMemoryPack));
+        Assert.That(ex!.Message, Does.Contain("RHINO015"));
+        Assert.That(ex.Message, Does.Contain("[MemoryPackable]"));
+    }
+
+    [Test]
+    public void MessagePackProtocol_MissingOnlyMessagePackObject_ReportsRHINO015MentioningOnlyThatOne() {
         const string source = """
             using MemoryPack;
             using RhinoDB.Core.Tables;
@@ -399,7 +422,8 @@ public class DiagnosticsTests {
                 [property: MemoryPackOrder(1)] string Name);
             """;
 
-        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            GeneratorTestHost.CompileAndLoadWithClientProtocol(source, ClientProtocolKind.MessagePack));
         Assert.That(ex!.Message, Does.Contain("RHINO015"));
         Assert.That(ex.Message, Does.Contain("[MessagePackObject]"));
         Assert.That(ex.Message, Does.Not.Contain("missing [MemoryPackable]"));
@@ -639,7 +663,7 @@ public class DiagnosticsTests {
     }
 
     [Test]
-    public void CustomTypeMissingBothSerializationAttributes_ReportsRHINO017() {
+    public void RawProtocol_CustomTypeNeedsNeitherSerializationAttribute() {
         const string source = """
             using RhinoDB.Core.Tables;
             using RhinoDB.Lib.Execution;
@@ -653,14 +677,32 @@ public class DiagnosticsTests {
             public readonly partial record struct PlayerName(string First, string Last);
             """;
 
-        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
-        Assert.That(ex!.Message, Does.Contain("RHINO017"));
-        Assert.That(ex.Message, Does.Contain("[MemoryPackable]"));
-        Assert.That(ex.Message, Does.Contain("[MessagePackObject]"));
+        Assert.DoesNotThrow(() => GeneratorTestHost.CompileAndLoad(source));
     }
 
     [Test]
-    public void CustomTypeMissingOnlyMessagePackObject_ReportsRHINO017MentioningOnlyThatOne() {
+    public void VersionedMemoryPackProtocol_CustomTypeMissingMemoryPackable_ReportsRHINO017() {
+        const string source = """
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class NoSerializationDb : DbContext<NoSerializationDbTransaction> { }
+
+            [CustomType]
+            public readonly partial record struct PlayerName(string First, string Last);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            GeneratorTestHost.CompileAndLoadWithClientProtocol(source, ClientProtocolKind.VersionedMemoryPack));
+        Assert.That(ex!.Message, Does.Contain("RHINO017"));
+        Assert.That(ex.Message, Does.Contain("[MemoryPackable]"));
+    }
+
+    [Test]
+    public void MessagePackProtocol_CustomTypeMissingOnlyMessagePackObject_ReportsRHINO017MentioningOnlyThatOne() {
         const string source = """
             using MemoryPack;
             using RhinoDB.Core.Tables;
@@ -678,7 +720,8 @@ public class DiagnosticsTests {
                 [property: MemoryPackOrder(1)] string Last);
             """;
 
-        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            GeneratorTestHost.CompileAndLoadWithClientProtocol(source, ClientProtocolKind.MessagePack));
         Assert.That(ex!.Message, Does.Contain("RHINO017"));
         Assert.That(ex.Message, Does.Contain("[MessagePackObject]"));
         Assert.That(ex.Message, Does.Not.Contain("missing [MemoryPackable]"));

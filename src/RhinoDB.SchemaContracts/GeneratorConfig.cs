@@ -1,4 +1,4 @@
-namespace RhinoDB.PreBuild;
+namespace RhinoDB.SchemaContracts;
 
 public sealed class GeneratorConfig {
     public string SourceParentDirectory { get; set; } = "RhinoContracts";
@@ -7,4 +7,6 @@ public sealed class GeneratorConfig {
 
     // Deliberately NOT under RhinoContracts, it needs to be compiled
     public string MigrationsOutputDirectory { get; set; } = "Migrations";
+
+    public string ClientProtocol { get; set; } = "Raw";
 }

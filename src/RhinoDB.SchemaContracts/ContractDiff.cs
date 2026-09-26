@@ -11,7 +11,7 @@ static public class ContractDiff {
         return DiffFields(oldTable.Fields, newTable.Fields);
     }
 
-    static DiffClassification DiffFields(List<FieldDescriptor> oldFields, List<FieldDescriptor> newFields) {
+    static private DiffClassification DiffFields(List<FieldDescriptor> oldFields, List<FieldDescriptor> newFields) {
         if (newFields.Count < oldFields.Count) return DiffClassification.Breaking;
 
         for (var i = 0; i < oldFields.Count; i++) {

@@ -88,29 +88,29 @@ public class DescriptorWiringTests {
         Assert.That(asm.GetType("TestNs.GameDb")!.GetField("G_binary")!.GetValue(null), Is.EqualTo(0));
     }
 
-    const string OldAccountDescriptor = """
-        {
-          "Databases": [],
-          "TypeRevisions": {},
-          "CustomTypes": {},
-          "Tables": [
-            {
-              "DatabaseFullName": "global::TestNs.VaultDb",
-              "Accessor": "Account",
-              "RowTypeFullName": "global::TestNs.Account",
-              "Kind": "Persistent",
-              "TableIdHash": 0,
-              "Revision": 0,
-              "PrimaryKey": { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" },
-              "Fields": [
-                { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" },
-                { "Path": "Balance", "TypeFullName": "decimal", "Kind": "Unmanaged" }
-              ],
-              "Indexes": []
-            }
-          ]
-        }
-        """;
+    private const string OldAccountDescriptor = """
+                                                {
+                                                  "Databases": [],
+                                                  "TypeRevisions": {},
+                                                  "CustomTypes": {},
+                                                  "Tables": [
+                                                    {
+                                                      "DatabaseFullName": "global::TestNs.VaultDb",
+                                                      "Accessor": "Account",
+                                                      "RowTypeFullName": "global::TestNs.Account",
+                                                      "Kind": "Persistent",
+                                                      "TableIdHash": 0,
+                                                      "Revision": 0,
+                                                      "PrimaryKey": { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" },
+                                                      "Fields": [
+                                                        { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" },
+                                                        { "Path": "Balance", "TypeFullName": "decimal", "Kind": "Unmanaged" }
+                                                      ],
+                                                      "Indexes": []
+                                                    }
+                                                  ]
+                                                }
+                                                """;
 
     [Test]
     public void BreakingChangeAgainstCommittedDescriptor_NoMatchingMigration_ReportsRHINO019() {

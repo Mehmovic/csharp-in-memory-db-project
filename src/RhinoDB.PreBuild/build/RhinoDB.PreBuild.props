@@ -1,12 +1,12 @@
 <Project>
     <PropertyGroup>
-        <_RhinoGeneratorConfigPath>$(MSBuildProjectDirectory)\config.Generator.json</_RhinoGeneratorConfigPath>
-        <_RhinoGeneratorConfigJson Condition="Exists('$(_RhinoGeneratorConfigPath)')">$([System.IO.File]::ReadAllText('$(_RhinoGeneratorConfigPath)'))</_RhinoGeneratorConfigJson>
-        <RhinoSourceParentDirectory Condition="'$(_RhinoGeneratorConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoGeneratorConfigJson)', '"SourceParentDirectory"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoSourceParentDirectory>
+        <_RhinoConfigPath>$(MSBuildProjectDirectory)\config.json</_RhinoConfigPath>
+        <_RhinoConfigJson Condition="Exists('$(_RhinoConfigPath)')">$([System.IO.File]::ReadAllText('$(_RhinoConfigPath)'))</_RhinoConfigJson>
+        <RhinoSourceParentDirectory Condition="'$(_RhinoConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoConfigJson)', '"SourceParentDirectory"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoSourceParentDirectory>
         <RhinoSourceParentDirectory Condition="'$(RhinoSourceParentDirectory)' == ''">RhinoContracts</RhinoSourceParentDirectory>
-        <RhinoTargetParentDirectory Condition="'$(_RhinoGeneratorConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoGeneratorConfigJson)', '"TargetParentDirectory"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoTargetParentDirectory>
+        <RhinoTargetParentDirectory Condition="'$(_RhinoConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoConfigJson)', '"TargetParentDirectory"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoTargetParentDirectory>
         <RhinoTargetParentDirectory Condition="'$(RhinoTargetParentDirectory)' == ''">RhinoDB</RhinoTargetParentDirectory>
-        <RhinoSchemaDescriptorPath Condition="'$(_RhinoGeneratorConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoGeneratorConfigJson)', '"SchemaDescriptorPath"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoSchemaDescriptorPath>
+        <RhinoSchemaDescriptorPath Condition="'$(_RhinoConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoConfigJson)', '"SchemaDescriptorPath"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoSchemaDescriptorPath>
         <RhinoSchemaDescriptorPath Condition="'$(RhinoSchemaDescriptorPath)' == ''">RhinoContracts/Descriptor.json</RhinoSchemaDescriptorPath>
     </PropertyGroup>
     <ItemGroup>
@@ -16,5 +16,6 @@
 
     <ItemGroup>
         <AdditionalFiles Include="$(RhinoSchemaDescriptorPath)" Condition="Exists('$(RhinoSchemaDescriptorPath)')" />
+        <AdditionalFiles Include="config.json" Condition="Exists('config.json')" />
     </ItemGroup>
 </Project>

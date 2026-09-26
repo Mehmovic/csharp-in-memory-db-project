@@ -1,22 +1,24 @@
 using System.Text.Json;
 
-namespace RhinoDB.PreBuild;
+namespace RhinoDB.SchemaContracts;
 
 static public class GeneratorConfigLoader {
-    public const string ConfigFileName = "config.Generator.json";
+    public const string ConfigFileName = "config.json";
 
-    static public GeneratorConfig Load(string projectDirectory) {
+    static public GeneratorConfig Load(string projectDirectory) => LoadFull(projectDirectory).Generator;
+
+    static public RhinoDbConfig LoadFull(string projectDirectory) {
         var configPath = Path.Combine(projectDirectory, ConfigFileName);
         if (!File.Exists(configPath)) {
-            var defaultConfig = new GeneratorConfig();
+            var defaultConfig = new RhinoDbConfig();
             TryWriteDefaultFile(configPath, defaultConfig);
             return defaultConfig;
         }
 
-        return Parse(File.ReadAllText(configPath));
+        return ParseFull(File.ReadAllText(configPath));
     }
 
-    static void TryWriteDefaultFile(string configPath, GeneratorConfig defaultConfig) {
+    static private void TryWriteDefaultFile(string configPath, RhinoDbConfig defaultConfig) {
         try {
             var json = JsonSerializer.Serialize(defaultConfig, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(configPath, json);
@@ -24,9 +26,11 @@ static public class GeneratorConfigLoader {
         }
     }
 
-    static public GeneratorConfig Parse(string json) {
+    static public GeneratorConfig Parse(string json) => ParseFull(json).Generator;
+
+    static public RhinoDbConfig ParseFull(string json) {
         try {
-            return JsonSerializer.Deserialize<GeneratorConfig>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            return JsonSerializer.Deserialize<RhinoDbConfig>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                 ?? throw new GeneratorConfigException($"'{ConfigFileName}' parsed to null - it must be a JSON object.");
         } catch (JsonException ex) {
             throw new GeneratorConfigException($"'{ConfigFileName}' is not valid JSON: {ex.Message}", ex);

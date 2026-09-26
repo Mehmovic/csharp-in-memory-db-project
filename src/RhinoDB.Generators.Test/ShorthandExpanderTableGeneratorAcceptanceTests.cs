@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using RhinoDB.PreBuild;
+using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Generators.Test;
 
@@ -18,9 +19,9 @@ namespace RhinoDB.Generators.Test;
 // ComposeSingleCompilationUnit below merges multiple Expand() outputs into one valid file purely for
 // this test harness's benefit, not a real constraint on the tool itself.
 public class ShorthandExpanderTableGeneratorAcceptanceTests {
-    static readonly Dictionary<string, string> NoProjectSources = new();
+    static private readonly Dictionary<string, string> NoProjectSources = new();
 
-    const string DatabaseBoilerplate =
+    private const string DatabaseBoilerplate =
         "using RhinoDB.Lib.Execution;\n\n[Database]\npublic partial class GameDb : DbContext<GameDbTransaction> { }\n";
 
     [Test]
@@ -33,10 +34,10 @@ public class ShorthandExpanderTableGeneratorAcceptanceTests {
                 [PrimaryKey] int Id,
                 string Label
             );
-            """, NoProjectSources);
+            """, NoProjectSources, ClientProtocolKind.VersionedMemoryPack);
 
-        var (assembly, _) = GeneratorTestHost.CompileAndLoad(
-            ComposeSingleCompilationUnit(DatabaseBoilerplate, expanded));
+        var (assembly, _) = GeneratorTestHost.CompileAndLoadWithClientProtocol(
+            ComposeSingleCompilationUnit(DatabaseBoilerplate, expanded), ClientProtocolKind.VersionedMemoryPack);
 
         Assert.That(assembly.GetType("TestNs.ShorthandMetric"), Is.Not.Null);
     }
@@ -52,10 +53,10 @@ public class ShorthandExpanderTableGeneratorAcceptanceTests {
                 int X,
                 int Y
             );
-            """, NoProjectSources);
+            """, NoProjectSources, ClientProtocolKind.VersionedMemoryPack);
 
-        var (assembly, _) = GeneratorTestHost.CompileAndLoad(
-            ComposeSingleCompilationUnit(DatabaseBoilerplate, expanded));
+        var (assembly, _) = GeneratorTestHost.CompileAndLoadWithClientProtocol(
+            ComposeSingleCompilationUnit(DatabaseBoilerplate, expanded), ClientProtocolKind.VersionedMemoryPack);
 
         Assert.That(assembly.GetType("TestNs.ShorthandPoint"), Is.Not.Null);
     }
@@ -71,7 +72,7 @@ public class ShorthandExpanderTableGeneratorAcceptanceTests {
                 string Last
             );
             """;
-        var expandedCustomType = ShorthandExpander.Expand(customTypeSource, NoProjectSources);
+        var expandedCustomType = ShorthandExpander.Expand(customTypeSource, NoProjectSources, ClientProtocolKind.VersionedMemoryPack);
 
         var projectSources = new Dictionary<string, string> { ["PlayerName.rhinotype"] = customTypeSource };
         var expandedTable = ShorthandExpander.Expand("""
@@ -82,10 +83,10 @@ public class ShorthandExpanderTableGeneratorAcceptanceTests {
                 [PrimaryKey] int Id,
                 ShorthandPlayerName Name
             );
-            """, projectSources);
+            """, projectSources, ClientProtocolKind.VersionedMemoryPack);
 
-        var (assembly, _) = GeneratorTestHost.CompileAndLoad(
-            ComposeSingleCompilationUnit(DatabaseBoilerplate, expandedCustomType, expandedTable));
+        var (assembly, _) = GeneratorTestHost.CompileAndLoadWithClientProtocol(
+            ComposeSingleCompilationUnit(DatabaseBoilerplate, expandedCustomType, expandedTable), ClientProtocolKind.VersionedMemoryPack);
 
         Assert.That(assembly.GetType("TestNs.ShorthandPlayer"), Is.Not.Null);
         Assert.That(assembly.GetType("TestNs.ShorthandPlayerName"), Is.Not.Null);
@@ -94,7 +95,7 @@ public class ShorthandExpanderTableGeneratorAcceptanceTests {
     // Takes N independently-valid "files" (each with its own using directives and file-scoped
     // namespace), and merges them into one compilation unit: usings deduplicated and hoisted to the
     // top, exactly one namespace declaration, all type bodies concatenated beneath it.
-    static string ComposeSingleCompilationUnit(params string[] units) {
+    static private string ComposeSingleCompilationUnit(params string[] units) {
         var usings = new List<string>();
         var bodies = new List<string>();
         string? ns = null;

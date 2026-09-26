@@ -4,14 +4,14 @@ namespace RhinoDB.Tools.Dev.Test;
 // Descriptor.json/Migrations/a cold-storage directory by plain file I/O, so these tests build a fresh
 // temp directory by hand rather than reusing RhinoDB.Tools.Migration.Test's Fixtures/ pattern.
 public class DevResetCommandTests {
-    static string CreateTempProjectDirectory() {
+    static private string CreateTempProjectDirectory() {
         var dir = Path.Combine(Path.GetTempPath(), "RhinoDBDevResetTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "Sample.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>");
         return dir;
     }
 
-    static string CaptureOut(Func<int> run, out int exitCode) {
+    static private string CaptureOut(Func<int> run, out int exitCode) {
         var originalOut = Console.Out;
         var captured = new StringWriter();
         Console.SetOut(captured);

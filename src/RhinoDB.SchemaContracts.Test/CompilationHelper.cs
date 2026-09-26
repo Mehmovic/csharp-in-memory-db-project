@@ -11,7 +11,7 @@ namespace RhinoDB.SchemaContracts.Test;
 // RhinoDB-specific (fixtures declare their own stub [CustomType]/[MemoryPackable]/[MessagePackObject]
 // attributes directly in source, matching the exact fully-qualified names SchemaWalk checks for).
 static internal class CompilationHelper {
-    static readonly ImmutableArray<MetadataReference> References = BuildReferences();
+    static private readonly ImmutableArray<MetadataReference> References = BuildReferences();
 
     static public INamedTypeSymbol GetType(string source, string fullyQualifiedTypeName) {
         var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest));
@@ -20,7 +20,7 @@ static internal class CompilationHelper {
             ?? throw new InvalidOperationException($"Type '{fullyQualifiedTypeName}' not found in the compiled source.");
     }
 
-    static ImmutableArray<MetadataReference> BuildReferences() {
+    static private ImmutableArray<MetadataReference> BuildReferences() {
         var trustedPlatformAssemblies = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator);
         return trustedPlatformAssemblies.Select(path => (MetadataReference)MetadataReference.CreateFromFile(path)).ToImmutableArray();
     }

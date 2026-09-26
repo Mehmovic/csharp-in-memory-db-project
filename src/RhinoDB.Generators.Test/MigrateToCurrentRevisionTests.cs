@@ -7,38 +7,38 @@ namespace RhinoDB.Generators.Test;
 // (RevisionAtGeneration) and the live row type, walking the registered [Migration(FromRevision=N)] chain
 // forward from whatever revision the bytes were captured at.
 public class MigrateToCurrentRevisionTests {
-    const string TwoHopSource = """
-        using MemoryPack;
-        using MessagePack;
-        using RhinoDB.Core.Tables;
-        using RhinoDB.Lib.Execution;
+    private const string TwoHopSource = """
+                                        using MemoryPack;
+                                        using MessagePack;
+                                        using RhinoDB.Core.Tables;
+                                        using RhinoDB.Lib.Execution;
 
-        namespace TestNs;
+                                        namespace TestNs;
 
-        [Database]
-        public partial class VaultDb : DbContext<VaultDbTransaction> { }
+                                        [Database]
+                                        public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-        [FrozenSchema(0)]
-        public readonly record struct AccountV0([PrimaryKey] int Id);
+                                        [FrozenSchema(0)]
+                                        public readonly record struct AccountV0([PrimaryKey] int Id);
 
-        [FrozenSchema(1)]
-        public readonly record struct AccountV1([PrimaryKey] int Id, decimal Balance);
+                                        [FrozenSchema(1)]
+                                        public readonly record struct AccountV1([PrimaryKey] int Id, decimal Balance);
 
-        [Table(TableKind.Persistent, typeof(VaultDb))]
-        [MemoryPackable(GenerateType.VersionTolerant)]
-        [MessagePackObject]
-        public readonly partial record struct Account(
-            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
-            [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance,
-            [property: MemoryPackOrder(2)] [property: Key(2)] string Tier) {
-            [Migration(0)]
-            internal static AccountV1 UpgradeFromV0(AccountV0 old) => new AccountV1(old.Id, 0m);
-            [Migration(1)]
-            internal static Account UpgradeFromV1(AccountV1 old) => new Account(old.Id, old.Balance, "Bronze");
-        }
-        """;
+                                        [Table(TableKind.Persistent, typeof(VaultDb))]
+                                        [MemoryPackable(GenerateType.VersionTolerant)]
+                                        [MessagePackObject]
+                                        public readonly partial record struct Account(
+                                            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                                            [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance,
+                                            [property: MemoryPackOrder(2)] [property: Key(2)] string Tier) {
+                                            [Migration(0)]
+                                            internal static AccountV1 UpgradeFromV0(AccountV0 old) => new AccountV1(old.Id, 0m);
+                                            [Migration(1)]
+                                            internal static Account UpgradeFromV1(AccountV1 old) => new Account(old.Id, old.Balance, "Bronze");
+                                        }
+                                        """;
 
-    static object InvokeMigrateToCurrentRevision(System.Reflection.Assembly asm, int fromRevision, byte[] rowBytes) {
+    static private object InvokeMigrateToCurrentRevision(System.Reflection.Assembly asm, int fromRevision, byte[] rowBytes) {
         var opsType = asm.GetType("TestNs.VaultDbAccountOps")!;
         var method = opsType.GetMethod("MigrateToCurrentRevision", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!;
         return method.Invoke(null, [fromRevision, rowBytes])!;

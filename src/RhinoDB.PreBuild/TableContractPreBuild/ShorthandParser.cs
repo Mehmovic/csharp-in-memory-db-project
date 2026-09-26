@@ -38,7 +38,7 @@ static public class ShorthandParser {
         return new ParsedShorthandFile(@namespace, usings, typeName, kind, databaseTypeName, tableNamedArguments, fields);
     }
 
-    static (ShorthandKind Kind, string? DatabaseTypeName, ImmutableArray<(string Name, string Value)> NamedArguments) ParseShorthandAttribute(
+    static private (ShorthandKind Kind, string? DatabaseTypeName, ImmutableArray<(string Name, string Value)> NamedArguments) ParseShorthandAttribute(
         RecordDeclarationSyntax record, string typeName) {
         foreach (var attrList in record.AttributeLists) {
             foreach (var attr in attrList.Attributes) {
@@ -54,14 +54,14 @@ static public class ShorthandParser {
         throw new ShorthandParseException($"'{typeName}' has no recognized shorthand attribute - expected [InstantTable], [PersistentTable], or [RhinoType].");
     }
 
-    static string AttributeSimpleName(AttributeSyntax attr) =>
+    static private string AttributeSimpleName(AttributeSyntax attr) =>
         attr.Name switch {
             SimpleNameSyntax simple => simple.Identifier.Text,
             QualifiedNameSyntax qualified => qualified.Right.Identifier.Text,
             _ => attr.Name.ToString()
         };
 
-    static string ParseDatabaseArgument(AttributeSyntax attr, string typeName) {
+    static private string ParseDatabaseArgument(AttributeSyntax attr, string typeName) {
         var positional = attr.ArgumentList?.Arguments.FirstOrDefault(a => a.NameEquals is null);
         if (positional?.Expression is not TypeOfExpressionSyntax typeOf)
             throw new ShorthandParseException($"'{typeName}''s shorthand table attribute must have a 'typeof(Db)' first argument.");
@@ -69,7 +69,7 @@ static public class ShorthandParser {
         return typeOf.Type.ToString();
     }
 
-    static ImmutableArray<(string Name, string Value)> ParseNamedArguments(AttributeSyntax attr) {
+    static private ImmutableArray<(string Name, string Value)> ParseNamedArguments(AttributeSyntax attr) {
         if (attr.ArgumentList is null) return ImmutableArray<(string, string)>.Empty;
 
         return attr.ArgumentList.Arguments
@@ -78,7 +78,7 @@ static public class ShorthandParser {
             .ToImmutableArray();
     }
 
-    static ParsedShorthandField ParseField(ParameterSyntax parameter) {
+    static private ParsedShorthandField ParseField(ParameterSyntax parameter) {
         var typeName = parameter.Type?.ToString() ?? "";
         if (parameter.Identifier.IsMissing || string.IsNullOrWhiteSpace(typeName))
             throw new ShorthandParseException(
@@ -102,7 +102,7 @@ static public class ShorthandParser {
         return new ParsedShorthandField(name, typeName, passThrough.ToImmutable(), explicitPackId);
     }
 
-    static int ParsePackIdValue(AttributeSyntax attr, string fieldName) {
+    static private int ParsePackIdValue(AttributeSyntax attr, string fieldName) {
         var arg = attr.ArgumentList?.Arguments.Count == 1 ? attr.ArgumentList.Arguments[0] : null;
         if (arg is null || !TryGetIntLiteral(arg.Expression, out var value))
             throw new ShorthandParseException($"'{fieldName}''s [PackId(n)] must have exactly one integer literal argument.");
@@ -110,7 +110,7 @@ static public class ShorthandParser {
         return value;
     }
 
-    static bool TryGetIntLiteral(ExpressionSyntax expr, out int value) {
+    static private bool TryGetIntLiteral(ExpressionSyntax expr, out int value) {
         switch (expr) {
             case LiteralExpressionSyntax { Token.Value: int literalValue }:
                 value = literalValue;

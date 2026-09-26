@@ -5,8 +5,6 @@ using RhinoDB.Core.Tables;
 namespace RhinoDB.Sandbox.Benchmark.Schema;
 
 [Table(TableKind.Persistent, typeof(PersistentBenchDb))]
-[MemoryPackable]
-[MessagePackObject]
 public readonly partial record struct PersistentWidget(
     [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
     [property: MemoryPackOrder(1)] [property: Key(1)] long Value

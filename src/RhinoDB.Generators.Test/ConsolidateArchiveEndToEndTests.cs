@@ -12,40 +12,40 @@ namespace RhinoDB.Generators.Test;
 // archive) - after ConsolidateArchive() runs, the same segment must decode as the CURRENT shape without
 // ever going through [Migration(0)] again, proving the bytes on disk actually changed.
 public class ConsolidateArchiveEndToEndTests {
-    const string Descriptor = """
-        {
-          "Databases": [ { "FullName": "global::TestNs.VaultDb", "Generation": 1, "InvalidGenerations": [], "RetainedFromGeneration": 0 } ],
-          "TypeRevisions": {},
-          "CustomTypes": {},
-          "Tables": []
-        }
-        """;
+    private const string Descriptor = """
+                                      {
+                                        "Databases": [ { "FullName": "global::TestNs.VaultDb", "Generation": 1, "InvalidGenerations": [], "RetainedFromGeneration": 0 } ],
+                                        "TypeRevisions": {},
+                                        "CustomTypes": {},
+                                        "Tables": []
+                                      }
+                                      """;
 
-    const string Source = """
-        using MemoryPack;
-        using MessagePack;
-        using RhinoDB.Core.Tables;
-        using RhinoDB.Lib.Execution;
+    private const string Source = """
+                                  using MemoryPack;
+                                  using MessagePack;
+                                  using RhinoDB.Core.Tables;
+                                  using RhinoDB.Lib.Execution;
 
-        namespace TestNs;
+                                  namespace TestNs;
 
-        [Database]
-        public partial class VaultDb : DbContext<VaultDbTransaction> { }
+                                  [Database]
+                                  public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-        [FrozenSchema(0)]
-        public readonly record struct AccountV0([PrimaryKey] int Id, decimal Balance);
+                                  [FrozenSchema(0)]
+                                  public readonly record struct AccountV0([PrimaryKey] int Id, decimal Balance);
 
-        [Table(TableKind.Persistent, typeof(VaultDb))]
-        [MemoryPackable(GenerateType.VersionTolerant)]
-        [MessagePackObject]
-        public readonly partial record struct Account(
-            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
-            [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance,
-            [property: MemoryPackOrder(2)] [property: Key(2)] string Tier) {
-            [Migration(0)]
-            internal static Account UpgradeFromV0(AccountV0 old) => new Account(old.Id, old.Balance, "Bronze");
-        }
-        """;
+                                  [Table(TableKind.Persistent, typeof(VaultDb))]
+                                  [MemoryPackable(GenerateType.VersionTolerant)]
+                                  [MessagePackObject]
+                                  public readonly partial record struct Account(
+                                      [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                                      [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance,
+                                      [property: MemoryPackOrder(2)] [property: Key(2)] string Tier) {
+                                      [Migration(0)]
+                                      internal static Account UpgradeFromV0(AccountV0 old) => new Account(old.Id, old.Balance, "Bronze");
+                                  }
+                                  """;
 
     [Test]
     public async Task ConsolidateArchive_AnOldGenerationSegment_IsRewrittenToTheCurrentGenerationAndShape() {

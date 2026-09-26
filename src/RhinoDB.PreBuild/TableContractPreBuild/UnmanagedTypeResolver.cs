@@ -6,7 +6,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace RhinoDB.PreBuild;
 
 static public class UnmanagedTypeResolver {
-    static readonly ImmutableHashSet<string> BuiltInUnmanagedTypeNames = ImmutableHashSet.Create(
+    static private readonly ImmutableHashSet<string> BuiltInUnmanagedTypeNames = ImmutableHashSet.Create(
         "sbyte", "byte", "short", "ushort", "int", "uint", "long", "ulong", "nint", "nuint",
         "char", "float", "double", "decimal", "bool",
         "Guid", "System.Guid",
@@ -18,7 +18,7 @@ static public class UnmanagedTypeResolver {
     static public bool IsUnmanaged(string typeName, IReadOnlyDictionary<string, string> allProjectSourceTextsByPath) =>
         IsUnmanaged(typeName, allProjectSourceTextsByPath, new HashSet<string>());
 
-    static bool IsUnmanaged(string typeName, IReadOnlyDictionary<string, string> sources, HashSet<string> visiting) {
+    static private bool IsUnmanaged(string typeName, IReadOnlyDictionary<string, string> sources, HashSet<string> visiting) {
         typeName = typeName.Trim();
         if (typeName.EndsWith("?", StringComparison.Ordinal)) return IsUnmanaged(typeName.Substring(0, typeName.Length - 1), sources, visiting);
         if (BuiltInUnmanagedTypeNames.Contains(typeName)) return true;
@@ -36,7 +36,7 @@ static public class UnmanagedTypeResolver {
         }
     }
 
-    static MemberDeclarationSyntax? FindTypeDeclaration(string simpleName, IReadOnlyDictionary<string, string> sources) {
+    static private MemberDeclarationSyntax? FindTypeDeclaration(string simpleName, IReadOnlyDictionary<string, string> sources) {
         foreach (var text in sources.Values) {
             var root = CSharpSyntaxTree.ParseText(text).GetCompilationUnitRoot();
 

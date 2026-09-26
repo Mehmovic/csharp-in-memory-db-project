@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace RhinoDB.SchemaContracts;
 
 static public class ContractDescriptorJson {
-    static readonly JsonSerializerOptions Options = new() {
+    static private readonly JsonSerializerOptions Options = new() {
         WriteIndented = true,
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() },

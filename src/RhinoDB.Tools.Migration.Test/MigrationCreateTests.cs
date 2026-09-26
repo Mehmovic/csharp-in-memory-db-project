@@ -9,13 +9,13 @@ namespace RhinoDB.Tools.Migration.Test;
 // RhinoDB.Core) so `migration create`'s real file writes/Descriptor.json rewrite never touch the
 // git-tracked fixture itself.
 public class MigrationCreateTests {
-    static string FixtureSourceDirectory([CallerFilePath] string here = "") =>
+    static private string FixtureSourceDirectory([CallerFilePath] string here = "") =>
         Path.Combine(Path.GetDirectoryName(here)!, "Fixtures", "CreateSampleProject");
 
-    static string RhinoDbCoreCsprojPath([CallerFilePath] string here = "") =>
+    static private string RhinoDbCoreCsprojPath([CallerFilePath] string here = "") =>
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(here)!, "..", "RhinoDB.Core", "RhinoDB.Core.csproj"));
 
-    static string CopyFixtureToTempDirectory() {
+    static private string CopyFixtureToTempDirectory() {
         var tempDirectory = Path.Combine(Path.GetTempPath(), "RhinoDBMigrationCreateTest_" + Guid.NewGuid().ToString("N"));
         CopyDirectory(FixtureSourceDirectory(), tempDirectory);
 
@@ -27,7 +27,7 @@ public class MigrationCreateTests {
         return csprojPath;
     }
 
-    static void CopyDirectory(string sourceDir, string destDir) {
+    static private void CopyDirectory(string sourceDir, string destDir) {
         Directory.CreateDirectory(destDir);
         foreach (var file in Directory.GetFiles(sourceDir))
             File.Copy(file, Path.Combine(destDir, Path.GetFileName(file)));
@@ -69,6 +69,43 @@ public class MigrationCreateTests {
             Assert.That(history, Has.Count.EqualTo(1), "the fixture's committed descriptor had no prior history - this run's hop is the only entry");
             Assert.That(history[0].Generation, Is.EqualTo(1));
             Assert.That(history[0].Revision, Is.EqualTo(1));
+        } finally {
+            Directory.Delete(projectDirectory, recursive: true);
+        }
+    }
+
+    [Test]
+    public void MigrationCreate_MessagePackClientProtocol_FrozenSnapshotGetsMatchingAttribute() {
+        var csprojPath = CopyFixtureToTempDirectory();
+        var projectDirectory = Path.GetDirectoryName(csprojPath)!;
+        try {
+            File.WriteAllText(Path.Combine(projectDirectory, "config.json"), """{"Generator": {"ClientProtocol": "MessagePack"}}""");
+
+            var exitCode = RhinoDB.Tools.Migration.MigrationTool.Run(["create", "--project", csprojPath]);
+            Assert.That(exitCode, Is.EqualTo(0));
+
+            var frozenContent = File.ReadAllText(Path.Combine(projectDirectory, "Migrations", "Widget_Rev0.g.cs"));
+            Assert.That(frozenContent, Does.Contain("using MessagePack;"));
+            Assert.That(frozenContent, Does.Contain("[MessagePackObject]"));
+            Assert.That(frozenContent, Does.Contain("[property: Key(0)]"));
+            Assert.That(frozenContent, Does.Contain("[property: Key(1)]"));
+            Assert.That(frozenContent, Does.Not.Contain("[MemoryPackable"));
+        } finally {
+            Directory.Delete(projectDirectory, recursive: true);
+        }
+    }
+
+    [Test]
+    public void MigrationCreate_DefaultRawClientProtocol_FrozenSnapshotGetsNoSerializationAttributes() {
+        var csprojPath = CopyFixtureToTempDirectory();
+        var projectDirectory = Path.GetDirectoryName(csprojPath)!;
+        try {
+            var exitCode = RhinoDB.Tools.Migration.MigrationTool.Run(["create", "--project", csprojPath]);
+            Assert.That(exitCode, Is.EqualTo(0));
+
+            var frozenContent = File.ReadAllText(Path.Combine(projectDirectory, "Migrations", "Widget_Rev0.g.cs"));
+            Assert.That(frozenContent, Does.Not.Contain("[MemoryPackable"));
+            Assert.That(frozenContent, Does.Not.Contain("[MessagePackObject]"));
         } finally {
             Directory.Delete(projectDirectory, recursive: true);
         }
@@ -126,14 +163,14 @@ public class MigrationCreateTests {
         }
     }
 
-    const string SampleDbWithNoWidget = """
-        using RhinoDB.Core.Tables;
+    private const string SampleDbWithNoWidget = """
+                                                using RhinoDB.Core.Tables;
 
-        namespace CreateSampleProject;
+                                                namespace CreateSampleProject;
 
-        [Database]
-        public partial class SampleDb { }
-        """;
+                                                [Database]
+                                                public partial class SampleDb { }
+                                                """;
 
     [Test]
     public void MigrationCreate_ATableNoLongerDeclared_IsMarkedRemovedAtGenerationInsteadOfBeingDropped() {

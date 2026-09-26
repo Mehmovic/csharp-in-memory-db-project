@@ -14,46 +14,46 @@ namespace RhinoDB.Generators.Test;
 // shape), runs the real generated migration, then proves the migrated bytes are correct by loading them
 // back through the ordinary {Db}Loader path and reading the row through the live accessor.
 public class RunMigrationEndToEndTests {
-    const string Descriptor = """
-        {
-          "Databases": [ { "FullName": "global::TestNs.VaultDb", "Generation": 1, "InvalidGenerations": [], "RetainedFromGeneration": 0 } ],
-          "TypeRevisions": {},
-          "CustomTypes": {},
-          "Tables": []
-        }
-        """;
+    private const string Descriptor = """
+                                      {
+                                        "Databases": [ { "FullName": "global::TestNs.VaultDb", "Generation": 1, "InvalidGenerations": [], "RetainedFromGeneration": 0 } ],
+                                        "TypeRevisions": {},
+                                        "CustomTypes": {},
+                                        "Tables": []
+                                      }
+                                      """;
 
-    const string Source = """
-        using MemoryPack;
-        using MessagePack;
-        using RhinoDB.Core.Tables;
-        using RhinoDB.Lib.Execution;
+    private const string Source = """
+                                  using MemoryPack;
+                                  using MessagePack;
+                                  using RhinoDB.Core.Tables;
+                                  using RhinoDB.Lib.Execution;
 
-        namespace TestNs;
+                                  namespace TestNs;
 
-        [Database]
-        public partial class VaultDb : DbContext<VaultDbTransaction> { }
+                                  [Database]
+                                  public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-        [FrozenSchema(0)]
-        public readonly record struct AccountV0([PrimaryKey] int Id, decimal Balance);
+                                  [FrozenSchema(0)]
+                                  public readonly record struct AccountV0([PrimaryKey] int Id, decimal Balance);
 
-        [Table(TableKind.Persistent, typeof(VaultDb))]
-        [MemoryPackable(GenerateType.VersionTolerant)]
-        [MessagePackObject]
-        public readonly partial record struct Account(
-            [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
-            [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance,
-            [property: MemoryPackOrder(2)] [property: Key(2)] string Tier) {
-            [Migration(0)]
-            internal static Account UpgradeFromV0(AccountV0 old) => new Account(old.Id, old.Balance, "Bronze");
-        }
+                                  [Table(TableKind.Persistent, typeof(VaultDb))]
+                                  [MemoryPackable(GenerateType.VersionTolerant)]
+                                  [MessagePackObject]
+                                  public readonly partial record struct Account(
+                                      [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                                      [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance,
+                                      [property: MemoryPackOrder(2)] [property: Key(2)] string Tier) {
+                                      [Migration(0)]
+                                      internal static Account UpgradeFromV0(AccountV0 old) => new Account(old.Id, old.Balance, "Bronze");
+                                  }
 
-        public static class TestHelpers {
-            public static bool AccountFound(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).HasRow();
-            public static decimal AccountBalance(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Balance;
-            public static string AccountTier(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Tier;
-        }
-        """;
+                                  public static class TestHelpers {
+                                      public static bool AccountFound(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).HasRow();
+                                      public static decimal AccountBalance(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Balance;
+                                      public static string AccountTier(VaultDbAccountOps ops, int id) => ops.Primary.Find(id).Get().Unwrap().Tier;
+                                  }
+                                  """;
 
     [Test]
     public async Task RunMigration_ARealBreakingChange_MigratesOldBytesAndTheyAreLoadableAfterward() {
@@ -112,46 +112,46 @@ public class RunMigrationEndToEndTests {
         }
     }
 
-    const string DescriptorWithOrphan = """
-        {
-          "Databases": [ { "FullName": "global::TestNs.VaultDb", "Generation": 1, "InvalidGenerations": [], "RetainedFromGeneration": 0 } ],
-          "TypeRevisions": {},
-          "CustomTypes": {},
-          "Tables": [
-            {
-              "DatabaseFullName": "global::TestNs.VaultDb",
-              "Accessor": "Legacy",
-              "RowTypeFullName": "global::TestNs.Legacy",
-              "Kind": "Persistent",
-              "TableIdHash": 0,
-              "Revision": 0,
-              "PrimaryKey": { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" },
-              "Fields": [ { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" } ],
-              "Indexes": [],
-              "RemovedAtGeneration": 0
-            }
-          ]
-        }
-        """;
+    private const string DescriptorWithOrphan = """
+                                                {
+                                                  "Databases": [ { "FullName": "global::TestNs.VaultDb", "Generation": 1, "InvalidGenerations": [], "RetainedFromGeneration": 0 } ],
+                                                  "TypeRevisions": {},
+                                                  "CustomTypes": {},
+                                                  "Tables": [
+                                                    {
+                                                      "DatabaseFullName": "global::TestNs.VaultDb",
+                                                      "Accessor": "Legacy",
+                                                      "RowTypeFullName": "global::TestNs.Legacy",
+                                                      "Kind": "Persistent",
+                                                      "TableIdHash": 0,
+                                                      "Revision": 0,
+                                                      "PrimaryKey": { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" },
+                                                      "Fields": [ { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" } ],
+                                                      "Indexes": [],
+                                                      "RemovedAtGeneration": 0
+                                                    }
+                                                  ]
+                                                }
+                                                """;
 
-    const string SourceWithOnlyAccountLive = """
-        using MemoryPack;
-        using MessagePack;
-        using RhinoDB.Core.Tables;
-        using RhinoDB.Lib.Execution;
+    private const string SourceWithOnlyAccountLive = """
+                                                     using MemoryPack;
+                                                     using MessagePack;
+                                                     using RhinoDB.Core.Tables;
+                                                     using RhinoDB.Lib.Execution;
 
-        namespace TestNs;
+                                                     namespace TestNs;
 
-        [Database]
-        public partial class VaultDb : DbContext<VaultDbTransaction> { }
+                                                     [Database]
+                                                     public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-        [Table(TableKind.Persistent, typeof(VaultDb))]
-        [MemoryPackable]
-        [MessagePackObject]
-        public readonly partial record struct Account([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
-        """;
+                                                     [Table(TableKind.Persistent, typeof(VaultDb))]
+                                                     [MemoryPackable]
+                                                     [MessagePackObject]
+                                                     public readonly partial record struct Account([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
+                                                     """;
 
-    static ColdTable<int, int> OpenLegacyTable(ColdStore cold) =>
+    static private ColdTable<int, int> OpenLegacyTable(ColdStore cold) =>
         cold.OpenTable<int, int>("Legacy", k => MemoryPackSerializer.Serialize(k), b => MemoryPackSerializer.Deserialize<int>(b), b => MemoryPackSerializer.Deserialize<int>(b));
 
     [Test]

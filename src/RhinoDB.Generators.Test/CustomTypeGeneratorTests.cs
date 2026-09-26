@@ -1,3 +1,5 @@
+using RhinoDB.SchemaContracts;
+
 namespace RhinoDB.Generators.Test;
 
 // CustomTypeGenerator (task #85): [CustomType] gives a standalone, non-[Table] record struct the same
@@ -92,17 +94,35 @@ public class CustomTypeGeneratorTests {
     }
 
     [Test]
-    public void CustomType_SerializeVersionedMemoryPackAndMessagePack_AreGenerated() {
+    public void CustomType_VersionedMemoryPackProtocol_OnlyThatWrapperPairIsGenerated() {
         // Proves the wrapper methods exist and are callable - full round-trip through the REAL
         // MemoryPack/MessagePack generators needs GeneratorTestHost.CompileAndLoadWithSerializationGenerators,
         // which hits the known upstream MemoryPack-vs-.NET-11-preview constraint issue (task #82) - this
         // just confirms CustomTypeGenerator emits the wrapper surface correctly.
-        var (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
+        var (asm, _) = GeneratorTestHost.CompileAndLoadWithClientProtocol(Source, ClientProtocolKind.VersionedMemoryPack);
         var opsType = asm.GetType("TestNs.PlayerNameCustomTypeOps")!;
 
         Assert.That(opsType.GetMethod("SerializeVersionedMemoryPack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Not.Null);
         Assert.That(opsType.GetMethod("DeserializeVersionedMemoryPack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Not.Null);
+        Assert.That(opsType.GetMethod("SerializeMessagePack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Null);
+    }
+
+    [Test]
+    public void CustomType_MessagePackProtocol_OnlyThatWrapperPairIsGenerated() {
+        var (asm, _) = GeneratorTestHost.CompileAndLoadWithClientProtocol(Source, ClientProtocolKind.MessagePack);
+        var opsType = asm.GetType("TestNs.PlayerNameCustomTypeOps")!;
+
         Assert.That(opsType.GetMethod("SerializeMessagePack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Not.Null);
         Assert.That(opsType.GetMethod("DeserializeMessagePack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Not.Null);
+        Assert.That(opsType.GetMethod("SerializeVersionedMemoryPack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Null);
+    }
+
+    [Test]
+    public void CustomType_RawProtocol_NeitherWrapperPairIsGenerated() {
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(Source);
+        var opsType = asm.GetType("TestNs.PlayerNameCustomTypeOps")!;
+
+        Assert.That(opsType.GetMethod("SerializeVersionedMemoryPack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Null);
+        Assert.That(opsType.GetMethod("SerializeMessagePack", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static), Is.Null);
     }
 }

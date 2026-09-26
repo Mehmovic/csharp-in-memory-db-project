@@ -7,13 +7,13 @@ using RhinoDB.SchemaContracts;
 namespace RhinoDB.SchemaContracts.Test;
 
 public class DescriptorBuilderReverseMapTests {
-    const string Prelude = """
-        namespace RhinoDB.Core.Tables { public class CustomTypeAttribute : System.Attribute { } }
-        namespace MemoryPack { public class MemoryPackableAttribute : System.Attribute { } }
-        namespace MessagePack { public class MessagePackObjectAttribute : System.Attribute { } }
-        """;
+    private const string Prelude = """
+                                   namespace RhinoDB.Core.Tables { public class CustomTypeAttribute : System.Attribute { } }
+                                   namespace MemoryPack { public class MemoryPackableAttribute : System.Attribute { } }
+                                   namespace MessagePack { public class MessagePackObjectAttribute : System.Attribute { } }
+                                   """;
 
-    static ImmutableArray<IParameterSymbol> PrimaryCtorParams(INamedTypeSymbol type) =>
+    static private ImmutableArray<IParameterSymbol> PrimaryCtorParams(INamedTypeSymbol type) =>
         SchemaWalk.FindPrimaryConstructor(type)!.Parameters;
 
     [Test]

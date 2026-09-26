@@ -56,7 +56,7 @@ static public class SchemaWalk {
             .ToImmutableArray();
 
     static public ImmutableArray<Diagnostic> CheckOtherKindFieldAttributes(
-        ImmutableArray<IParameterSymbol> parameters, string containingTypeName, Location location) {
+        ImmutableArray<IParameterSymbol> parameters, string containingTypeName, Location location, ClientProtocolKind clientProtocol) {
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         foreach (var p in parameters) {
             if (p.Type.SpecialType == SpecialType.System_String || p.Type.IsUnmanagedType) continue;
@@ -65,14 +65,26 @@ static public class SchemaWalk {
 
             var missing = ImmutableArray.CreateBuilder<string>();
             if (!HasCustomTypeAttribute(fieldType)) missing.Add("[CustomType]");
-            if (!HasMemoryPackable(fieldType)) missing.Add("[MemoryPackable]");
-            if (!HasMessagePackObject(fieldType)) missing.Add("[MessagePackObject]");
+            if (clientProtocol == ClientProtocolKind.VersionedMemoryPack && !HasMemoryPackable(fieldType)) missing.Add("[MemoryPackable]");
+            if (clientProtocol == ClientProtocolKind.MessagePack && !HasMessagePackObject(fieldType)) missing.Add("[MessagePackObject]");
             if (missing.Count > 0)
                 diagnostics.Add(Diagnostic.Create(
                     MissingSerializationAttributesOnCustomTypeFieldDiagnostic, location,
                     containingTypeName, p.Name, fieldType.Name, string.Join(" and ", missing)));
         }
         return diagnostics.ToImmutable();
+    }
+
+    static public void EmitProtocolWrapperMethods(StringBuilder sb, string typeFullName, ClientProtocolKind clientProtocol) {
+        if (clientProtocol == ClientProtocolKind.VersionedMemoryPack) {
+            sb.AppendLine($"    public static byte[] SerializeVersionedMemoryPack({typeFullName} value) => MemoryPackSerializer.Serialize(value);");
+            sb.AppendLine($"    public static {typeFullName} DeserializeVersionedMemoryPack(byte[] bytes) => MemoryPackSerializer.Deserialize<{typeFullName}>(bytes)!;");
+        }
+        if (clientProtocol == ClientProtocolKind.MessagePack) {
+            sb.AppendLine($"    public static byte[] SerializeMessagePack({typeFullName} value) => MessagePackSerializer.Serialize(value);");
+            sb.AppendLine($"    public static {typeFullName} DeserializeMessagePack(byte[] bytes) => MessagePackSerializer.Deserialize<{typeFullName}>(bytes);");
+        }
+        if (clientProtocol != ClientProtocolKind.Raw) sb.AppendLine();
     }
 
     static public void EmitWriteField(StringBuilder sb, RowFieldModel field, string expr) {

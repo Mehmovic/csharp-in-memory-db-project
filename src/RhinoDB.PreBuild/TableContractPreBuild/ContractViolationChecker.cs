@@ -26,7 +26,7 @@ static public class ContractViolationChecker {
         }
     }
 
-    static ImmutableDictionary<byte, (string Name, string TypeName, bool IsExplicit)> ResolvedFieldsBySlot(ParsedShorthandFile file) {
+    static private ImmutableDictionary<byte, (string Name, string TypeName, bool IsExplicit)> ResolvedFieldsBySlot(ParsedShorthandFile file) {
         var slots = PackIdNumberer.Assign(file.Fields);
         var builder = ImmutableDictionary.CreateBuilder<byte, (string, string, bool)>();
         for (var i = 0; i < file.Fields.Length; i++) {

@@ -1,3 +1,5 @@
+using RhinoDB.SchemaContracts;
+
 namespace RhinoDB.Generators.Test;
 
 // TableGenerator's hand-rolled Raw/positional serializer (SerializeRow/DeserializeRow/SerializeKey/
@@ -194,7 +196,7 @@ public class RawSerializerTests {
 
     [Test]
     public void UnmanagedRow_SerializeVersionedMemoryPackThenDeserialize_RoundTrips() {
-        var (asm, _) = GeneratorTestHost.CompileAndLoad(SourceUnmanagedRow);
+        var (asm, _) = GeneratorTestHost.CompileAndLoadWithClientProtocol(SourceUnmanagedRow, ClientProtocolKind.VersionedMemoryPack);
         var rowType = asm.GetType("TestNs.Point")!;
         var row = Activator.CreateInstance(rowType, 1, 3, 4)!;
 

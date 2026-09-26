@@ -15,13 +15,13 @@ static public class MigrationTool {
         };
     }
 
-    static int Unknown(string verb) {
+    static private int Unknown(string verb) {
         Console.Error.WriteLine($"rhinodb migration: unknown command '{verb}'");
         PrintUsage();
         return 1;
     }
 
-    static void PrintUsage() {
+    static private void PrintUsage() {
         Console.WriteLine("""
             Usage:
               rhinodb migration status [--project <path>]

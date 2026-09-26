@@ -23,30 +23,48 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
     );
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
+        var configProtocol = context.AdditionalTextsProvider
+            .Where(static t => Path.GetFileName(t.Path) == "config.json")
+            .Collect()
+            .Select(static (texts, ct) => {
+                if (texts.Length == 0) return ClientProtocolKind.Raw;
+                var text = texts[0].GetText(ct)?.ToString();
+                if (string.IsNullOrEmpty(text)) return ClientProtocolKind.Raw;
+                try {
+                    var parsedConfig = GeneratorConfigLoader.Parse(text!);
+                    return ClientProtocolParser.Parse(parsedConfig.ClientProtocol);
+                } catch {
+                    return ClientProtocolKind.Raw;
+                }
+            });
+
         var results = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 SchemaWalk.CustomTypeAttributeFullName,
                 predicate: static (node, _) => node is StructDeclarationSyntax or RecordDeclarationSyntax,
-                transform: static (ctx, _) => ToCustomTypeModel(ctx)
-            );
+                transform: static (ctx, _) => ctx
+            )
+            .Combine(configProtocol)
+            .Select(static (pair, _) => ToCustomTypeModel(pair.Left, pair.Right));
 
         context.RegisterSourceOutput(results, static (spc, result) => {
             foreach (var diagnostic in result.Diagnostics) spc.ReportDiagnostic(diagnostic);
-            if (result.Model is not null) spc.AddSource($"{result.Model.SimpleName}.CustomType.g.cs", Emit(result.Model));
+            if (result.Model is not null) spc.AddSource($"{result.Model.SimpleName}.CustomType.g.cs", Emit(result.Model, result.ClientProtocol));
         });
     }
 
-    static private (CustomTypeModel? Model, ImmutableArray<Diagnostic> Diagnostics) ToCustomTypeModel(GeneratorAttributeSyntaxContext ctx) {
+    static private (CustomTypeModel? Model, ImmutableArray<Diagnostic> Diagnostics, ClientProtocolKind ClientProtocol) ToCustomTypeModel(
+        GeneratorAttributeSyntaxContext ctx, ClientProtocolKind clientProtocol) {
         var type = (INamedTypeSymbol)ctx.TargetSymbol;
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
         var missingSerializationAttrs = ImmutableArray.CreateBuilder<string>();
-        if (!SchemaWalk.HasMemoryPackable(type)) missingSerializationAttrs.Add("[MemoryPackable]");
-        if (!SchemaWalk.HasMessagePackObject(type)) missingSerializationAttrs.Add("[MessagePackObject]");
+        if (clientProtocol == ClientProtocolKind.VersionedMemoryPack && !SchemaWalk.HasMemoryPackable(type)) missingSerializationAttrs.Add("[MemoryPackable]");
+        if (clientProtocol == ClientProtocolKind.MessagePack && !SchemaWalk.HasMessagePackObject(type)) missingSerializationAttrs.Add("[MessagePackObject]");
         if (missingSerializationAttrs.Count > 0) {
             diagnostics.Add(Diagnostic.Create(
                 MissingSerializationAttributesDiagnostic, ctx.TargetNode.GetLocation(), type.Name, string.Join(" and ", missingSerializationAttrs)));
-            return (null, diagnostics.ToImmutable());
+            return (null, diagnostics.ToImmutable(), clientProtocol);
         }
 
         var primaryCtor = type.InstanceConstructors.FirstOrDefault(c =>
@@ -54,8 +72,8 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
         );
 
         if (primaryCtor is not null) {
-            diagnostics.AddRange(SchemaWalk.CheckOtherKindFieldAttributes(primaryCtor.Parameters, type.Name, ctx.TargetNode.GetLocation()));
-            if (diagnostics.Count > 0) return (null, diagnostics.ToImmutable());
+            diagnostics.AddRange(SchemaWalk.CheckOtherKindFieldAttributes(primaryCtor.Parameters, type.Name, ctx.TargetNode.GetLocation(), clientProtocol));
+            if (diagnostics.Count > 0) return (null, diagnostics.ToImmutable(), clientProtocol);
         }
 
         var fields = primaryCtor is null
@@ -68,10 +86,10 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
             type.ContainingNamespace.IsGlobalNamespace ? null : type.ContainingNamespace.ToDisplayString(),
             fields
         );
-        return (model, diagnostics.ToImmutable());
+        return (model, diagnostics.ToImmutable(), clientProtocol);
     }
 
-    static private string Emit(CustomTypeModel model) {
+    static private string Emit(CustomTypeModel model, ClientProtocolKind clientProtocol) {
         var sb = new StringBuilder();
         var type = model.FullName;
         var opsName = $"{model.SimpleName}CustomTypeOps";
@@ -125,10 +143,7 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    public static byte[] SerializeVersionedMemoryPack({type} value) => MemoryPackSerializer.Serialize(value);");
-        sb.AppendLine($"    public static {type} DeserializeVersionedMemoryPack(byte[] bytes) => MemoryPackSerializer.Deserialize<{type}>(bytes)!;");
-        sb.AppendLine($"    public static byte[] SerializeMessagePack({type} value) => MessagePackSerializer.Serialize(value);");
-        sb.AppendLine($"    public static {type} DeserializeMessagePack(byte[] bytes) => MessagePackSerializer.Deserialize<{type}>(bytes);");
+        SchemaWalk.EmitProtocolWrapperMethods(sb, type, clientProtocol);
 
         sb.AppendLine("}");
         return sb.ToString();
