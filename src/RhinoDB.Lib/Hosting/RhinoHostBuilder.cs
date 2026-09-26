@@ -1,4 +1,5 @@
 using RhinoDB.Lib.Cold;
+using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Execution;
 
 namespace RhinoDB.Lib.Hosting;
@@ -63,9 +64,13 @@ public sealed class RhinoHostBuilder {
                     return Result<object>.Error(MissingConfig(nameof(options.LoadAsync), because: "RhinoRunMode.Run needs it"));
                 case RhinoRunMode.Replay when options.LoadFromGenesis is null:
                     return Result<object>.Error(MissingConfig(nameof(options.LoadFromGenesis), because: "RhinoRunMode.Replay needs it"));
+                case RhinoRunMode.Migrate when options.RunMigration is null:
+                    return Result<object>.Error(MissingConfig(nameof(options.RunMigration), because: "RhinoRunMode.Migrate needs it"));
             }
 
-            var runResult = await RunOne(parsed, createDb, options.LoadAsync, options.LoadFromGenesis);
+            var runResult = await RunOne(
+                parsed, createDb, options.LoadAsync, options.LoadFromGenesis,
+                options.RunMigration, options.GBinary, options.IsGenerationInvalid);
             return runResult.IsError() ? runResult.Void() : Result<object>.Ok(runResult.Unwrap());
         }
 
@@ -77,7 +82,10 @@ public sealed class RhinoHostBuilder {
         RhinoHostOptions options,
         Func<ColdStore, TDb> createDb,
         Func<TDb, Task>? loadAsync,
-        Func<TDb, ColdStore, long?, Result>? loadFromGenesis
+        Func<TDb, ColdStore, long?, Result>? loadFromGenesis,
+        Func<TDb, Result>? runMigration,
+        int? binaryGeneration,
+        Func<int, bool>? isGenerationInvalid
     ) where TDb : notnull {
         var coldResult = ColdStore.Open(options.ColdPath);
         if (coldResult.IsError()) return coldResult.Void();
@@ -87,6 +95,31 @@ public sealed class RhinoHostBuilder {
 
         switch (options.Mode) {
             case RhinoRunMode.Run: {
+                if (binaryGeneration is { } gBinary && isGenerationInvalid is not null && runMigration is not null) {
+                    var currentGenerationResult = cold.ReadGeneration();
+                    if (currentGenerationResult.IsError()) {
+                        cold.Dispose();
+                        return currentGenerationResult.Void();
+                    }
+                    var currentGeneration = currentGenerationResult.Unwrap();
+
+                    var decisionResult = SchemaGenerationCheck.EnsureCurrentGeneration(
+                        currentGeneration, cold.WalGeneration, gBinary,
+                        migrationChainExists: true, isGenerationInvalid(currentGeneration));
+                    if (decisionResult.IsError()) {
+                        cold.Dispose();
+                        return decisionResult.Void();
+                    }
+
+                    if (decisionResult.Unwrap() == SchemaGenerationDecision.MigrationRequired) {
+                        var migrateResult = runMigration(db);
+                        if (migrateResult.IsError()) {
+                            cold.Dispose();
+                            return migrateResult;
+                        }
+                    }
+                }
+
                 var recoveryResult = await cold.CompleteRecoveryAsync();
                 if (recoveryResult.IsError()) {
                     cold.Dispose();
@@ -103,13 +136,14 @@ public sealed class RhinoHostBuilder {
                 }
                 break;
             }
-            case RhinoRunMode.Migrate:
-                cold.Dispose();
-                return Result<TDb>.Error(
-                    DbError.SystemFailure(
-                        new NotSupportedException("Migration is not built yet - see Docs/06-schema-migration.md.")
-                    )
-                );
+            case RhinoRunMode.Migrate: {
+                var migrateResult = runMigration!(db);
+                if (migrateResult.IsError()) {
+                    cold.Dispose();
+                    return migrateResult;
+                }
+                break;
+            }
         }
 
         return db;

@@ -7,14 +7,16 @@ public class DbContext<TTx> where TTx : ITransaction {
 
     internal ColdStore? Cold { get; }
 
-    protected DbContext() {
-        executionLoop = new DbExecutionLoop<TTx>(this);
+    protected DbContext(bool startPaused = false) {
+        executionLoop = new DbExecutionLoop<TTx>(this, startPaused);
     }
 
-    protected DbContext(ColdStore cold) {
+    protected DbContext(ColdStore cold, bool startPaused = false) {
         Cold = cold;
-        executionLoop = new DbExecutionLoop<TTx>(this);
+        executionLoop = new DbExecutionLoop<TTx>(this, startPaused);
     }
+
+    protected internal void ResumeExecution() => executionLoop.Resume();
 
     protected internal virtual TTx CreateTransaction() => default!;
 
@@ -44,8 +46,8 @@ public class DbContext<TTx> where TTx : ITransaction {
 }
 
 public class DbContext : DbContext<DefaultTransaction> {
-    public DbContext() { }
-    public DbContext(ColdStore cold) : base(cold) { }
+    public DbContext(bool startPaused = false) : base(startPaused) { }
+    public DbContext(ColdStore cold, bool startPaused = false) : base(cold, startPaused) { }
 
     public ValueTask<Result> Run(Func<DbContext, Result> func, PropagationMode mode = PropagationMode.Optimistic)
         => base.Run(static (ctx, _, f) => f((DbContext)ctx), func, mode);

@@ -11,10 +11,16 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
     );
 
     private readonly DbContext<TTx> context;
+    private Task? runLoopTask;
 
-    public DbExecutionLoop(DbContext<TTx> context) {
+    public DbExecutionLoop(DbContext<TTx> context, bool startPaused = false) {
         this.context = context;
-        _ = Task.Factory.StartNew(RunLoop, TaskCreationOptions.LongRunning);
+        if (!startPaused) Resume();
+    }
+
+    public void Resume() {
+        if (runLoopTask is not null) return;
+        runLoopTask = Task.Factory.StartNew(RunLoop, TaskCreationOptions.LongRunning);
     }
 
     public ValueTask<Result> Enqueue(Func<DbContext<TTx>, TTx, Result> operation, PropagationMode mode) =>

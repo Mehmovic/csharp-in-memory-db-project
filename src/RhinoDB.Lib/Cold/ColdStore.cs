@@ -35,6 +35,8 @@ public sealed class ColdStore : IDisposable {
 
     public string DirectoryPath { get; }
 
+    public int WalGeneration => (int)TestOnlyWal.Generation;
+
     public DecodedWalEntry[] PendingWalTail { get; private set; }
 
     public long RecoveredLsn { get; }

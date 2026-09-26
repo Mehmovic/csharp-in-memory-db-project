@@ -98,7 +98,7 @@ public class RhinoHostBuilderTests {
     }
 
     [Test]
-    public async Task BuildAsync_InMigrateMode_FailsWithoutCallingEitherLoader() {
+    public async Task BuildAsync_InMigrateModeWithoutRunMigrationConfigured_FailsWithoutCallingEitherLoader() {
         var loadAsyncCalled = false;
         var loadFromGenesisCalled = false;
 
@@ -107,12 +107,135 @@ public class RhinoHostBuilderTests {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
                 options.LoadFromGenesis = (_, _, _) => { loadFromGenesisCalled = true; return Result.Ok(); };
+                // RunMigration deliberately left unconfigured - Migrate mode requires it.
             })
             .BuildAsync();
 
-        Assert.That(hostResult.IsError(), Is.True, "Migration isn't built yet - it must fail loudly, not silently no-op.");
+        Assert.That(hostResult.IsError(), Is.True, "RhinoRunMode.Migrate needs RunMigration configured - fail loudly, not silently no-op.");
         Assert.That(loadAsyncCalled, Is.False);
         Assert.That(loadFromGenesisCalled, Is.False);
+    }
+
+    [Test]
+    public async Task BuildAsync_InMigrateMode_CallsRunMigration_NotLoadAsyncOrLoadFromGenesis() {
+        var runMigrationCalled = false;
+        var loadAsyncCalled = false;
+        var loadFromGenesisCalled = false;
+
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=migrate"])
+            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
+                options.LoadFromGenesis = (_, _, _) => { loadFromGenesisCalled = true; return Result.Ok(); };
+                options.RunMigration = _ => { runMigrationCalled = true; return Result.Ok(); };
+            })
+            .BuildAsync();
+
+        Assert.That(hostResult.IsOk(), Is.True);
+        Assert.That(runMigrationCalled, Is.True);
+        Assert.That(loadAsyncCalled, Is.False);
+        Assert.That(loadFromGenesisCalled, Is.False);
+        hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task BuildAsync_InMigrateMode_WhenRunMigrationItselfFails_PropagatesTheError() {
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=migrate"])
+            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.RunMigration = _ => Result.Error(DbError.SystemFailure(new InvalidOperationException("boom")));
+            })
+            .BuildAsync();
+
+        Assert.That(hostResult.IsError(), Is.True);
+    }
+
+    // ---- Self-healing generation check (RhinoRunMode.Run) ----
+
+    [Test]
+    public async Task BuildAsync_InRunMode_WhenCurrentGenerationMatchesBinary_DoesNotCallRunMigration() {
+        var runMigrationCalled = false;
+        var loadAsyncCalled = false;
+
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
+            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
+                options.GBinary = 0;
+                options.IsGenerationInvalid = _ => false;
+                options.RunMigration = _ => { runMigrationCalled = true; return Result.Ok(); };
+            })
+            .BuildAsync();
+
+        Assert.That(hostResult.IsOk(), Is.True);
+        Assert.That(runMigrationCalled, Is.False, "G_db (0, a fresh database) already matches G_binary - no migration needed.");
+        Assert.That(loadAsyncCalled, Is.True);
+        hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task BuildAsync_InRunMode_WhenBinaryIsNewerThanCurrentGeneration_CallsRunMigrationBeforeLoadAsync() {
+        var callOrder = new List<string>();
+
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
+            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.LoadAsync = _ => { callOrder.Add("LoadAsync"); return Task.CompletedTask; };
+                options.GBinary = 1;
+                options.IsGenerationInvalid = _ => false;
+                options.RunMigration = _ => { callOrder.Add("RunMigration"); return Result.Ok(); };
+            })
+            .BuildAsync();
+
+        Assert.That(hostResult.IsOk(), Is.True);
+        Assert.That(callOrder, Is.EqualTo(new[] { "RunMigration", "LoadAsync" }), "self-healing: migrate first, then load, in one Run-mode bring-up.");
+        hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task BuildAsync_InRunMode_WhenTheCurrentGenerationIsDeclaredInvalid_RefusesWithoutCallingRunMigrationOrLoadAsync() {
+        var runMigrationCalled = false;
+        var loadAsyncCalled = false;
+
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
+            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
+                options.GBinary = 0;
+                options.IsGenerationInvalid = _ => true;
+                options.RunMigration = _ => { runMigrationCalled = true; return Result.Ok(); };
+            })
+            .BuildAsync();
+
+        Assert.That(hostResult.IsError(), Is.True, "point C's invalid-generation check must refuse, ahead of everything else.");
+        Assert.That(runMigrationCalled, Is.False);
+        Assert.That(loadAsyncCalled, Is.False);
+    }
+
+    [Test]
+    public async Task BuildAsync_InRunMode_WhenBinaryIsOlderThanCurrentGeneration_RefusesAsADowngrade() {
+        // Bump the database to generation 5 first (closed before the real builder-driven Open below) - the
+        // exact scenario an accidental binary rollback (deploying an OLDER build against
+        // already-migrated data) produces.
+        using (var seedCold = ColdStore.Open(dirA).Unwrap())
+            Assert.That(seedCold.RunMigration(5, []).IsOk(), Is.True);
+
+        var runMigrationCalled = false;
+        var loadAsyncCalled = false;
+
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
+            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
+                options.GBinary = 3;
+                options.IsGenerationInvalid = _ => false;
+                options.RunMigration = _ => { runMigrationCalled = true; return Result.Ok(); };
+            })
+            .BuildAsync();
+
+        Assert.That(hostResult.IsError(), Is.True, "the database is AHEAD of this binary - refuse, never silently downgrade.");
+        Assert.That(runMigrationCalled, Is.False);
+        Assert.That(loadAsyncCalled, Is.False);
     }
 
     [Test]

@@ -245,4 +245,58 @@ public class DbContextTests {
 
         Assert.That(log, Is.EqualTo(new[] { "first", "interloper", "second" }));
     }
+
+    // ---- startPaused (Phase 4 step 22 hardening - not exercised by any real caller yet, cheap insurance
+    // against a future refactor that needs to gate execution until after load/migration completes) ----
+
+    private sealed class PausableDbContext(bool startPaused) : DbContext(startPaused) {
+        public new void ResumeExecution() => base.ResumeExecution();
+    }
+
+    [Test]
+    public async Task Constructor_DefaultsToNotPaused_AnEnqueuedOperationRunsWithoutNeedingResume() {
+        var ctx = new DbContext();
+
+        var result = await ctx.Run(c => Result.Ok(42));
+
+        Assert.That(result.Unwrap(), Is.EqualTo(42));
+    }
+
+    [Test]
+    public void StartPaused_True_AnEnqueuedOperationDoesNotCompleteUntilResumeIsCalled() {
+        var ctx = new PausableDbContext(startPaused: true);
+
+        var task = ctx.Run(c => Result.Ok(1)).AsTask();
+
+        Assert.That(task.Wait(TimeSpan.FromMilliseconds(200)), Is.False, "paused - nothing should be draining the channel yet.");
+
+        ctx.ResumeExecution();
+
+        Assert.That(task.Wait(TimeSpan.FromSeconds(5)), Is.True, "resumed - the queued operation must now run.");
+        Assert.That(task.Result.Unwrap(), Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task StartPaused_True_MultipleOperationsQueuedBeforeResume_AllRunInOrderAfterResume() {
+        var ctx = new PausableDbContext(startPaused: true);
+        var log = new List<int>();
+
+        var tasks = Enumerable.Range(0, 5).Select(i => ctx.Run(c => { log.Add(i); return Result.Ok(); }).AsTask()).ToArray();
+        ctx.ResumeExecution();
+        await Task.WhenAll(tasks);
+
+        Assert.That(log, Is.EqualTo(Enumerable.Range(0, 5).ToList()));
+    }
+
+    [Test]
+    public async Task ResumeExecution_CalledMultipleTimes_IsIdempotent() {
+        var ctx = new PausableDbContext(startPaused: true);
+
+        ctx.ResumeExecution();
+        ctx.ResumeExecution();
+        ctx.ResumeExecution();
+
+        var result = await ctx.Run(c => Result.Ok(7));
+        Assert.That(result.Unwrap(), Is.EqualTo(7));
+    }
 }

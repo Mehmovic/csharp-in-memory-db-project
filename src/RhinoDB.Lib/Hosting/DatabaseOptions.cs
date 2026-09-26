@@ -9,4 +9,9 @@ public sealed class DatabaseOptions<TDb, TTx>
     public Func<ColdStore, TDb>? CreateDb { get; set; }
     public Func<TDb, Task>? LoadAsync { get; set; }
     public Func<TDb, ColdStore, long?, Result>? LoadFromGenesis { get; set; }
+
+    // Absent for an Instant-only database
+    public Func<TDb, Result>? RunMigration { get; set; }
+    public int? GBinary { get; set; }
+    public Func<int, bool>? IsGenerationInvalid { get; set; }
 }
