@@ -40,7 +40,7 @@ public class MigrateToCurrentRevisionTests {
 
     static object InvokeMigrateToCurrentRevision(System.Reflection.Assembly asm, int fromRevision, byte[] rowBytes) {
         var opsType = asm.GetType("TestNs.VaultDbAccountOps")!;
-        var method = opsType.GetMethod("MigrateToCurrentRevision", BindingFlags.Public | BindingFlags.Static)!;
+        var method = opsType.GetMethod("MigrateToCurrentRevision", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!;
         return method.Invoke(null, [fromRevision, rowBytes])!;
     }
 
@@ -48,7 +48,7 @@ public class MigrateToCurrentRevisionTests {
     public void StartingAtTheEarliestHop_AppliesBothHopsInSequence() {
         var (asm, _) = GeneratorTestHost.CompileAndLoad(TwoHopSource);
         var oldRow = Activator.CreateInstance(asm.GetType("TestNs.AccountV0")!, 7)!;
-        var rowBytes = (byte[])GeneratorTestHost.InvokeHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeRow", oldRow)!;
+        var rowBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeRow", oldRow)!;
 
         var migrated = InvokeMigrateToCurrentRevision(asm, 0, rowBytes);
 
@@ -61,7 +61,7 @@ public class MigrateToCurrentRevisionTests {
     public void StartingMidChain_AppliesOnlyTheRemainingHop() {
         var (asm, _) = GeneratorTestHost.CompileAndLoad(TwoHopSource);
         var midRow = Activator.CreateInstance(asm.GetType("TestNs.AccountV1")!, 9, 55m)!;
-        var rowBytes = (byte[])GeneratorTestHost.InvokeHelper(asm, "TestNs.AccountV1FrozenSchemaOps", "SerializeRow", midRow)!;
+        var rowBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.AccountV1FrozenSchemaOps", "SerializeRow", midRow)!;
 
         var migrated = InvokeMigrateToCurrentRevision(asm, 1, rowBytes);
 
@@ -74,7 +74,7 @@ public class MigrateToCurrentRevisionTests {
     public void StartingAtTheTip_NoTransformApplied_JustDecodesTheLiveShape() {
         var (asm, _) = GeneratorTestHost.CompileAndLoad(TwoHopSource);
         var liveRow = Activator.CreateInstance(asm.GetType("TestNs.Account")!, 3, 10m, "Gold")!;
-        var rowBytes = (byte[])GeneratorTestHost.InvokeHelper(asm, "TestNs.VaultDbAccountOps", "SerializeRow", liveRow)!;
+        var rowBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.VaultDbAccountOps", "SerializeRow", liveRow)!;
 
         var migrated = InvokeMigrateToCurrentRevision(asm, 2, rowBytes);
 
@@ -85,7 +85,7 @@ public class MigrateToCurrentRevisionTests {
     public void StartingPastTheTip_StillDecodesTheLiveShape() {
         var (asm, _) = GeneratorTestHost.CompileAndLoad(TwoHopSource);
         var liveRow = Activator.CreateInstance(asm.GetType("TestNs.Account")!, 3, 10m, "Gold")!;
-        var rowBytes = (byte[])GeneratorTestHost.InvokeHelper(asm, "TestNs.VaultDbAccountOps", "SerializeRow", liveRow)!;
+        var rowBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.VaultDbAccountOps", "SerializeRow", liveRow)!;
 
         var migrated = InvokeMigrateToCurrentRevision(asm, 99, rowBytes);
 
@@ -113,10 +113,10 @@ public class MigrateToCurrentRevisionTests {
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var liveRow = Activator.CreateInstance(asm.GetType("TestNs.Widget")!, 42)!;
-        var rowBytes = (byte[])GeneratorTestHost.InvokeHelper(asm, "TestNs.VaultDbWidgetOps", "SerializeRow", liveRow)!;
+        var rowBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.VaultDbWidgetOps", "SerializeRow", liveRow)!;
 
         var opsType = asm.GetType("TestNs.VaultDbWidgetOps")!;
-        var method = opsType.GetMethod("MigrateToCurrentRevision", BindingFlags.Public | BindingFlags.Static)!;
+        var method = opsType.GetMethod("MigrateToCurrentRevision", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!;
         var migrated = method.Invoke(null, [0, rowBytes])!;
 
         Assert.That(migrated, Is.EqualTo(liveRow));

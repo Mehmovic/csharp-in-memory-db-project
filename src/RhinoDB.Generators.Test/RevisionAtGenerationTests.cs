@@ -47,7 +47,7 @@ public class RevisionAtGenerationTests {
 
     static int InvokeRevisionAtGeneration(System.Reflection.Assembly asm, int generation) {
         var opsType = asm.GetType("TestNs.VaultDbAccountOps")!;
-        var method = opsType.GetMethod("RevisionAtGeneration", BindingFlags.Public | BindingFlags.Static)!;
+        var method = opsType.GetMethod("RevisionAtGeneration", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!;
         return (int)method.Invoke(null, [generation])!;
     }
 

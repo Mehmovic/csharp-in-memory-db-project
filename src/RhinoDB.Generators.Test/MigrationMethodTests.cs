@@ -36,7 +36,7 @@ public class MigrationMethodTests {
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var opsType = asm.GetType("TestNs.VaultDbAccountOps")!;
-        var wrapper = opsType.GetMethod("MigrateFromRevision0", BindingFlags.Public | BindingFlags.Static);
+        var wrapper = opsType.GetMethod("MigrateFromRevision0", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
 
         Assert.That(wrapper, Is.Not.Null);
         Assert.That(wrapper!.ReturnType, Is.EqualTo(asm.GetType("TestNs.Account")));
@@ -84,8 +84,8 @@ public class MigrationMethodTests {
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var opsType = asm.GetType("TestNs.VaultDbAccountOps")!;
 
-        Assert.That(opsType.GetMethod("MigrateFromRevision0", BindingFlags.Public | BindingFlags.Static), Is.Not.Null);
-        Assert.That(opsType.GetMethod("MigrateFromRevision1", BindingFlags.Public | BindingFlags.Static), Is.Not.Null);
+        Assert.That(opsType.GetMethod("MigrateFromRevision0", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static), Is.Not.Null);
+        Assert.That(opsType.GetMethod("MigrateFromRevision1", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static), Is.Not.Null);
     }
 
     [Test]

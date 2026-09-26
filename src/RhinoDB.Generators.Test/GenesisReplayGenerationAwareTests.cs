@@ -67,8 +67,8 @@ public class GenesisReplayGenerationAwareTests {
             var txType = asm.GetType("TestNs.VaultDbTransaction")!;
 
             var oldRow = Activator.CreateInstance(asm.GetType("TestNs.AccountV0")!, 7, 150m)!;
-            var oldKeyBytes = (byte[])GeneratorTestHost.InvokeHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeKey", 7)!;
-            var oldRowBytes = (byte[])GeneratorTestHost.InvokeHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeRow", oldRow)!;
+            var oldKeyBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeKey", 7)!;
+            var oldRowBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeRow", oldRow)!;
 
             var archiveDir = Path.Combine(dir, WalArchive.ArchiveDirectoryName);
             var change = new WalChange(TableIdHash.Compute("Account"), ChangeKind.Insert, oldKeyBytes, oldRowBytes);
@@ -126,8 +126,8 @@ public class GenesisReplayGenerationAwareTests {
             var loaderType = asm.GetType("TestNs.VaultDbLoader")!;
 
             var oldRow = Activator.CreateInstance(asm.GetType("TestNs.AccountV0")!, 7, 150m)!;
-            var oldKeyBytes = (byte[])GeneratorTestHost.InvokeHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeKey", 7)!;
-            var oldRowBytes = (byte[])GeneratorTestHost.InvokeHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeRow", oldRow)!;
+            var oldKeyBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeKey", 7)!;
+            var oldRowBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeRow", oldRow)!;
 
             var archiveDir = Path.Combine(dir, WalArchive.ArchiveDirectoryName);
             var change = new WalChange(TableIdHash.Compute("Account"), ChangeKind.Insert, oldKeyBytes, oldRowBytes);

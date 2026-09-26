@@ -69,8 +69,8 @@ public class RunMigrationEndToEndTests {
                 Activator.CreateInstance(dbType, seedCold);
 
                 var oldRow = Activator.CreateInstance(asm.GetType("TestNs.AccountV0")!, 7, 150m)!;
-                var oldKeyBytes = (byte[])GeneratorTestHost.InvokeHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeKey", 7)!;
-                var oldRowBytes = (byte[])GeneratorTestHost.InvokeHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeRow", oldRow)!;
+                var oldKeyBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeKey", 7)!;
+                var oldRowBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeRow", oldRow)!;
 
                 seedCold.BeginScope();
                 seedCold.Stage(TableIdHash.Compute("Account"), ChangeKind.Insert, oldKeyBytes, oldRowBytes);

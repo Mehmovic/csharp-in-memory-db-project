@@ -912,7 +912,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private void EmitMigrationWrappers(StringBuilder sb, TableModel table) {
         foreach (var migration in table.MigrationMethods) {
-            sb.AppendLine($"    public static {migration.ReturnTypeFullName} MigrateFromRevision{migration.FromRevision}({migration.ParamTypeFullName} old) => {table.RowTypeFullName}.{migration.MethodName}(old);");
+            sb.AppendLine($"    internal static {migration.ReturnTypeFullName} MigrateFromRevision{migration.FromRevision}({migration.ParamTypeFullName} old) => {table.RowTypeFullName}.{migration.MethodName}(old);");
         }
         if (table.MigrationMethods.Length > 0) sb.AppendLine();
     }
@@ -930,7 +930,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var tip = sortedHops.Length == 0 ? 0 : sortedHops[sortedHops.Length - 1].FromRevision + 1;
         var row = table.RowTypeFullName;
 
-        sb.AppendLine($"    public static {row} MigrateToCurrentRevision(int fromRevision, byte[] rowBytes) {{");
+        sb.AppendLine($"    internal static {row} MigrateToCurrentRevision(int fromRevision, byte[] rowBytes) {{");
         sb.AppendLine($"        if (fromRevision >= {tip}) return DeserializeRow(rowBytes);");
         if (sortedHops.Length > 0) {
             sb.AppendLine("        switch (fromRevision) {");
@@ -953,7 +953,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"        ({entry.Generation}, {entry.Revision}),");
         sb.AppendLine("    };");
         sb.AppendLine();
-        sb.AppendLine("    public static int RevisionAtGeneration(int generation) {");
+        sb.AppendLine("    internal static int RevisionAtGeneration(int generation) {");
         sb.AppendLine("        var revision = 0;");
         sb.AppendLine("        foreach (var entry in RevisionHistory) {");
         sb.AppendLine("            if (entry.Generation > generation) break;");
@@ -978,7 +978,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var key = table.PrimaryKeyTypeFullName;
         var pkField = table.Fields.First(f => f.FieldName == table.PrimaryKeyName);
 
-        sb.AppendLine($"    public static byte[] SerializeRow({row} row) {{");
+        sb.AppendLine($"    internal static byte[] SerializeRow({row} row) {{");
         sb.AppendLine("        var bufferWriter = new PooledBufferWriter(256);");
         sb.AppendLine("        var writerState = MemoryPackWriterOptionalStatePool.Rent(null);");
         sb.AppendLine("        var writer = new MemoryPackWriter<PooledBufferWriter>(ref bufferWriter, writerState);");
@@ -990,7 +990,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    public static {row} DeserializeRow(byte[] bytes) {{");
+        sb.AppendLine($"    internal static {row} DeserializeRow(byte[] bytes) {{");
         sb.AppendLine("        var readerState = MemoryPackReaderOptionalStatePool.Rent(null);");
         sb.AppendLine("        var reader = new MemoryPackReader(bytes, readerState);");
         foreach (var f in table.Fields) SchemaWalk.EmitReadField(sb, f);
@@ -1001,7 +1001,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    public static byte[] SerializeKey({key} key) {{");
+        sb.AppendLine($"    internal static byte[] SerializeKey({key} key) {{");
         sb.AppendLine("        var bufferWriter = new PooledBufferWriter(32);");
         sb.AppendLine("        var writerState = MemoryPackWriterOptionalStatePool.Rent(null);");
         sb.AppendLine("        var writer = new MemoryPackWriter<PooledBufferWriter>(ref bufferWriter, writerState);");
@@ -1013,7 +1013,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    public static {key} DeserializeKey(byte[] bytes) {{");
+        sb.AppendLine($"    internal static {key} DeserializeKey(byte[] bytes) {{");
         sb.AppendLine("        var readerState = MemoryPackReaderOptionalStatePool.Rent(null);");
         sb.AppendLine("        var reader = new MemoryPackReader(bytes, readerState);");
         SchemaWalk.EmitReadField(sb, pkField);
