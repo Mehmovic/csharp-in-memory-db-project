@@ -125,4 +125,62 @@ public class MigrationCreateTests {
             Directory.Delete(projectDirectory, recursive: true);
         }
     }
+
+    const string SampleDbWithNoWidget = """
+        using RhinoDB.Core.Tables;
+
+        namespace CreateSampleProject;
+
+        [Database]
+        public partial class SampleDb { }
+        """;
+
+    [Test]
+    public void MigrationCreate_ATableNoLongerDeclared_IsMarkedRemovedAtGenerationInsteadOfBeingDropped() {
+        var csprojPath = CopyFixtureToTempDirectory();
+        var projectDirectory = Path.GetDirectoryName(csprojPath)!;
+        try {
+            File.WriteAllText(Path.Combine(projectDirectory, "Widget.cs"), SampleDbWithNoWidget);
+
+            var exitCode = RhinoDB.Tools.Migration.MigrationTool.Run(["create", "--project", csprojPath]);
+            Assert.That(exitCode, Is.EqualTo(0));
+
+            var descriptorPath = Path.Combine(projectDirectory, "RhinoContracts", "Descriptor.json");
+            var descriptor = RhinoDB.SchemaContracts.ContractDescriptorJson.Parse(File.ReadAllText(descriptorPath));
+            var table = descriptor.Tables.Single(t => t.Accessor == "Widget");
+
+            Assert.That(table.RemovedAtGeneration, Is.EqualTo(0),
+                "carried forward into the descriptor, not dropped from it entirely - the whole point of orphan retention.");
+            Assert.That(table.Revision, Is.EqualTo(0), "orphaning must not touch the table's own pinned revision.");
+
+            var migrationsDir = Path.Combine(projectDirectory, "Migrations");
+            var migrationFiles = Directory.Exists(migrationsDir) ? Directory.GetFiles(migrationsDir) : [];
+            Assert.That(migrationFiles, Is.Empty, "an orphan needs no frozen snapshot/migration stub - there's no new revision to bridge to.");
+        } finally {
+            Directory.Delete(projectDirectory, recursive: true);
+        }
+    }
+
+    [Test]
+    public void MigrationCreate_RunTwiceAfterATableIsRemoved_TheSecondRunDoesNotReMarkIt() {
+        var csprojPath = CopyFixtureToTempDirectory();
+        var projectDirectory = Path.GetDirectoryName(csprojPath)!;
+        var originalOut = Console.Out;
+        try {
+            File.WriteAllText(Path.Combine(projectDirectory, "Widget.cs"), SampleDbWithNoWidget);
+
+            Assert.That(RhinoDB.Tools.Migration.MigrationTool.Run(["create", "--project", csprojPath]), Is.EqualTo(0));
+
+            var capturedOut = new StringWriter();
+            Console.SetOut(capturedOut);
+            var secondExitCode = RhinoDB.Tools.Migration.MigrationTool.Run(["create", "--project", csprojPath]);
+            Console.SetOut(originalOut);
+
+            Assert.That(secondExitCode, Is.EqualTo(0));
+            Assert.That(capturedOut.ToString(), Does.Contain("No breaking changes detected"));
+        } finally {
+            Console.SetOut(originalOut);
+            Directory.Delete(projectDirectory, recursive: true);
+        }
+    }
 }

@@ -1568,6 +1568,36 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine("    }");
         }
 
+        if (persistentTables.Length > 0) {
+            var orphanedTables = descriptor?.Tables
+                .Where(t => t.DatabaseFullName == database.FullName && t.RemovedAtGeneration is not null && !tables.Any(live => live.Accessor == t.Accessor))
+                .ToImmutableArray() ?? ImmutableArray<TableDescriptor>.Empty;
+
+            sb.AppendLine();
+            sb.AppendLine("    public Result RunMigration() {");
+            sb.AppendLine("        var currentGenerationResult = cold.ReadGeneration();");
+            sb.AppendLine("        if (currentGenerationResult.IsError()) return currentGenerationResult.Void();");
+            sb.AppendLine("        var currentGeneration = currentGenerationResult.Unwrap();");
+            sb.AppendLine();
+            sb.AppendLine("        var tableRewrites = new List<(string TableName, Func<byte[], byte[], (byte[] Key, byte[] Row)> Transform)>();");
+            foreach (var table in persistentTables) {
+                var opsName = $"{database.SimpleName}{table.Accessor}Ops";
+                var fromRevisionVar = $"{Camel(table.Accessor)}FromRevision";
+                sb.AppendLine($"        var {fromRevisionVar} = {opsName}.RevisionAtGeneration(currentGeneration);");
+                sb.AppendLine($"        tableRewrites.Add((\"{table.Accessor}\", (keyBytes, rowBytes) => {{");
+                sb.AppendLine($"            var migratedRow = {opsName}.MigrateToCurrentRevision({fromRevisionVar}, rowBytes);");
+                sb.AppendLine($"            return ({opsName}.SerializeKey(migratedRow.{table.PrimaryKeyName}), {opsName}.SerializeRow(migratedRow));");
+                sb.AppendLine("        }));");
+            }
+            sb.AppendLine();
+            sb.AppendLine("        var orphanTablesToDrop = new List<string>();");
+            foreach (var orphan in orphanedTables)
+                sb.AppendLine($"        if ({orphan.RemovedAtGeneration} < currentGeneration) orphanTablesToDrop.Add(\"{orphan.Accessor}\");");
+            sb.AppendLine();
+            sb.AppendLine("        return cold.RunMigration(G_binary, tableRewrites, orphanTablesToDrop);");
+            sb.AppendLine("    }");
+        }
+
         sb.AppendLine("}");
 
         if (persistentTables.Length > 0) EmitLoader(sb, database, persistentTables);

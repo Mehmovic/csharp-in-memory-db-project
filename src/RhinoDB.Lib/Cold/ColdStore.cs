@@ -4,6 +4,7 @@ using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Execution;
 using RhinoDB.Lib.Tables;
 using RhinoDB.Native;
+using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Lib.Cold;
 
@@ -247,6 +248,8 @@ public sealed class ColdStore : IDisposable {
         return table;
     }
 
+    public Result<int> ReadGeneration() => checkpoint.ReadGeneration();
+
     public Result<TRow> Peek<TKey, TRow>(ColdTable<TKey, TRow> table, TKey key)
         where TKey : IEquatable<TKey>, IComparable<TKey>
         where TRow : struct {
@@ -265,6 +268,92 @@ public sealed class ColdStore : IDisposable {
 
         using var _ = txn;
         foreach (var pair in table.ScanAll(txn)) yield return pair;
+    }
+
+    public Result RunMigration(
+        int targetGeneration,
+        IReadOnlyList<(string TableName, Func<byte[], byte[], (byte[] Key, byte[] Row)> Transform)> tableRewrites,
+        IReadOnlyList<string>? orphanTablesToDrop = null
+    ) {
+        var rc = env.BeginTxn(0, out var txn);
+        if (rc != 0 || txn is null) return Result.Error(MdbxErrorMapper.Map(rc));
+
+        using var _ = txn;
+
+        foreach (var (tableName, transform) in tableRewrites) {
+            var rewriteResult = RewriteTableRaw(txn, tableName, transform);
+            if (rewriteResult.IsError()) return rewriteResult;
+        }
+
+        foreach (var tableName in orphanTablesToDrop ?? []) {
+            var dropResult = DropTableEntirely(txn, tableName);
+            if (dropResult.IsError()) return dropResult;
+        }
+
+        var writeGenerationResult = checkpoint.WriteGeneration(txn, targetGeneration);
+        if (writeGenerationResult.IsError()) return writeGenerationResult;
+
+        var commitRc = txn.Commit();
+        return commitRc != 0 ? Result.Error(MdbxErrorMapper.Map(commitRc)) : Result.Ok();
+    }
+
+    private Result DropTableEntirely(Transaction txn, string tableName) {
+        var rcOpen = txn.OpenDbi(tableName, CreateDbi, out var dbi);
+        if (rcOpen != 0) return Result.Error(MdbxErrorMapper.Map(rcOpen));
+
+        var rcDrop = txn.Drop(dbi, del: true);
+        if (rcDrop != 0) return Result.Error(MdbxErrorMapper.Map(rcDrop));
+
+        tableDbisById.Remove(TableIdHash.Compute(tableName));
+        tables.Remove(tableName);
+        return Result.Ok();
+    }
+
+    private Result RewriteTableRaw(Transaction txn, string tableName, Func<byte[], byte[], (byte[] Key, byte[] Row)> transform) {
+        var scratchName = $"{tableName}__migrate_scratch";
+
+        var rcScratch = txn.OpenDbi(scratchName, CreateDbi, out var scratchDbi);
+        if (rcScratch != 0) return Result.Error(MdbxErrorMapper.Map(rcScratch));
+
+        var rcOld = txn.OpenDbi(tableName, CreateDbi, out var oldDbi);
+        if (rcOld != 0) return Result.Error(MdbxErrorMapper.Map(rcOld));
+
+        var copyToScratchResult = CopyAllRows(txn, oldDbi, scratchDbi, transform);
+        if (copyToScratchResult.IsError()) return copyToScratchResult;
+
+        var rcDropOld = txn.Drop(oldDbi, del: true);
+        if (rcDropOld != 0) return Result.Error(MdbxErrorMapper.Map(rcDropOld));
+
+        var rcReopen = txn.OpenDbi(tableName, CreateDbi, out var newDbi);
+        if (rcReopen != 0) return Result.Error(MdbxErrorMapper.Map(rcReopen));
+
+        var copyBackResult = CopyAllRows(txn, scratchDbi, newDbi, static (key, row) => (key, row));
+        if (copyBackResult.IsError()) return copyBackResult;
+
+        var rcDropScratch = txn.Drop(scratchDbi, del: true);
+        if (rcDropScratch != 0) return Result.Error(MdbxErrorMapper.Map(rcDropScratch));
+
+        tableDbisById[TableIdHash.Compute(tableName)] = newDbi;
+        if (tables.TryGetValue(tableName, out var cached) && cached is IColdTableDbiHandle handle) handle.UpdateDbi(newDbi);
+
+        return Result.Ok();
+    }
+
+    static private Result CopyAllRows(Transaction txn, uint sourceDbi, uint destDbi, Func<byte[], byte[], (byte[] Key, byte[] Row)> transform) {
+        var rcCursor = txn.OpenCursor(sourceDbi, out var cursor);
+        if (rcCursor != 0) return Result.Error(MdbxErrorMapper.Map(rcCursor));
+
+        using (cursor) {
+            var getRc = cursor!.GetFirst(out var keyBytes, out var rowBytes);
+            while (getRc == 0) {
+                var (newKey, newRow) = transform(keyBytes, rowBytes);
+                var putRc = txn.Put(destDbi, newKey, newRow, 0);
+                if (putRc != 0) return Result.Error(MdbxErrorMapper.Map(putRc));
+                getRc = cursor.GetNext(out keyBytes, out rowBytes);
+            }
+        }
+
+        return Result.Ok();
     }
 
     public void Dispose() {

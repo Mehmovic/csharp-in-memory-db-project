@@ -187,6 +187,30 @@ mandatory and leaves the database legitimately mixed-generation for a while - a
 different, more complex design. Not built until a measured startup time demands
 it. Same evidence gate as UDP, ART and the algebraic client codec.
 
+**Measured, 2026-09-26** (Phase 4 step 20's required perf gate, not a guess anymore):
+`RhinoDB.Run.Server.Benchmark`'s `MigrationBenchmarks.RunMigration` - the real generated
+drop-recreate-copy transaction (scratch dbi, drop, reopen, copy back, drop scratch, atomic
+`G_binary` write), against a real `PersistentWidget` table with no actual breaking change
+in play (a no-op-shape rewrite, isolating the mechanical I/O cost from any per-row transform
+cost, which is negligible by comparison) -
+
+| RecordCount | Mean (3 iterations) | Per-row |
+|---|---|---|
+| 100,000 | 63.8 ms | ~0.64 μs |
+| 1,000,000 | 648.5 ms | ~0.65 μs |
+
+Linear, consistent with a sequential cursor-scan + sequential-insert cost model (no
+random-access B-tree lookups, unlike a point `Get`/`Update`, which this repo's own earlier
+benchmarks put at ~3.3-5 μs each) - migration is genuinely CHEAPER per row than an ordinary
+point write. Extrapolating linearly, even a 50M-row table lands around 32 seconds, well under
+the doc's own conservative "potentially minutes" estimate above. Disk usage during the
+transaction is roughly 2x the migrated table's size (scratch dbi + old dbi coexist until the
+drop), plus the transaction's own dirty pages - acceptable at RhinoDB's actual target scale
+(an online soccer manager game; no single table is expected to approach even 1M rows, per
+`Docs/03-roadmap.md`'s target application). **Conclusion: libmdbx full-rewrite stays the
+design, no engine swap or lazy/per-row alternative needed** - this was always meant to be an
+evidence-gated decision, and the evidence confirms it.
+
 ## 10. How migrations must be tested
 
 Frozen fixtures from the **previous released build** - bytes produced by the old

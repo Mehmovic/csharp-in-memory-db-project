@@ -2,15 +2,21 @@ using RhinoDB.Native;
 
 namespace RhinoDB.Lib.Cold;
 
+internal interface IColdTableDbiHandle {
+    void UpdateDbi(uint dbi);
+}
+
 public sealed class ColdTable<TKey, TRow>(
     uint dbi,
     Func<TKey, byte[]> serializeKey,
     Func<byte[], TKey> deserializeKey,
     Func<byte[], TRow> deserializeRow
-)
+) : IColdTableDbiHandle
     where TKey : IEquatable<TKey>, IComparable<TKey>
     where TRow : struct {
-    internal uint Dbi { get; } = dbi;
+    internal uint Dbi { get; private set; } = dbi;
+
+    void IColdTableDbiHandle.UpdateDbi(uint newDbi) => Dbi = newDbi;
 
     internal Result<TRow> Get(Transaction txn, TKey key) {
         var keyBytes = serializeKey(key);

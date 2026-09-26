@@ -51,10 +51,28 @@ static public class MigrationCreateCommand {
             pairs.Add((oldTable, newTable));
         }
 
-        if (breakingByRowType.Count == 0) {
+        var newlyOrphaned = new List<TableDescriptor>();
+        foreach (var oldTable in oldDescriptor.Tables) {
+            if (oldTable.RemovedAtGeneration is not null) {
+                newDescriptor.Tables.Add(oldTable);
+                continue;
+            }
+            var stillLive = newDescriptor.Tables.Any(t => t.DatabaseFullName == oldTable.DatabaseFullName && t.Accessor == oldTable.Accessor);
+            if (stillLive) continue;
+
+            var owningDatabase = newDescriptor.Databases.FirstOrDefault(d => d.FullName == oldTable.DatabaseFullName);
+            oldTable.RemovedAtGeneration = owningDatabase?.Generation ?? 0;
+            newDescriptor.Tables.Add(oldTable);
+            newlyOrphaned.Add(oldTable);
+        }
+
+        if (breakingByRowType.Count == 0 && newlyOrphaned.Count == 0) {
             Console.WriteLine("No breaking changes detected - nothing to create.");
             return 0;
         }
+
+        foreach (var orphan in newlyOrphaned)
+            Console.WriteLine($"  Table '{orphan.DatabaseFullName}.{orphan.Accessor}' is no longer declared - marked removed at generation {orphan.RemovedAtGeneration}.");
 
         var migrationsDirectory = Path.Combine(projectDirectory, config.MigrationsOutputDirectory);
         Directory.CreateDirectory(migrationsDirectory);
