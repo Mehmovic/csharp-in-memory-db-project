@@ -1,8 +1,5 @@
 namespace RhinoDB.SchemaContracts;
 
-// Duplicates PackedVersion.Pack's exact bit layout (RhinoDB.Core) rather than referencing it - this
-// project is netstandard2.0 with zero dependency on RhinoDB.Core, and the packing formula is one pure,
-// stable line (same class of deliberate duplication as SchemaWalk.EmitReadField's private Camel copy).
 static public class ServerVersionParser {
     static public uint Parse(string version) {
         var parts = version.Split('.');
@@ -15,6 +12,6 @@ static public class ServerVersionParser {
                 + "major/minor must each fit in a byte (0-255), patch in a ushort (0-65535).");
         }
 
-        return ((uint)major << 24) | ((uint)minor << 16) | patch;
+        return PackedVersion.Pack(major, minor, patch);
     }
 }

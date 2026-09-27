@@ -1,4 +1,4 @@
-namespace RhinoDB.Core;
+namespace RhinoDB.SchemaContracts;
 
 static public class PackedVersion {
     static public uint Pack(byte major, byte minor, ushort patch) =>

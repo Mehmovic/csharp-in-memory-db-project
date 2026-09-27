@@ -1,4 +1,4 @@
-namespace RhinoDB.Core.Test;
+namespace RhinoDB.SchemaContracts.Test;
 
 public class PackedVersionTests {
     [Test]

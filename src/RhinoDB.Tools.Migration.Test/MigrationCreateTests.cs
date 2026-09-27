@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace RhinoDB.Tools.Migration.Test;
@@ -24,7 +25,27 @@ public class MigrationCreateTests {
             @"..\..\..\RhinoDB.Core\RhinoDB.Core.csproj", RhinoDbCoreCsprojPath());
         File.WriteAllText(csprojPath, rewritten);
 
+        RestoreProject(csprojPath);
+
         return csprojPath;
+    }
+
+    // MSBuildWorkspace's design-time project load - and even a real `dotnet build` - needs a prior NuGet
+    // restore to resolve transitive project references (TableKind/IndexKind/Uniqueness live in
+    // RhinoDB.SchemaContracts, reached transitively through RhinoDB.Core); a temp copy created fresh at
+    // test-run time has no obj/project.assets.json yet, so it must be restored explicitly here.
+    static private void RestoreProject(string csprojPath) {
+        var startInfo = new ProcessStartInfo("dotnet", $"restore \"{csprojPath}\"") {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        using var process = Process.Start(startInfo)!;
+        process.WaitForExit();
+        if (process.ExitCode != 0) {
+            throw new InvalidOperationException(
+                $"dotnet restore failed for '{csprojPath}': {process.StandardError.ReadToEnd()}");
+        }
     }
 
     static private void CopyDirectory(string sourceDir, string destDir) {

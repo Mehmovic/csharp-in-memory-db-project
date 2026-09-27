@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net11.0</TargetFramework>
@@ -16,6 +16,7 @@
         <ProjectReference Include="..\RhinoDB.SchemaContracts\RhinoDB.SchemaContracts.csproj"
                            OutputItemType="Analyzer"
                            ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\RhinoDB.SchemaContracts\RhinoDB.SchemaContracts.csproj" />
     </ItemGroup>
 
 </Project>

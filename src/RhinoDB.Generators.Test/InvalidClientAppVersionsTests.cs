@@ -1,4 +1,4 @@
-using RhinoDB.Core;
+using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Generators.Test;
 

@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 using RhinoDB.SchemaContracts;
+using RhinoDB.Core.Tables;
 
 namespace RhinoDB.Generators;
 
@@ -1987,7 +1988,4 @@ public sealed class TableGenerator : IIncrementalGenerator {
         public ImmutableArray<int> InvalidGenerations { get; } = invalidGenerations;
     }
 
-    private enum TableKind { Instant, Persistent }
-    private enum IndexKind { Hash, BTree  }
-    private enum Uniqueness { Unique, NonUnique }
 }
