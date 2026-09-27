@@ -8,6 +8,7 @@ public sealed class RhinoHostBuilder {
     private readonly string[] args;
     private readonly List<IDatabaseRegistration> registrations = [];
     private readonly HashSet<string> names = [];
+    private readonly Dictionary<Type, object> tableCompatAdapters = [];
 
     private RhinoHostBuilder(string[] args) {
         this.args = args;
@@ -27,6 +28,13 @@ public sealed class RhinoHostBuilder {
         return this;
     }
 
+    public RhinoHostBuilder AddTableCompatAdapter<TRow>(Action<TableCompatOptions<TRow>> configure) {
+        var options = new TableCompatOptions<TRow>();
+        configure(options);
+        tableCompatAdapters[typeof(TRow)] = options;
+        return this;
+    }
+
     public async Task<Result<RhinoHost>> BuildAsync() {
         var databases = new Dictionary<string, object>();
 
@@ -37,7 +45,7 @@ public sealed class RhinoHostBuilder {
             databases[registration.Name] = result.Unwrap();
         }
 
-        return new RhinoHost(databases);
+        return new RhinoHost(databases, tableCompatAdapters);
     }
 
     private interface IDatabaseRegistration {
@@ -192,13 +200,20 @@ public sealed class RhinoHostBuilder {
 
 public sealed class RhinoHost {
     private readonly IReadOnlyDictionary<string, object> databases;
+    private readonly IReadOnlyDictionary<Type, object> tableCompatAdapters;
 
-    internal RhinoHost(IReadOnlyDictionary<string, object> databases) {
+    internal RhinoHost(IReadOnlyDictionary<string, object> databases, IReadOnlyDictionary<Type, object> tableCompatAdapters) {
         this.databases = databases;
+        this.tableCompatAdapters = tableCompatAdapters;
     }
 
     public TDb GetDatabase<TDb>(string name) where TDb : notnull =>
         databases.TryGetValue(name, out var db)
             ? (TDb)db
             : throw new KeyNotFoundException($"No database registered under '{name}'.");
+
+    public TableCompatOptions<TRow>? GetTableCompatAdapter<TRow>() =>
+        tableCompatAdapters.TryGetValue(typeof(TRow), out var options)
+            ? (TableCompatOptions<TRow>)options
+            : null;
 }
