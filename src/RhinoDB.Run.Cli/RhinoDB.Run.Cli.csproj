@@ -17,6 +17,7 @@
     <ItemGroup>
         <ProjectReference Include="..\RhinoDB.Tools.Migration\RhinoDB.Tools.Migration.csproj" />
         <ProjectReference Include="..\RhinoDB.Tools.Dev\RhinoDB.Tools.Dev.csproj" />
+        <ProjectReference Include="..\RhinoDB.Tools.Contract\RhinoDB.Tools.Contract.csproj" />
     </ItemGroup>
 
 </Project>

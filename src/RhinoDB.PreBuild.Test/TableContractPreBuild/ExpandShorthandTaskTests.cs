@@ -9,7 +9,7 @@ public class ExpandShorthandTaskTests {
         var outputDir = @"C:\proj\Rhino\Tables";
         var sourceFile = @"C:\proj\RhinoContracts\Tables\Widget.cs";
 
-        var result = ExpandShorthandTask.ComputeOutputPath(sourceDir, outputDir, sourceFile);
+        var result = ShorthandExpansionRunner.ComputeOutputPath(sourceDir, outputDir, sourceFile);
 
         Assert.That(result, Is.EqualTo(@"C:\proj\Rhino\Tables\Widget.g.cs"));
     }
@@ -21,7 +21,7 @@ public class ExpandShorthandTaskTests {
         var outputDir = @"C:\proj\Rhino\Tables";
         var sourceFile = @"C:\proj\RhinoContracts\Tables\Matches\PvPTable.cs";
 
-        var result = ExpandShorthandTask.ComputeOutputPath(sourceDir, outputDir, sourceFile);
+        var result = ShorthandExpansionRunner.ComputeOutputPath(sourceDir, outputDir, sourceFile);
 
         Assert.That(result, Is.EqualTo(@"C:\proj\Rhino\Tables\Matches\PvPTable.g.cs"));
     }
@@ -31,8 +31,8 @@ public class ExpandShorthandTaskTests {
         var sourceDir = @"C:\proj\RhinoContracts\Tables";
         var outputDir = @"C:\proj\Rhino\Tables";
 
-        var pvp = ExpandShorthandTask.ComputeOutputPath(sourceDir, outputDir, @"C:\proj\RhinoContracts\Tables\Matches\PvPTable.cs");
-        var pve = ExpandShorthandTask.ComputeOutputPath(sourceDir, outputDir, @"C:\proj\RhinoContracts\Tables\Matches\PvETable.cs");
+        var pvp = ShorthandExpansionRunner.ComputeOutputPath(sourceDir, outputDir, @"C:\proj\RhinoContracts\Tables\Matches\PvPTable.cs");
+        var pve = ShorthandExpansionRunner.ComputeOutputPath(sourceDir, outputDir, @"C:\proj\RhinoContracts\Tables\Matches\PvETable.cs");
 
         Assert.That(pvp, Is.EqualTo(@"C:\proj\Rhino\Tables\Matches\PvPTable.g.cs"));
         Assert.That(pve, Is.EqualTo(@"C:\proj\Rhino\Tables\Matches\PvETable.g.cs"));
@@ -44,7 +44,7 @@ public class ExpandShorthandTaskTests {
         var outputDir = @"C:\proj\Rhino\Tables";
         var sourceFile = @"C:\proj\RhinoContracts\Tables\Matches\Ranked\PvPTable.cs";
 
-        var result = ExpandShorthandTask.ComputeOutputPath(sourceDir, outputDir, sourceFile);
+        var result = ShorthandExpansionRunner.ComputeOutputPath(sourceDir, outputDir, sourceFile);
 
         Assert.That(result, Is.EqualTo(@"C:\proj\Rhino\Tables\Matches\Ranked\PvPTable.g.cs"));
     }

@@ -8,6 +8,8 @@
         <RhinoTargetParentDirectory Condition="'$(RhinoTargetParentDirectory)' == ''">RhinoDB</RhinoTargetParentDirectory>
         <RhinoSchemaDescriptorPath Condition="'$(_RhinoConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoConfigJson)', '"SchemaDescriptorPath"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoSchemaDescriptorPath>
         <RhinoSchemaDescriptorPath Condition="'$(RhinoSchemaDescriptorPath)' == ''">RhinoContracts/Descriptor.json</RhinoSchemaDescriptorPath>
+        <DisableContractAutoPreBuild Condition="'$(_RhinoConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoConfigJson)', '"DisableContractAutoPreBuild"\s*:\s*(true|false)').Groups[1].Value)</DisableContractAutoPreBuild>
+        <DisableContractAutoPreBuild Condition="'$(DisableContractAutoPreBuild)' == ''">false</DisableContractAutoPreBuild>
     </PropertyGroup>
     <ItemGroup>
         <Compile Remove="$(RhinoSourceParentDirectory)/**/*.cs" />

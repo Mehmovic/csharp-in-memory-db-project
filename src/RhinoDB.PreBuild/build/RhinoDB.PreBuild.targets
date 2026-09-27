@@ -8,7 +8,7 @@
 
     <Target Name="RhinoExpandShorthand" BeforeTargets="CoreCompile"
             Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildingProject)' == 'true'">
-        <ExpandShorthandTask ProjectDirectory="$(MSBuildProjectDirectory)" />
+        <ExpandShorthandTask ProjectDirectory="$(MSBuildProjectDirectory)" Condition="'$(DisableContractAutoPreBuild)' != 'true'" />
         <ItemGroup>
             <Compile Include="$(RhinoTargetParentDirectory)/**/*.g.cs" Exclude="@(Compile)" />
         </ItemGroup>

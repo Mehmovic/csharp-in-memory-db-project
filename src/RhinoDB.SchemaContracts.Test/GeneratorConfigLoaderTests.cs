@@ -69,6 +69,20 @@ public class GeneratorConfigLoaderTests {
     }
 
     [Test]
+    public void Parse_NoDisableContractAutoPreBuildField_DefaultsToTrue() {
+        var config = GeneratorConfigLoader.Parse("""{"Generator": {"TargetParentDirectory": "MyOutput"}}""");
+
+        Assert.That(config.DisableContractAutoPreBuild, Is.True);
+    }
+
+    [Test]
+    public void Parse_ExplicitDisableContractAutoPreBuild_RoundTrips() {
+        var config = GeneratorConfigLoader.Parse("""{"Generator": {"DisableContractAutoPreBuild": false}}""");
+
+        Assert.That(config.DisableContractAutoPreBuild, Is.False);
+    }
+
+    [Test]
     public void ParseFull_ServerSectionAlongsideGenerator_BothParseIndependently() {
         var full = GeneratorConfigLoader.ParseFull("""
             {"Generator": {"ClientProtocol": "MessagePack"}, "Server": {"Version": "2.3.1"}}

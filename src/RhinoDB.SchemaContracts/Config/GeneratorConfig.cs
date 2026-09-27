@@ -9,4 +9,8 @@ public sealed class GeneratorConfig {
     public string MigrationsOutputDirectory { get; set; } = "Migrations";
 
     public string ClientProtocol { get; set; } = "Raw";
+
+    // When true, RhinoDB.PreBuild.targets skips its automatic BeforeTargets="CoreCompile" expansion -
+    // the developer runs `rhinodb contract generate`/`clean` manually instead, protobuf-style.
+    public bool DisableContractAutoPreBuild { get; set; } = true;
 }
