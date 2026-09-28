@@ -159,4 +159,59 @@ public class WalRecordCodecTests {
         Assert.That(result.Entries, Is.Empty);
         Assert.That(result.ValidLength, Is.EqualTo(0));
     }
+
+    // ---- the timestamp is an approximation that LOCATES an LSN; the encoder stays pure ----
+
+    [Test]
+    public void Encode_WithAnExplicitTimestamp_DecodesBackToTheSameValue() {
+        const long stamp = 638_883_456_000_000_000L;
+        var frame = WalRecordCodec.Encode(42, WalEntryKind.Operation, TwoChangesAcrossTables(), stamp);
+
+        var status = WalRecordCodec.TryDecode(frame, out var entry, out var consumed);
+
+        Assert.That(status, Is.EqualTo(WalScanStatus.Clean));
+        Assert.That(consumed, Is.EqualTo(frame.Length));
+        Assert.That(entry.Lsn, Is.EqualTo(42));
+        Assert.That(entry.UtcTicks, Is.EqualTo(stamp));
+    }
+
+    [Test]
+    public void Encode_ByDefault_LeavesTheFrameUnstampedAndDeterministic() {
+        // Defaulting to Unstamped rather than "capture now" is what keeps the encoder pure:
+        // two encodes of the same input must produce identical bytes, whatever the wall clock
+        // is doing. Time enters the system at the WAL, which stamps in AppendOnly.
+        var first = WalRecordCodec.Encode(42, WalEntryKind.Operation, TwoChangesAcrossTables());
+        var second = WalRecordCodec.Encode(42, WalEntryKind.Operation, TwoChangesAcrossTables());
+
+        Assert.That(second, Is.EqualTo(first));
+        Assert.That(WalRecordCodec.Unstamped, Is.EqualTo(0L));
+        Assert.That(WalRecordCodec.TryDecode(first, out var entry, out _), Is.EqualTo(WalScanStatus.Clean));
+        Assert.That(entry.UtcTicks, Is.EqualTo(WalRecordCodec.Unstamped));
+    }
+
+    [Test]
+    public void TryDecode_StampsSurviveAcrossAWholeScanInOrder() {
+        var first = WalRecordCodec.Encode(1, WalEntryKind.Operation, OneChange(), 1000L);
+        var second = WalRecordCodec.Encode(2, WalEntryKind.Operation, OneChange(), 2000L);
+        var third = WalRecordCodec.Encode(3, WalEntryKind.Operation, OneChange(), 3000L);
+        var buffer = first.Concat(second).Concat(third).ToArray();
+
+        var scan = WalRecordCodec.Scan(buffer);
+
+        Assert.That(scan.Status, Is.EqualTo(WalScanStatus.Clean));
+        Assert.That(scan.Entries.Select(e => e.Lsn), Is.EqualTo(new long[] { 1, 2, 3 }));
+        Assert.That(scan.Entries.Select(e => e.UtcTicks), Is.EqualTo(new long[] { 1000L, 2000L, 3000L }));
+    }
+
+    [Test]
+    public void TryDecode_HeaderCarriesTheTimestampSoTheCrcCoversIt() {
+        // The timestamp sits inside the CRC32 region, so a corrupted stamp is DETECTED rather
+        // than silently yielding a wrong answer to a time-range query.
+        var frame = WalRecordCodec.Encode(1, WalEntryKind.Operation, OneChange(), 1234L);
+        frame[18] ^= 0xFF;
+
+        var status = WalRecordCodec.TryDecode(frame, out _, out _);
+
+        Assert.That(status, Is.Not.EqualTo(WalScanStatus.Clean));
+    }
 }

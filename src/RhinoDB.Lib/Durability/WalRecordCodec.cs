@@ -5,22 +5,25 @@ using MemoryPack;
 namespace RhinoDB.Lib.Durability;
 
 static public class WalRecordCodec {
-    public const int HeaderSize = 4 + 4 + 8 + 1;
+    public const int HeaderSize = 4 + 4 + 8 + 8 + 1;
+    public const long Unstamped = 0;
 
-    static public byte[] Encode(long lsn, WalEntryKind kind, WalChange[] changes) =>
-        BuildFrame(lsn, kind, changes.Length == 0 ? [] : MemoryPackSerializer.Serialize(changes));
 
-    static public byte[] Encode(long lsn, WalEntryKind kind, List<WalChange> changes) =>
-        BuildFrame(lsn, kind, changes.Count == 0 ? [] : MemoryPackSerializer.Serialize(changes));
+    static public byte[] Encode(long lsn, WalEntryKind kind, WalChange[] changes, long utcTicks = Unstamped) =>
+        BuildFrame(lsn, kind, changes.Length == 0 ? [] : MemoryPackSerializer.Serialize(changes), utcTicks);
 
-    static private byte[] BuildFrame(long lsn, WalEntryKind kind, byte[] payload) {
+    static public byte[] Encode(long lsn, WalEntryKind kind, List<WalChange> changes, long utcTicks = Unstamped) =>
+        BuildFrame(lsn, kind, changes.Count == 0 ? [] : MemoryPackSerializer.Serialize(changes), utcTicks);
+
+    static private byte[] BuildFrame(long lsn, WalEntryKind kind, byte[] payload, long utcTicks) {
         var frame = new byte[HeaderSize + payload.Length];
         var span = frame.AsSpan();
 
         BinaryPrimitives.WriteUInt32LittleEndian(span[..4], (uint)payload.Length);
         BinaryPrimitives.WriteInt64LittleEndian(span[8..16], lsn);
-        span[16] = (byte)kind;
-        payload.CopyTo(span[17..]);
+        BinaryPrimitives.WriteInt64LittleEndian(span[16..24], utcTicks);
+        span[24] = (byte)kind;
+        payload.CopyTo(span[25..]);
 
         var checksum = Crc32.HashToUInt32(span[8..]);
         BinaryPrimitives.WriteUInt32LittleEndian(span[4..8], checksum);
@@ -43,11 +46,12 @@ static public class WalRecordCodec {
         if (actualChecksum != storedChecksum) return buffer.Length == frameSize ? WalScanStatus.TornTail : WalScanStatus.Corrupted;
 
         var lsn = BinaryPrimitives.ReadInt64LittleEndian(buffer[8..16]);
-        var kind = (WalEntryKind)buffer[16];
-        var payload = buffer[17..frameSize];
+        var utcTicks = BinaryPrimitives.ReadInt64LittleEndian(buffer[16..24]);
+        var kind = (WalEntryKind)buffer[24];
+        var payload = buffer[25..frameSize];
         var changes = payload.IsEmpty ? [] : MemoryPackSerializer.Deserialize<WalChange[]>(payload)!;
 
-        entry = new DecodedWalEntry(lsn, kind, changes);
+        entry = new DecodedWalEntry(lsn, kind, changes, utcTicks);
         bytesConsumed = frameSize;
         return WalScanStatus.Clean;
     }

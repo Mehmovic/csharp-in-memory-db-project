@@ -41,6 +41,7 @@ static internal class Program {
               rhinodb migration status [--project <path>]
               rhinodb migration create <Name> [--project <path>]
               rhinodb dev reset [--project <path>] [--cold-path <path>]... [--yes]
+              rhinodb dev prune --cold-path <path> [--older-than <timestamp> | --keep-generations <n>] [--yes]
               rhinodb contract generate [--project <path>] [--no-clean]
               rhinodb contract clean [--project <path>]
             """);

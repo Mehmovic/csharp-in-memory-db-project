@@ -406,4 +406,80 @@ public class RhinoHostBuilderTests {
         Assert.Throws<KeyNotFoundException>(() => host.GetDatabase<FakeDb>("nonexistent"));
         host.GetDatabase<FakeDb>("game").Cold!.Dispose();
     }
+
+    // ---- the archive collector allocates NOTHING when retention is off ----
+
+    [Test]
+    public async Task BuildAsync_WithRetentionOff_CreatesNoCollectorAndNoTimer() {
+        // config.json in the test output has no Server.ArchiveRetention, and no per-database
+        // override is set - so retention is off and must cost nothing: no collector object, and
+        // since the collector owns the Timer, no Timer either.
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
+            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.LoadAsync = _ => Task.CompletedTask;
+            })
+            .BuildAsync();
+
+        Assert.That(hostResult.IsOk(), Is.True);
+        using var host = hostResult.Unwrap();
+        Assert.That(host.ArchiveCollectorCount, Is.EqualTo(0),
+            "a disabled feature should not leave a live object behind - the collector holds a Timer.");
+        host.GetDatabase<FakeDb>("game").Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task BuildAsync_WithRetentionOn_CreatesExactlyOneCollector() {
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
+            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.LoadAsync = _ => Task.CompletedTask;
+                options.ArchiveRetention = new ArchiveRetentionPolicy(TimeSpan.FromHours(4), TimeSpan.FromDays(30));
+            })
+            .BuildAsync();
+
+        Assert.That(hostResult.IsOk(), Is.True);
+        using var host = hostResult.Unwrap();
+        Assert.That(host.ArchiveCollectorCount, Is.EqualTo(1));
+        host.GetDatabase<FakeDb>("game").Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task BuildAsync_TwoDatabases_OneWithRetention_CreatsExactlyOneCollector() {
+        // The per-database override must not turn collection ON for the other database.
+        var hostResult = await RhinoHostBuilder.Create([$"--a.cold-path={dirA}", $"--b.cold-path={dirB}"])
+            .AddDatabase<FakeDb, DefaultTransaction>("a", options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.LoadAsync = _ => Task.CompletedTask;
+                options.ArchiveRetention = new ArchiveRetentionPolicy(TimeSpan.FromHours(1), TimeSpan.FromDays(7));
+            })
+            .AddDatabase<FakeDb, DefaultTransaction>("b", options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.LoadAsync = _ => Task.CompletedTask;
+            })
+            .BuildAsync();
+
+        Assert.That(hostResult.IsOk(), Is.True);
+        using var host = hostResult.Unwrap();
+        Assert.That(host.ArchiveCollectorCount, Is.EqualTo(1),
+            "an override on one database must not enable collection for its neighbour.");
+        host.GetDatabase<FakeDb>("a").Cold!.Dispose();
+        host.GetDatabase<FakeDb>("b").Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task RhinoHost_Dispose_WithACollectorRunning_IsSafeToCallTwice() {
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
+            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.LoadAsync = _ => Task.CompletedTask;
+                options.ArchiveRetention = new ArchiveRetentionPolicy(TimeSpan.FromHours(4), TimeSpan.FromDays(30));
+            })
+            .BuildAsync();
+
+        var host = hostResult.Unwrap();
+        Assert.DoesNotThrow(host.Dispose);
+        Assert.DoesNotThrow(host.Dispose, "Dispose must be idempotent - a host may be torn down twice.");
+        host.GetDatabase<FakeDb>("game").Cold!.Dispose();
+    }
 }

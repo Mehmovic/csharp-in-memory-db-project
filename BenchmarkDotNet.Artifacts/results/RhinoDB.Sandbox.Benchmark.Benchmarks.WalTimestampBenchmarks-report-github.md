@@ -1,0 +1,35 @@
+```
+
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.9457)
+Unknown processor
+.NET SDK 11.0.100-rc.1.26425.128
+  [Host]     : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  Job-IEGVRB : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+
+IterationCount=12  LaunchCount=3  RunStrategy=Throughput  
+WarmupCount=8  
+
+```
+| Method                       | PayloadSize | Mean         | Error        | StdDev       | Median       | Ratio    | RatioSD | Gen0   | Allocated | Alloc Ratio |
+|----------------------------- |------------ |-------------:|-------------:|-------------:|-------------:|---------:|--------:|-------:|----------:|------------:|
+| **Clock_UtcNow_Ticks**           | **128**         |     **20.28 ns** |     **0.329 ns** |     **0.541 ns** |     **20.17 ns** |     **1.00** |    **0.04** |      **-** |         **-** |          **NA** |
+| Clock_Stopwatch_GetTimestamp | 128         |     13.23 ns |     0.428 ns |     0.666 ns |     13.44 ns |     0.65 |    0.04 |      - |         - |          NA |
+| Encode_CurrentHeader         | 128         |     94.49 ns |     2.108 ns |     3.523 ns |     94.82 ns |     4.66 |    0.21 | 0.0280 |     176 B |          NA |
+| Encode_TimestampedHeader     | 128         |     97.18 ns |     4.418 ns |     7.135 ns |     93.83 ns |     4.79 |    0.37 | 0.0293 |     184 B |          NA |
+| EncodeInto_CurrentHeader     | 128         |    101.23 ns |     5.502 ns |     8.885 ns |     95.67 ns |     4.99 |    0.45 | 0.0280 |     176 B |          NA |
+| EncodeInto_TimestampedHeader | 128         |    124.66 ns |     7.767 ns |    12.761 ns |    120.85 ns |     6.15 |    0.64 | 0.0293 |     184 B |          NA |
+| Scan_CurrentHeader           | 128         | 11,553.80 ns |   725.745 ns | 1,171.943 ns | 10,918.69 ns |   570.03 |   58.81 |      - |         - |          NA |
+| Scan_TimestampedHeader       | 128         |  7,496.38 ns |   391.242 ns |   653.678 ns |  7,823.71 ns |   369.85 |   33.18 |      - |         - |          NA |
+| WalCodec_Encode_Current      | 128         |    140.66 ns |    11.504 ns |    19.221 ns |    132.10 ns |     6.94 |    0.95 | 0.0508 |     320 B |          NA |
+| WalCodec_Encode_Timestamped  | 128         |    232.19 ns |    48.661 ns |    79.951 ns |    196.74 ns |    11.46 |    3.90 | 0.0522 |     328 B |          NA |
+|                              |             |              |              |              |              |          |         |        |           |             |
+| **Clock_UtcNow_Ticks**           | **1024**        |     **21.41 ns** |     **0.495 ns** |     **0.827 ns** |     **21.24 ns** |     **1.00** |    **0.05** |      **-** |         **-** |          **NA** |
+| Clock_Stopwatch_GetTimestamp | 1024        |     13.24 ns |     0.181 ns |     0.302 ns |     13.29 ns |     0.62 |    0.03 |      - |         - |          NA |
+| Encode_CurrentHeader         | 1024        |    303.88 ns |    60.837 ns |   101.645 ns |    264.70 ns |    14.21 |    4.72 | 0.1707 |    1072 B |          NA |
+| Encode_TimestampedHeader     | 1024        |    511.59 ns |    36.143 ns |    60.386 ns |    516.36 ns |    23.93 |    2.93 | 0.1717 |    1080 B |          NA |
+| EncodeInto_CurrentHeader     | 1024        |    836.15 ns |    26.509 ns |    43.556 ns |    834.94 ns |    39.11 |    2.49 | 0.1707 |    1072 B |          NA |
+| EncodeInto_TimestampedHeader | 1024        |    872.82 ns |    30.931 ns |    51.679 ns |    884.43 ns |    40.83 |    2.84 | 0.1717 |    1080 B |          NA |
+| Scan_CurrentHeader           | 1024        | 36,645.02 ns | 1,277.275 ns | 2,098.600 ns | 35,928.56 ns | 1,714.07 |  116.32 |      - |         - |          NA |
+| Scan_TimestampedHeader       | 1024        | 27,401.46 ns | 1,101.222 ns | 1,809.339 ns | 27,333.95 ns | 1,281.71 |   96.40 |      - |         - |          NA |
+| WalCodec_Encode_Current      | 1024        |    221.73 ns |    25.341 ns |    42.339 ns |    226.68 ns |    10.37 |    1.99 | 0.0508 |     320 B |          NA |
+| WalCodec_Encode_Timestamped  | 1024        |    290.81 ns |    27.123 ns |    43.799 ns |    313.28 ns |    13.60 |    2.08 | 0.0520 |     328 B |          NA |

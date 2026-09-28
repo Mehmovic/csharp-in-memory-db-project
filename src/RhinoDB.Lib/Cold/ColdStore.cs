@@ -254,6 +254,41 @@ public sealed class ColdStore : IDisposable {
 
     public Result<int> ReadRetainedFromGeneration() => checkpoint.ReadRetainedFromGeneration();
 
+    public Result<int> PruneArchiveOlderThan(long cutoffUtcTicks) {
+        var retained = ReadRetainedFromGeneration();
+        if (retained.IsError()) return retained.Void();
+        var currentFloor = retained.Unwrap();
+
+        var deleted = WalArchive.DeleteSegmentsOlderThanTimestamp(DirectoryPath, cutoffUtcTicks);
+        if (deleted.IsError()) return deleted.Void();
+
+        var oldestSurviving = WalArchive.ReadOldestRetainedGeneration(DirectoryPath);
+        if (oldestSurviving.IsError()) return oldestSurviving.Void();
+        var newFloor = oldestSurviving.Unwrap().TryGet(out var oldestGeneration) ? oldestGeneration : currentFloor;
+
+        var written = WriteRetainedFromGeneration(newFloor);
+        if (written.IsError()) return Result<int>.Error(written.GetError());
+
+        return deleted.Unwrap();
+    }
+
+    public Result<int> PruneArchiveOlderThanGeneration(int targetGeneration) {
+        var retained = ReadRetainedFromGeneration();
+        if (retained.IsError()) return retained.Void();
+
+        if (targetGeneration < retained.Unwrap()) return Result<int>.Error(DbError.RetentionFloorCannotMoveBackward());
+
+        var deleted = WalArchive.DeleteSegmentsOlderThan(DirectoryPath, targetGeneration);
+        if (deleted.IsError()) return deleted.Void();
+
+        var written = WriteRetainedFromGeneration(targetGeneration);
+        if (written.IsError()) return Result<int>.Error(written.GetError());
+
+        return deleted.Unwrap();
+    }
+
+    public Result<List<WalSegmentDescription>> DescribeArchiveSegments() => WalArchive.DescribeSegments(DirectoryPath);
+    
     public Result WriteRetainedFromGeneration(int generation) {
         var rc = env.BeginTxn(0, out var txn);
         if (rc != 0 || txn is null) return Result.Error(MdbxErrorMapper.Map(rc));

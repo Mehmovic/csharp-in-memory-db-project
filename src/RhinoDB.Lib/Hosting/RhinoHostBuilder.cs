@@ -9,6 +9,8 @@ public sealed class RhinoHostBuilder {
     private readonly List<IDatabaseRegistration> registrations = [];
     private readonly HashSet<string> names = [];
     private readonly Dictionary<Type, object> tableCompatAdapters = [];
+    private List<IDisposable>? collectors;
+    public event Action<string, ArchiveRetentionRunReport>? OnRetentionRun;
 
     private RhinoHostBuilder(string[] args) {
         this.args = args;
@@ -43,14 +45,24 @@ public sealed class RhinoHostBuilder {
             if (result.IsError()) return result.Void();
 
             databases[registration.Name] = result.Unwrap();
+            var policy = registration.ArchiveRetentionOverride ?? registration.ConfiguredRetention();
+            if (policy is not null) {
+                var name = registration.Name;
+                collectors ??= [];
+                collectors.Add(registration.StartArchiveCollector(
+                    result.Unwrap(), policy, report => OnRetentionRun?.Invoke(name, report))!);
+            }
         }
 
-        return new RhinoHost(databases, tableCompatAdapters);
+        return new RhinoHost(databases, tableCompatAdapters, collectors ?? []);
     }
 
     private interface IDatabaseRegistration {
         string Name { get; }
         Task<Result<object>> RunAsync(string[] args);
+        ArchiveRetentionPolicy? ArchiveRetentionOverride { get; }
+        ArchiveRetentionPolicy? ConfiguredRetention();
+        IDisposable? StartArchiveCollector(object builtDbParam, ArchiveRetentionPolicy policy, Action<ArchiveRetentionRunReport> onRun);
     }
 
     private sealed class DatabaseRegistration<TDb, TTx>(string name, DatabaseOptions<TDb, TTx> options)
@@ -58,6 +70,14 @@ public sealed class RhinoHostBuilder {
         where TDb : DbContext<TTx>
         where TTx : ITransaction {
         public string Name { get; } = name;
+        private TDb? builtDb;
+        public ArchiveRetentionPolicy? ArchiveRetentionOverride { get; } = options.ArchiveRetention;
+
+        public ArchiveRetentionPolicy? ConfiguredRetention() => builtDb?.ConfiguredArchiveRetention;
+
+        public IDisposable? StartArchiveCollector(object builtDbParam, ArchiveRetentionPolicy policy, Action<ArchiveRetentionRunReport> onRun) {
+            return new ArchiveRetentionCollector<TTx>((DbContext<TTx>)builtDbParam, policy, onRun);
+        }
 
         public async Task<Result<object>> RunAsync(string[] args) {
             if (options.CreateDb is not { } createDb)
@@ -74,9 +94,8 @@ public sealed class RhinoHostBuilder {
                     return Result<object>.Error(MissingConfig(nameof(options.LoadFromGenesis), because: "RhinoRunMode.Replay needs it"));
                 case RhinoRunMode.Migrate when options.RunMigration is null:
                     return Result<object>.Error(MissingConfig(nameof(options.RunMigration), because: "RhinoRunMode.Migrate needs it"));
-                case RhinoRunMode.Prune when parsed.PruneTargetGeneration is null:
-                    return Result<object>.Error(DbError.SystemFailure(new InvalidOperationException(
-                        $"AddDatabase(\"{Name}\"): --{Name}.prune-target-generation is required for RhinoRunMode.Prune.")));
+                case RhinoRunMode.Prune when parsed.PruneTargetGeneration is null && parsed.PruneOlderThanUtcTicks is null:
+                    return Result<object>.Error(MissingPruneConfig());
                 case RhinoRunMode.ConsolidateArchive when options.ConsolidateArchive is null:
                     return Result<object>.Error(MissingConfig(nameof(options.ConsolidateArchive), because: "RhinoRunMode.ConsolidateArchive needs it"));
             }
@@ -84,11 +103,21 @@ public sealed class RhinoHostBuilder {
             var runResult = await RunOne(
                 parsed, createDb, options.LoadAsync, options.LoadFromGenesis,
                 options.RunMigration, options.GBinary, options.IsGenerationInvalid, options.ConsolidateArchive);
-            return runResult.IsError() ? runResult.Void() : Result<object>.Ok(runResult.Unwrap());
+            if (runResult.IsError()) return runResult.Void();
+
+            builtDb = runResult.Unwrap();
+            return Result<object>.Ok(builtDb);
         }
 
         private DbError MissingConfig(string member, string because) =>
             DbError.SystemFailure(new InvalidOperationException($"AddDatabase(\"{Name}\"): {member} was not configured - {because}."));
+
+        private DbError MissingPruneConfig() =>
+            DbError.SystemFailure(
+                new InvalidOperationException(
+                    $"AddDatabase(\"{Name}\"): RhinoRunMode.Prune needs either --{Name}.prune-target-generation (keep the last N generations) or --{Name}.prune-older-than=<ISO-8601> (keep everything newer than a moment in time)."
+                )
+            );
     }
 
     static private async Task<Result<TDb>> RunOne<TDb>(
@@ -159,28 +188,13 @@ public sealed class RhinoHostBuilder {
                 break;
             }
             case RhinoRunMode.Prune: {
-                var targetGeneration = options.PruneTargetGeneration!.Value;
+                var pruneError = options.PruneTargetGeneration is { } pruneGeneration
+                    ? cold.PruneArchiveOlderThanGeneration(pruneGeneration)
+                    : cold.PruneArchiveOlderThan(options.PruneOlderThanUtcTicks!.Value);
 
-                var retainedFromGenerationResult = cold.ReadRetainedFromGeneration();
-                if (retainedFromGenerationResult.IsError()) {
+                if (pruneError.IsError()) {
                     cold.Dispose();
-                    return retainedFromGenerationResult.Void();
-                }
-                if (targetGeneration < retainedFromGenerationResult.Unwrap()) {
-                    cold.Dispose();
-                    return Result<TDb>.Error(DbError.RetentionFloorCannotMoveBackward());
-                }
-
-                var deleteResult = WalArchive.DeleteSegmentsOlderThan(cold.DirectoryPath, targetGeneration);
-                if (deleteResult.IsError()) {
-                    cold.Dispose();
-                    return deleteResult;
-                }
-
-                var writeFloorResult = cold.WriteRetainedFromGeneration(targetGeneration);
-                if (writeFloorResult.IsError()) {
-                    cold.Dispose();
-                    return writeFloorResult;
+                    return pruneError.Void();
                 }
                 break;
             }
@@ -193,18 +207,23 @@ public sealed class RhinoHostBuilder {
                 break;
             }
         }
-
         return db;
+        }
     }
-}
 
-public sealed class RhinoHost {
+public sealed class RhinoHost : IDisposable {
     private readonly IReadOnlyDictionary<string, object> databases;
     private readonly IReadOnlyDictionary<Type, object> tableCompatAdapters;
+    private readonly IReadOnlyList<IDisposable> collectors;
+    private bool disposed;
 
-    internal RhinoHost(IReadOnlyDictionary<string, object> databases, IReadOnlyDictionary<Type, object> tableCompatAdapters) {
+    internal RhinoHost(
+        IReadOnlyDictionary<string, object> databases,
+        IReadOnlyDictionary<Type, object> tableCompatAdapters,
+        IReadOnlyList<IDisposable> collectors) {
         this.databases = databases;
         this.tableCompatAdapters = tableCompatAdapters;
+        this.collectors = collectors;
     }
 
     public TDb GetDatabase<TDb>(string name) where TDb : notnull =>
@@ -216,4 +235,15 @@ public sealed class RhinoHost {
         tableCompatAdapters.TryGetValue(typeof(TRow), out var options)
             ? (TableCompatOptions<TRow>)options
             : null;
+
+    public int ArchiveCollectorCount => collectors?.Count ?? 0;
+
+    public void Dispose() {
+        if (disposed) return;
+        disposed = true;
+        if (collectors is null) return;
+        foreach (var collector in collectors) {
+            try { collector.Dispose(); } catch { /* best-effort - shutdown must not throw */ }
+        }
+    }
 }

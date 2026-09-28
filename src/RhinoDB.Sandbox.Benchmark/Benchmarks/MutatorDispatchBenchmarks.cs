@@ -74,7 +74,7 @@ public class MutatorDispatchBenchmarks {
         return directStorage.ChangeCount;
     }
 
-    private static int ExecuteLoop<TMutator>(TMutator mutator, BenchStorage storage)
+    static private int ExecuteLoop<TMutator>(TMutator mutator, BenchStorage storage)
         where TMutator : IRowMutator<BenchRow> {
         storage.Reset();
         var newRow = new BenchRow(0, 1);
@@ -90,8 +90,8 @@ public class MutatorDispatchBenchmarks {
 
 public readonly record struct BenchRow(int Id, int Value);
 
-public static class DirectBench {
-    public static BenchRow WithSamePrimaryKey(BenchRow original, BenchRow newRow) => newRow with { Id = original.Id };
+static public class DirectBench {
+    static public BenchRow WithSamePrimaryKey(BenchRow original, BenchRow newRow) => newRow with { Id = original.Id };
 }
 
 // Both mutator kinds implement the same real IRowMutator<BenchRow> with

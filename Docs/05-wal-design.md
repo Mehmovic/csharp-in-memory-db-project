@@ -671,3 +671,264 @@ Schema migration and contract generations are designed in
 [06-schema-migration.md](06-schema-migration.md) - the drain barrier and the
 generation marker described there are prerequisites of this design's Phase 3
 checkpoint, and `RunCheckpoint` is the seam they build on.
+
+## Frame timestamps, time-based retention, and the archive-before-truncate rule (decided 2026-09-18, implemented 2026-09-18)
+
+### The timestamp is an approximation that only ever LOCATES an LSN
+
+Every WAL frame now carries `long utcTicks` (100ns units) after the LSN:
+
+    [u32 length][u32 crc32][u64 lsn][u64 utcTicks][u8 kind][payload]   = 25-byte header (was 17)
+
+The rule that governs its use: **a timestamp selects an LSN; it is never a cursor.**
+Replay is still controlled precisely by LSN (`--X.replay-upto-lsn`). Wall-clock time is
+not monotonic with respect to LSN - an NTP correction, a VM snapshot, or a user changing
+the clock all produce a later LSN carrying an earlier timestamp - so time is only ever a
+*coarse selector* over a range of LSNs, never an identifier.
+
+Three deliberate choices:
+
+- **Captured in `WriteAheadLog.AppendOnly`, in the same call that writes the LSN, on the
+  writer thread.** A timestamp can therefore never drift away from the entry it labels.
+  Wall-clock time enters the system in exactly one place.
+- **`WalRecordCodec.Encode` stays pure.** It writes the stamp it is handed, and defaults to
+  `Unstamped (0)` rather than "capture now". Defaulting to the clock made the encoder
+  non-deterministic and broke the property that two encodes of the same input produce
+  identical bytes - caught by the existing overload-equality tests, not by reasoning.
+- **Inside the CRC32 region.** A corrupted timestamp is *detected* rather than silently
+  answering a time-range query wrongly.
+
+Measured before landing (`WalTimestampBenchmarks`, 10k/1M-scale path context: an operation
+costs ~3.4 us end to end):
+
+| | payload 128 B | payload 1024 B |
+|---|---:|---:|
+| allocation, per frame | 176 B -> 184 B (+8) | 1072 B -> 1080 B (+8) |
+| frame size | 145 -> 153 B (+5.5%) | 1041 -> 1049 B (+0.8%) |
+| `DateTime.UtcNow.Ticks` | **20.28 ns** | 21.41 ns |
+| `Stopwatch.GetTimestamp()` | 13.23 ns | 13.24 ns |
+
+The two allocation/size rows are exact, not timing. The clock figure is tight and flat
+across payload sizes (the benchmark's built-in control). So the cost is **~20 ns per
+operation = ~0.6% of a 3.4 us operation**, plus 8 bytes per frame.
+
+Honest caveat on that run: the paired 17-vs-25-byte *timing* comparison was inconclusive.
+Error bars were 5-25% of the means, and two of four pairs came back physically impossible -
+`Scan` hashing 8 more bytes reported 25-35% *faster*, which cannot be. The conclusion above
+rests on the deterministic allocation/size numbers plus the tight clock measurement, not on
+those pairings. A re-run with the real codec now lives in the benchmark as a steady-state
+probe.
+
+`Stopwatch` is ~7 ns cheaper; if the clock ever matters, capture `UtcNow` once at startup
+and derive from `Stopwatch`. Not worth doing at 0.6%.
+
+### Time-based retention, and what it can and cannot target
+
+**The live WAL is never time-pruned, and does not need to be.** Every checkpoint archives
+the tail and then truncates the WAL to empty, so the WAL only ever holds "changes since
+the last checkpoint". There is nothing in it to retain or expire.
+
+**The archive is where retention lives**, and it was previously *generation*-only
+(`--X.prune-target-generation=N`). A generation has no fixed duration - it spans "since the
+last checkpoint", which depends on how busy the database was - so **"keep the last 7 days"
+was not expressible at all**. New: `--X.prune-older-than=<ISO-8601>`.
+
+**The timestamp accepts whatever an operator actually types, and resolves it to UTC:**
+
+| input | read as |
+|---|---|
+| `2026-09-14T08:00:00` | **local** time on the machine running the prune, converted to UTC |
+| `2026-09-14T08:00:00Z` | UTC, unambiguous |
+| `2026-09-14T08:00:00+02:00` | that fixed offset, unambiguous |
+
+A value with no offset is genuinely ambiguous, and "the wall clock on the box doing the
+pruning" is the only reading that matches intent. The first cut of this assumed **UTC**
+instead - which shifts a UTC+02:00 operator's 08:00 by two hours and deletes the wrong
+segments. A destructive operation silently doing the wrong thing is worse than refusing, so
+the unqualified case is local, `RhinoHostOptions.ResolveUtcTicks` is the single place that
+decides, and it is public so a CLI can show the resolved UTC before committing to a prune.
+
+Two consequences worth knowing: resolution is against the **machine running the prune**, so
+an operator on a laptop in one zone pruning a server in another should pass an explicit
+offset or `Z`; and during a DST transition an unqualified time can be ambiguous (the hour
+that repeats) or nonexistent (the hour skipped), which .NET resolves to the standard offset
+and forward respectively. Neither is dangerous for a cutoff measured in hours, but an
+explicit offset removes the question entirely.
+
+`WalArchive.DeleteSegmentsOlderThanTimestamp` applies two rules:
+
+- **A segment is the atomic unit.** It is deleted only if *every* entry in it predates the
+  cutoff. Partially deleting one would leave a hole in the LSN sequence, and a hole means
+  missing changes - replay would rebuild a *wrong* state, silently.
+- **A segment holding any unstamped entry is always kept.** `UtcTicks == 0` means the frame
+  was hand-built rather than decoded from a WAL, so its age cannot be proven. Deleting
+  history on a guess is the one failure mode this design exists to avoid.
+
+Timestamps survive archiving: `WriteSegment` and `ConsolidateSegments` re-encode from
+`DecodedWalEntry`, and both now pass `entry.UtcTicks` through. Re-stamping there would have
+overwritten every history timestamp with the checkpoint's time and made pruning meaningless.
+
+After either policy the floor is rewritten to mean the same thing - *the oldest generation
+still on disk* - read back via `ReadOldestRetainedGeneration`, so a time prune advances it
+to whatever survived and the refuse-to-move-backward rule still holds. Giving both flags at
+once is rejected at parse time: two retention policies is ambiguous, not a merge.
+
+### Archiving must succeed before the WAL may be destroyed
+
+`RunCheckpoint` used to archive, then truncate unconditionally, then report the archive
+error. That is a data-loss bug: the rows and watermark are already committed to libmdbx, and
+the watermark now sits *past* those LSNs, so recovery will not re-read them. The WAL is the
+only remaining copy of that generation's replay history, and truncating on an archive failure
+destroys it permanently - no retry could rebuild it. It now returns the archive error with
+the WAL intact; the next process start re-reads the tail (`PendingWalTail` is the raw tail,
+not watermark-filtered) and re-archives it.
+
+`WriteSegment` also deletes its own partial file if it fails mid-write. That becomes
+load-bearing *because* of the truncate fix: previously an orphan segment was harmless (the
+next checkpoint truncated anyway), but now a retry writes a *new* segment and the orphan
+would still be there - and `ReadHistory` fails the entire history with `WalCorrupted` on a
+non-Clean scan.
+
+### The online archive collector (designed 2026-09-18, built 2026-09-18)
+
+The collector **never touches the live WAL.** Every checkpoint archives the tail and truncates
+the WAL to empty, so it holds only "changes since the last checkpoint" - there is nothing in
+it to expire. What expires is the ARCHIVE.
+
+Two knobs, in `config.json`:
+
+```json
+{
+  "Generator": { "SourceParentDirectory": "RhinoContracts", "TargetParentDirectory": "RhinoDB" },
+  "Server": {
+    "Version": "0.0.0",
+    "ArchiveRetention": {
+      "Enabled": true,
+      "Interval": "04:00:00",     // HOW OFTEN the collector runs
+      "KeepFor":  "30.00:00:00"   // HOW MUCH SURVIVES - a segment goes only when EVERY entry is older than now - KeepFor
+    }
+  }
+}
+```
+
+`KeepFor` is a **duration**, not a cutoff timestamp, because that is how an operator thinks
+("keep a month"). Each pass turns it into an absolute UTC cutoff and applies the same
+whole-segment rule as `--prune-older-than`. Nothing else needs to know about it. Both knobs are
+validated: enabled-but-incomplete, a zero/negative duration, or an unparseable one all throw a
+`GeneratorConfigException` naming the offending field, rather than silently defaulting to zero.
+
+**The policy is FROZEN, like every other value in config.json.** config.json is a build-time
+`AdditionalFiles` input and is deliberately NOT copied to the output, so a policy read from a
+file at runtime would not exist there - and a retention window that can be edited underneath a
+running server is one nobody can reason about. The application reads it once, at startup, through
+the public `GeneratorConfigLoader`, and hands the result to `AddDatabase`:
+
+```csharp
+var retention = ArchiveRetentionPolicy.FromConfig(
+    GeneratorConfigLoader.Load(projectDirectory).Server.ArchiveRetention);
+
+await RhinoHostBuilder.Create(args)
+    .AddDatabase<GameDb, GameTx>("game", options => {
+        options.CreateDb  = cold => new GameDb(cold);
+        options.LoadAsync = ...;
+        options.ArchiveRetention = retention;   // decided once, at startup
+    })
+    .BuildAsync();
+```
+
+Changing the window means editing config.json and **restarting**. `DatabaseOptions.ArchiveRetention`
+wins over the file, for tests and for a server giving each game a different window; and
+`DbContext<TTx>.ConfiguredArchiveRetention` is a virtual defaulting to `null` (retention off), so a
+generated database can carry its own frozen policy later without the host knowing.
+
+**Why it runs on the writer thread** - and this is the whole design, not an implementation
+detail:
+
+1. `PruneArchiveOlderThan` writes the retention floor into mdbx; from a timer thread that races
+   the writer.
+2. `NextSegmentFileName` picks the next segment number by scanning for the maximum. A collector
+   deleting the highest-numbered segment while a checkpoint chooses a name causes **sequence
+   reuse** - and `ReadHistory` orders by *filename ordinal*, so a low-numbered segment holding a
+   higher LSN reads out of order, `MergeInOrder` dedups it away, and the result is **silent
+   history loss**.
+
+Scheduling the work as an ordinary `Run` fixes both for free: the delegate body and the
+checkpoint (which happens in `BeginScope`, at the operation boundary) run on the same single
+writer thread, so they are already serialized. The price is a bounded pause on the writer once
+per `Interval` - a deliberate trade of latency for correctness, on a path that is not the hot
+path.
+
+**Disabled costs nothing.** `BuildAsync` resolves the policy *before* building anything, so when
+retention is off the per-database closure, the collector, its `Timer`, and even the host's
+collector list are never allocated. That is a real guarantee rather than an intention: the first
+version passed `report => OnRetentionRun?.Invoke(...)` as an argument, which allocated the
+closure for every database whether or not retention was ever enabled. `RhinoHost.ArchiveCollectorCount`
+exposes the count so a test can pin it, and zero collectors means zero `Timer`s - the collector
+owns the timer, so nothing is left running.
+
+The timer callback is wrapped: an exception escaping a `Timer` callback terminates the process,
+and a failed collection must never take the server down, so the next tick simply tries again.
+`RhinoHost` is now `IDisposable` and owns the collectors - dispose it to stop collection.
+
+A collection pass stages no changes, so `EndScope` returns before the WAL append: **the
+collector never writes to the WAL either.**
+### Superseded: earlier "not built yet" note
+
+Pruning is currently an **offline host mode**, which is safe: the database is not serving
+while it runs. A background timer ("every four hours, retention window configurable") is
+designed but not implemented, and there is one thing it must get right beyond the obvious:
+
+**Schedule it on the writer thread, not a free-running timer.** Two reasons, and the second
+is the subtle one:
+
+1. `WriteRetainedFromGeneration` is an mdbx write; from a timer thread it races the writer.
+2. `NextSegmentFileName` picks the next sequence by scanning the directory for the maximum.
+   A GC deleting the highest-numbered segment while a checkpoint is choosing a name would
+   cause **sequence reuse** - and `ReadHistory` orders segments by *filename ordinal*, so a
+   low-numbered segment holding a higher LSN would read out of order, `MergeInOrder` would
+   dedup it away, and the result would be **silent history loss**.
+
+Scheduling the prune as an ordinary `Run` operation fixes both for free: the single-writer
+model already serializes it against `BeginScope`'s checkpoint, since the delegate body and
+the checkpoint run on the same thread.
+
+### `rhinodb dev prune` - the same rules, from a terminal
+
+Retention is reachable two ways, and they are deliberately the *same* code:
+
+    rhinodb dev prune --cold-path <dir> --older-than <timestamp>     keep everything newer
+    rhinodb dev prune --cold-path <dir> --keep-generations <n>       keep the last n generations
+    (add --yes to actually delete; repeatable --cold-path for several databases)
+
+`--older-than` goes through the same `RhinoHostOptions.ResolveUtcTicks` the host flag uses, so
+the CLI and `--X.mode=prune` can never disagree about what a bare `08:00` meant.
+
+**The command does not implement pruning.** It calls `ColdStore.PruneArchiveOlderThan` /
+`PruneArchiveOlderThanGeneration` - the same two methods the host's Prune mode calls, and that
+the online GC will call. That is the same reasoning that collapsed the three `TableIdHash`
+copies: a destructive rule written twice eventually disagrees with itself, and the two copies
+then delete different histories. This is why `RhinoDB.Tools.Dev` now references
+`RhinoDB.Lib` - to call the real thing rather than re-derive it.
+
+**Dry run by default**, following `dev reset`. The listing is the point, not a formality:
+
+    /var/lib/rhino/game
+      keep everything newer than 2026-09-14T10:00:00 (local)  =  2026-09-14T08:00:00Z  (UTC)
+        00000041.wal  gen  17    842 entries  2026-09-12T03:11Z .. 2026-09-13T22:04Z    DELETE
+        00000042.wal  gen  18    910 entries  2026-09-14T01:02Z .. 2026-09-14T07:58Z    keep
+        00000043.wal  gen  19      4 entries  (age unknown - unstamped entries)       keep
+
+An operator is shown the resolved cutoff in **both** zones, and every segment with its
+generation, entry count, covered time range, and verdict - including the reason an unstamped
+segment is kept. Segment inventory comes from `WalArchive.DescribeSegments`, which is
+read-only and orders segments exactly as `ReadHistory` does, so the listing cannot disagree
+with what replay would actually read.
+
+`DeleteSegmentsOlderThan` now returns `Result<int>` (a count) so both policies report how
+much they removed, and the host's Prune case was collapsed from ~40 lines of inline floor
+handling onto the two shared `ColdStore` methods.
+Configuration note: `config.json` is a **compile-time** `AdditionalFile` consumed by the
+generators (`ServerConfig` currently holds only `Version`), so a GC interval placed there
+would need a recompile to change. The runtime home is `DatabaseOptions`, the same
+`AddDatabase(name, options => ...)` surface already used for `CreateDb` / `LoadAsync` /
+`LoadFromGenesis` / `ConsolidateArchive`.

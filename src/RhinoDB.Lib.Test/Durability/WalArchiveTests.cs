@@ -33,6 +33,15 @@ public class WalArchiveTests {
     static private DecodedWalEntry Entry(long lsn, long key = 1) =>
         new(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(key), [9])]);
 
+    // Same as Entry, but stamped - what a real committed operation looks like.
+    static private DecodedWalEntry StampedEntry(long lsn, long utcTicks, long key = 1) =>
+        new(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(key), [9])], utcTicks);
+
+    // 2026-01-01T00:00:00Z, 2026-02-01T00:00:00Z, 2026-03-01T00:00:00Z as UTC ticks.
+    static private readonly long January = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    static private readonly long February = new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    static private readonly long March = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+
     [Test]
     public void WriteSegment_WithEmptyEntries_CreatesNoFile() {
         var error = WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [], 0);
@@ -283,5 +292,89 @@ public class WalArchiveTests {
 
         Assert.That(history.IsError(), Is.True);
         Assert.That(history.GetError().Kind, Is.EqualTo(ErrorKind.WalCorrupted));
+    }
+
+    // ---- timestamps: the approximation used to LOCATE an LSN, never to be one ----
+
+    [Test]
+    public void WriteSegment_ThenReadHistory_PreservesEveryOriginalCommitTimestamp() {
+        var dbId = Guid.NewGuid();
+        var error = WalArchive.WriteSegment(archiveDir, dbId, [StampedEntry(1, January), StampedEntry(2, February)], 0);
+
+        Assert.That(error, Is.Null);
+        var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
+        Assert.That(history.Select(e => e.Entry.UtcTicks), Is.EqualTo(new[] { January, February }),
+            "Re-encoding a segment must NOT restamp it with the checkpoint's time - that would " +
+            "destroy every history timestamp and make time-based pruning meaningless.");
+    }
+
+    [Test]
+    public void ReadHistory_KeepsTimestampsOnEntriesThatCameFromTheLiveTail() {
+        var liveTail = new[] { StampedEntry(7, March) };
+
+        var history = WalArchive.ReadHistory(dir, liveTail, 0).Unwrap();
+
+        Assert.That(history, Has.Count.EqualTo(1));
+        Assert.That(history[0].Entry.UtcTicks, Is.EqualTo(March));
+    }
+
+    // ---- time-based retention: whole segments only, LSN contiguity preserved ----
+
+    [Test]
+    public void DeleteSegmentsOlderThanTimestamp_DropsOnlySegmentsEntirelyOlderThanTheCutoff() {
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, January)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(2, February)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(3, March)], 0);
+
+        var deleted = WalArchive.DeleteSegmentsOlderThanTimestamp(dir, February).Unwrap();
+
+        Assert.That(deleted, Is.EqualTo(1), "only the January segment predates the February cutoff");
+        var remaining = WalArchive.ReadHistory(dir, [], 0).Unwrap().Select(e => e.Entry.Lsn).ToArray();
+        Assert.That(remaining, Is.EqualTo(new long[] { 2, 3 }));
+    }
+
+    [Test]
+    public void DeleteSegmentsOlderThanTimestamp_KeepsASegmentThatStraddlesTheCutoff() {
+        // A segment is the atomic unit: dropping half of it would leave a hole in the LSN
+        // sequence, and a hole means missing changes - replay would rebuild a wrong state.
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, January), StampedEntry(2, March)], 0);
+
+        var deleted = WalArchive.DeleteSegmentsOlderThanTimestamp(dir, February).Unwrap();
+
+        Assert.That(deleted, Is.EqualTo(0));
+        Assert.That(WalArchive.ReadHistory(dir, [], 0).Unwrap(), Has.Count.EqualTo(2));
+    }
+
+    [Test]
+    public void DeleteSegmentsOlderThanTimestamp_AlwaysKeepsASegmentHoldingAnyUnstampedEntry() {
+        // UtcTicks == 0 means the frame was hand-built, not decoded from a WAL. We cannot
+        // prove its age, and deleting history on a guess is what this design exists to avoid.
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, January), Entry(2)], 0);
+
+        var deleted = WalArchive.DeleteSegmentsOlderThanTimestamp(dir, March).Unwrap();
+
+        Assert.That(deleted, Is.EqualTo(0));
+        Assert.That(WalArchive.ReadHistory(dir, [], 0).Unwrap(), Has.Count.EqualTo(2));
+    }
+
+    [Test]
+    public void DeleteSegmentsOlderThanTimestamp_LeavesAnEmptyArchiveAlone() {
+        var result = WalArchive.DeleteSegmentsOlderThanTimestamp(dir, March);
+
+        Assert.That(result.IsError(), Is.False);
+        Assert.That(result.Unwrap(), Is.EqualTo(0));
+    }
+
+    [Test]
+    public void DeleteSegmentsOlderThanTimestamp_AfterDeleting_LeavesReadableContiguousHistory() {
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, January)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(2, February)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(3, March)], 0);
+
+        WalArchive.DeleteSegmentsOlderThanTimestamp(dir, February).Unwrap();
+
+        var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 2, 3 }));
+        Assert.That(history.Select(e => e.Entry.UtcTicks), Is.EqualTo(new[] { February, March }));
     }
 }

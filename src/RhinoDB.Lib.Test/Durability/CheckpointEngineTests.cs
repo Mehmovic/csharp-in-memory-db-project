@@ -102,7 +102,7 @@ public class CheckpointEngineTests {
         var engine = new CheckpointEngine(env, wal, archiveDir);
         var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };
 
-        await engine.RunCheckpoint(1, tableDbis, [new CheckpointRow(TableId, [1], [42])], [], []);
+        await engine.RunCheckpoint(1, tableDbis, [new CheckpointRow(TableId, [1], [42])], [], new[] { new DecodedWalEntry(1, WalEntryKind.Operation, [new WalChange(TableId, ChangeKind.Insert, [1], [42])]) });
         wal.Dispose();
 
         Assert.That(new FileInfo(path).Length, Is.EqualTo(WalFileHeaderCodec.Size));
@@ -315,5 +315,43 @@ public class CheckpointEngineTests {
 
         Assert.That(engine.ReadGeneration().Unwrap(), Is.EqualTo(9));
         Assert.That(engine.ReadRetainedFromGeneration().Unwrap(), Is.EqualTo(3));
+    }
+
+    // ---- archiving must succeed before the WAL is allowed to be destroyed ----
+
+    [Test]
+    public async Task RunCheckpoint_WhenArchivingFails_ReturnsTheErrorAndLeavesTheWalIntact() {
+        var path = Path.Combine(dir, "wal.dat");
+        var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0, sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
+        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new(TableId, ChangeKind.Insert, [1], [42]) });
+
+        // Make the archive directory un-creatable: a plain FILE sits where it needs to go, so
+        // WriteSegment's Directory.CreateDirectory throws and the archive write fails.
+        File.WriteAllText(archiveDir, "not a directory");
+        var engine = new CheckpointEngine(env, wal, archiveDir);
+        var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };
+
+        var result = await engine.RunCheckpoint(1, tableDbis, [new CheckpointRow(TableId, [1], [42])], [], new[] { new DecodedWalEntry(1, WalEntryKind.Operation, [new WalChange(TableId, ChangeKind.Insert, [1], [42])]) });
+        var lengthBeforeDispose = new FileInfo(path).Length;
+        wal.Dispose();
+
+        Assert.That(result.IsError(), Is.True, "a failed archive must not be swallowed");
+        Assert.That(lengthBeforeDispose, Is.GreaterThan(WalFileHeaderCodec.Size),
+            "The WAL holds the only remaining copy of this generation's replay history, and the " +
+            "watermark now sits past those LSNs - truncating here would destroy it permanently.");
+    }
+
+    [Test]
+    public async Task RunCheckpoint_WhenArchivingFails_StillCommitsTheRowsSoNoDataIsLost() {
+        var wal = CreateWal();
+        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new(TableId, ChangeKind.Insert, [1], [42]) });
+        File.WriteAllText(archiveDir, "not a directory");
+        var engine = new CheckpointEngine(env, wal, archiveDir);
+        var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };
+
+        await engine.RunCheckpoint(1, tableDbis, [new CheckpointRow(TableId, [1], [42])], [], new[] { new DecodedWalEntry(1, WalEntryKind.Operation, [new WalChange(TableId, ChangeKind.Insert, [1], [42])]) });
+
+        Assert.That(ReadRaw(widgetsDbi, [1]), Is.EqualTo(new byte[] { 42 }),
+            "Refusing to truncate is about HISTORY, not data - the rows committed to mdbx above stand.");
     }
 }

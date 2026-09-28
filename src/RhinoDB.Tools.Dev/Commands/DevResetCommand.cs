@@ -10,9 +10,10 @@ static public class DevResetCommand {
             return 1;
         }
 
-        var coldPaths = new List<string>();
-        for (var i = 0; i < args.Length - 1; i++) {
-            if (args[i] == "--cold-path") coldPaths.Add(Path.GetFullPath(args[i + 1]));
+        var coldPaths = ColdPathArg.Resolve(args, out var coldPathError);
+        if (coldPathError is not null) {
+            Console.Error.WriteLine(coldPathError);
+            return 1;
         }
         var confirmed = args.Contains("--yes");
 

@@ -106,11 +106,12 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
         if (syncRc != 0 && syncRc != MdbxResultTrue) return Result.Error(MdbxErrorMapper.Map(syncRc));
 
         var archiveError = WalArchive.WriteSegment(archiveDirectory, wal.DatabaseId, entries, (uint)currentGeneration);
+        if (archiveError is { } archiveErr) return Result.Error(archiveErr);
 
         var truncateError = await wal.Truncate();
         if (truncateError is { } err) return Result.Error(err);
 
-        return archiveError is { } archiveErr ? Result.Error(archiveErr) : Result.Ok();
+        return Result.Ok();
 
         static Result UnknownTableIdResult(uint tableId)
             => Result.Error(DbError.SystemFailure(new Exception($"Unknown tableId {tableId} in the RunCheckpoint()")));

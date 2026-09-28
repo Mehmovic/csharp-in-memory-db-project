@@ -6,6 +6,7 @@ public sealed class WriteAheadLog : IDisposable {
     static private readonly TimeSpan DefaultPeriodicFlushInterval = TimeSpan.FromMilliseconds(100);
     private const long DefaultSizeThresholdBytes = 4 * 1024 * 1024;
     private const int BufferSize = 4096;
+    private const long CaptureTimestampNow = -1;
 
     private readonly FileStream fileStream;
     private readonly Timer periodicFlushTimer;
@@ -87,34 +88,36 @@ public sealed class WriteAheadLog : IDisposable {
             (new WriteAheadLog(fileStream, header.DatabaseId, header.Generation, sizeThresholdBytes, periodicFlushInterval), scan.Entries.ToArray()));
     }
 
-    internal Task<DbError?> AppendConfirmed(long lsn, WalEntryKind kind, WalChange[] changes) {
-        AppendOnly(lsn, kind, changes);
+    internal Task<DbError?> AppendConfirmed(long lsn, WalEntryKind kind, WalChange[] changes, long utcTicks = CaptureTimestampNow) {
+        AppendOnly(lsn, kind, changes, utcTicks);
         return JoinGroupCommit();
     }
 
-    internal Task<DbError?> AppendConfirmed(long lsn, WalEntryKind kind, List<WalChange> changes) {
-        AppendOnly(lsn, kind, changes);
+    internal Task<DbError?> AppendConfirmed(long lsn, WalEntryKind kind, List<WalChange> changes, long utcTicks = CaptureTimestampNow) {
+        AppendOnly(lsn, kind, changes, utcTicks);
         return JoinGroupCommit();
     }
 
-    internal void AppendOptimistic(long lsn, WalEntryKind kind, WalChange[] changes) {
-        var frameLength = AppendOnly(lsn, kind, changes);
+    internal void AppendOptimistic(long lsn, WalEntryKind kind, WalChange[] changes, long utcTicks = CaptureTimestampNow) {
+        var frameLength = AppendOnly(lsn, kind, changes, utcTicks);
         if (Interlocked.Add(ref bytesSinceLastFlush, frameLength) >= sizeThresholdBytes) _ = JoinGroupCommit();
     }
 
-    internal void AppendOptimistic(long lsn, WalEntryKind kind, List<WalChange> changes) {
-        var frameLength = AppendOnly(lsn, kind, changes);
+    internal void AppendOptimistic(long lsn, WalEntryKind kind, List<WalChange> changes, long utcTicks = CaptureTimestampNow) {
+        var frameLength = AppendOnly(lsn, kind, changes, utcTicks);
         if (Interlocked.Add(ref bytesSinceLastFlush, frameLength) >= sizeThresholdBytes) _ = JoinGroupCommit();
     }
 
-    private int AppendOnly(long lsn, WalEntryKind kind, WalChange[] changes) {
-        var frame = WalRecordCodec.Encode(lsn, kind, changes);
+    private int AppendOnly(long lsn, WalEntryKind kind, WalChange[] changes, long utcTicks) {
+        var stamp = utcTicks < 0 ? DateTime.UtcNow.Ticks : utcTicks;
+        var frame = WalRecordCodec.Encode(lsn, kind, changes, stamp);
         lock (appendLock) fileStream.Write(frame, 0, frame.Length);
         return frame.Length;
     }
 
-    private int AppendOnly(long lsn, WalEntryKind kind, List<WalChange> changes) {
-        var frame = WalRecordCodec.Encode(lsn, kind, changes);
+    private int AppendOnly(long lsn, WalEntryKind kind, List<WalChange> changes, long utcTicks) {
+        var stamp = utcTicks < 0 ? DateTime.UtcNow.Ticks : utcTicks;
+        var frame = WalRecordCodec.Encode(lsn, kind, changes, stamp);
         lock (appendLock) fileStream.Write(frame, 0, frame.Length);
         return frame.Length;
     }

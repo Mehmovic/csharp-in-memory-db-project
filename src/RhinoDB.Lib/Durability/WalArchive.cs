@@ -25,12 +25,13 @@ static public class WalArchive {
             fileStream.Write(header, 0, header.Length);
 
             foreach (var entry in entries) {
-                var frame = WalRecordCodec.Encode(entry.Lsn, entry.Kind, entry.Changes);
+                var frame = WalRecordCodec.Encode(entry.Lsn, entry.Kind, entry.Changes, entry.UtcTicks);
                 fileStream.Write(frame, 0, frame.Length);
             }
 
             fileStream.Flush(flushToDisk: true);
         } catch (Exception ex) {
+            TryDeletePartialSegment(segmentPath);
             return DbError.SystemFailure(ex);
         }
 
@@ -89,32 +90,36 @@ static public class WalArchive {
         return Result<Option<int>>.Ok(oldest is { } value ? Option<int>.Some(value) : Option<int>.None());
     }
 
-    static public Result DeleteSegmentsOlderThan(string coldStorePath, int targetGeneration) {
+    static public Result<int> DeleteSegmentsOlderThan(string coldStorePath, int targetGeneration) {
         var archiveDirectory = Path.Combine(coldStorePath, ArchiveDirectoryName);
-        if (!Directory.Exists(archiveDirectory)) return Result.Ok();
+        if (!Directory.Exists(archiveDirectory)) return Result.Ok(0);
 
+        var deleted = 0;
         foreach (var segmentPath in Directory.EnumerateFiles(archiveDirectory, $"*{SegmentExtension}")) {
             byte[] headerBytes;
             try {
                 using var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.Read, FileShare.Read);
                 headerBytes = new byte[WalFileHeaderCodec.Size];
                 var read = stream.Read(headerBytes, 0, headerBytes.Length);
-                if (read < headerBytes.Length) return Result.Error(DbError.WalCorrupted());
+                if (read < headerBytes.Length) return Result<int>.Error(DbError.WalCorrupted());
             } catch (Exception ex) {
-                return Result.Error(DbError.SystemFailure(ex));
+                return Result<int>.Error(DbError.SystemFailure(ex));
             }
 
-            if (!WalFileHeaderCodec.TryDecode(headerBytes, out var header)) return Result.Error(DbError.WalCorrupted());
+            if (!WalFileHeaderCodec.TryDecode(headerBytes, out var header)) return Result<int>.Error(DbError.WalCorrupted());
             if ((int)header.Generation >= targetGeneration) continue;
 
             try {
                 File.Delete(segmentPath);
+                deleted++;
             } catch (Exception ex) {
-                return Result.Error(DbError.SystemFailure(ex));
+                return Result<int>.Error(DbError.SystemFailure(ex));
             }
         }
 
-        return Result.Ok();
+        return DirectorySync.TrySync(archiveDirectory, out _)
+            ? Result.Ok(deleted)
+            : Result<int>.Error(DbError.WalDirectorySyncFailed());
     }
 
     static public Result ConsolidateSegments(
@@ -153,7 +158,7 @@ static public class WalArchive {
                     newChanges.Add(new WalChange(change.TableId, change.Kind, result.Key, result.Row));
                 }
 
-                if (newChanges.Count > 0) consolidatedEntries.Add(new DecodedWalEntry(entry.Lsn, entry.Kind, newChanges.ToArray()));
+                if (newChanges.Count > 0) consolidatedEntries.Add(new DecodedWalEntry(entry.Lsn, entry.Kind, newChanges.ToArray(), entry.UtcTicks));
             }
 
             try {
@@ -168,7 +173,7 @@ static public class WalArchive {
                     fileStream.Write(newHeader, 0, newHeader.Length);
 
                     foreach (var entry in consolidatedEntries) {
-                        var frame = WalRecordCodec.Encode(entry.Lsn, entry.Kind, entry.Changes);
+                        var frame = WalRecordCodec.Encode(entry.Lsn, entry.Kind, entry.Changes, entry.UtcTicks);
                         fileStream.Write(frame, 0, frame.Length);
                     }
 
@@ -185,6 +190,79 @@ static public class WalArchive {
         return DirectorySync.TrySync(archiveDirectory, out _) ? Result.Ok() : Result.Error(DbError.WalDirectorySyncFailed());
     }
 
+    static public Result<List<WalSegmentDescription>> DescribeSegments(string coldStorePath) {
+        var archiveDirectory = Path.Combine(coldStorePath, ArchiveDirectoryName);
+        var descriptions = new List<WalSegmentDescription>();
+        if (!Directory.Exists(archiveDirectory)) return Result.Ok(descriptions);
+
+        foreach (var segmentPath in Directory.EnumerateFiles(archiveDirectory, $"*{SegmentExtension}")
+                     .OrderBy(p => p, StringComparer.Ordinal)) {
+            var readResult = ReadSegment(segmentPath);
+            if (readResult.IsError()) return readResult.Void();
+
+            var (generation, entries) = readResult.Unwrap();
+            var anyUnstamped = false;
+            var oldest = long.MaxValue;
+            var newest = long.MinValue;
+
+            foreach (var entry in entries) {
+                if (entry.UtcTicks == 0) { anyUnstamped = true; continue; }
+                if (entry.UtcTicks < oldest) oldest = entry.UtcTicks;
+                if (entry.UtcTicks > newest) newest = entry.UtcTicks;
+            }
+
+            var noneStamped = oldest == long.MaxValue;
+            descriptions.Add(new WalSegmentDescription(
+                segmentPath,
+                generation,
+                entries.Length,
+                noneStamped ? 0 : oldest,
+                noneStamped ? 0 : newest,
+                anyUnstamped));
+        }
+
+        return Result.Ok(descriptions);
+    }
+
+    static private void TryDeletePartialSegment(string segmentPath) {
+        try { File.Delete(segmentPath); } catch { }
+    }
+
+    static public Result<int> DeleteSegmentsOlderThanTimestamp(string coldStorePath, long cutoffUtcTicks) {
+        var archiveDirectory = Path.Combine(coldStorePath, ArchiveDirectoryName);
+        if (!Directory.Exists(archiveDirectory)) return Result.Ok(0);
+
+        var deleted = 0;
+        foreach (var segmentPath in Directory.EnumerateFiles(archiveDirectory, $"*{SegmentExtension}")) {
+            var readResult = ReadSegment(segmentPath);
+            if (readResult.IsError()) return readResult.Void();
+
+            var (_, entries) = readResult.Unwrap();
+            if (!IsWhollyOlderThan(entries, cutoffUtcTicks)) continue;
+
+            try {
+                File.Delete(segmentPath);
+                deleted++;
+            } catch (Exception ex) {
+                return Result<int>.Error(DbError.SystemFailure(ex));
+            }
+        }
+
+        return DirectorySync.TrySync(archiveDirectory, out _)
+            ? Result.Ok(deleted)
+            : Result<int>.Error(DbError.WalDirectorySyncFailed());
+    }
+
+    static private bool IsWhollyOlderThan(DecodedWalEntry[] entries, long cutoffUtcTicks) {
+        if (entries.Length == 0) return true;
+
+        foreach (var entry in entries) {
+            if (entry.UtcTicks == 0) return false;
+            if (entry.UtcTicks >= cutoffUtcTicks) return false;
+        }
+        return true;
+    }
+    
     static private Result<(uint Generation, DecodedWalEntry[] Entries)> ReadSegment(string path) {
         byte[] bytes;
         try {

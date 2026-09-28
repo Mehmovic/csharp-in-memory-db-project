@@ -84,19 +84,20 @@ public class WalPrototypeBenchmarks {
         }
     }
 
-    // [u32 length][u32 checksum][u64 lsn][byte kind][payload] - Docs/05-wal-design.md Phase 1's
+    // [u32 length][u32 checksum][u64 lsn][u64 utcTicks][byte kind][payload] - Docs/05-wal-design.md Phase 1's
     // entry layout, close enough for a throwaway prototype to include the real per-entry cost
     // (checksum computation, header packing) alongside the I/O it exists to measure.
     static private byte[] BuildEntry(long lsn, long key) {
         var payload = new byte[PayloadSize];
         BitConverter.TryWriteBytes(payload, key);
 
-        var entry = new byte[4 + 4 + 8 + 1 + payload.Length];
+        var entry = new byte[4 + 4 + 8 + 8 + 1 + payload.Length];
         var span = entry.AsSpan();
         BitConverter.TryWriteBytes(span[..4], payload.Length);
         BitConverter.TryWriteBytes(span[8..16], lsn);
-        span[16] = 1;
-        payload.CopyTo(span[17..]);
+        BitConverter.TryWriteBytes(span[16..24], DateTime.UtcNow.Ticks);
+        span[24] = 1;
+        payload.CopyTo(span[25..]);
         BitConverter.TryWriteBytes(span[4..8], Fnv1A(span[8..]));
         return entry;
     }

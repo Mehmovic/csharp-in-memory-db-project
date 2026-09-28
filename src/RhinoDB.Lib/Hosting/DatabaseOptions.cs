@@ -1,4 +1,5 @@
 using RhinoDB.Lib.Cold;
+using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Execution;
 
 namespace RhinoDB.Lib.Hosting;
@@ -15,4 +16,5 @@ public sealed class DatabaseOptions<TDb, TTx>
     public int? GBinary { get; set; }
     public Func<int, bool>? IsGenerationInvalid { get; set; }
     public Func<TDb, Result>? ConsolidateArchive { get; set; }
+    public ArchiveRetentionPolicy? ArchiveRetention { get; set; }
 }

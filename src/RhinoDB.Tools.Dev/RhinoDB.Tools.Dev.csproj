@@ -10,6 +10,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\RhinoDB.SchemaContracts\RhinoDB.SchemaContracts.csproj" />
+        <ProjectReference Include="..\RhinoDB.Lib\RhinoDB.Lib.csproj" />
     </ItemGroup>
 
 </Project>

@@ -9,6 +9,7 @@ static public class DevTool {
 
         return args[0] switch {
             "reset" => DevResetCommand.Run(args[1..]),
+            "prune" => DevPruneCommand.Run(args[1..]),
             _ => Unknown(args[0]),
         };
     }
@@ -23,6 +24,7 @@ static public class DevTool {
         Console.WriteLine("""
             Usage:
               rhinodb dev reset [--project <path>] [--cold-path <path>]... [--yes]
+              rhinodb dev prune --cold-path <path> [--older-than <timestamp> | --keep-generations <n>] [--yes]
             """);
     }
 }

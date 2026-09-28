@@ -1,4 +1,5 @@
 using RhinoDB.Lib.Cold;
+using RhinoDB.Lib.Durability;
 
 namespace RhinoDB.Lib.Execution;
 
@@ -19,6 +20,8 @@ public class DbContext<TTx> where TTx : ITransaction {
     protected internal void ResumeExecution() => executionLoop.Resume();
 
     protected internal virtual TTx CreateTransaction() => default!;
+
+    protected internal virtual ArchiveRetentionPolicy? ConfiguredArchiveRetention => null;
 
     public ValueTask<Result> Run(Func<DbContext<TTx>, TTx, Result> func, PropagationMode mode = PropagationMode.Optimistic)
         => executionLoop.Enqueue(func, mode);
