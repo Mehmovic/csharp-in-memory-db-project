@@ -17,6 +17,9 @@ namespace RhinoDB.Lib.Durability.Test;
 public class ArchiveRetentionTests {
     static private readonly long January = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
     static private readonly long March = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    // AFTER the 2026-03-02 cutoff the hole tests prune against, so a segment stamped with it is a
+    // genuine "too new to delete". (Using March itself there would make every segment deletable.)
+    static private readonly long Recent = new DateTimeOffset(2026, 3, 10, 0, 0, 0, TimeSpan.Zero).UtcTicks;
 
     // ---- policy: the two knobs ----
 
@@ -88,8 +91,10 @@ public class ArchiveRetentionTests {
 
     private void WriteSegments(string coldPath, params (long ticks, uint generation)[] segments) {
         var archiveDir = Path.Combine(coldPath, WalArchive.ArchiveDirectoryName);
-        foreach (var segment in segments)
-            Assert.That(WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, segment.ticks)], segment.generation), Is.Null);
+        // Each segment gets its OWN lsn: reusing one makes MergeInOrder dedupe the history down to
+        // a single entry, which would hide whatever the test is actually about.
+        for (var i = 0; i < segments.Length; i++)
+            Assert.That(WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(i + 1, segments[i].ticks)], segments[i].generation), Is.Null);
     }
 
     private string[] SegmentFiles(string coldPath) {
@@ -180,7 +185,121 @@ public class ArchiveRetentionTests {
         }
     }
 
-    // ---- Enabled: false must not construct the collector, and therefore not the Timer ----
+    // ---- KNOWN FLAW (2026-09-22), now fixed: the prune was per-segment, so it could leave a hole ----
+    //
+    // DeleteSegmentsOlderThanTimestamp used to evaluate each segment INDEPENDENTLY and keep going
+    // past any segment that failed the age test. With segments S1..S4 that deletes S2 and keeps
+    // S1, S3, S4 - a hole exactly where S2's LSN range was. Wall-clock going backwards is enough
+    // to produce that arrangement, and the design's own docs name NTP corrections, VM snapshots
+    // and operators changing the clock as the reasons a later segment can carry an earlier stamp.
+    //
+    // It went undetected because:
+    //   1. MergeInOrder's `+1` contiguity check was deliberately removed in Stage 5.5 (Instant-only
+    //      transactions create legitimate LSN gaps), so a prune-induced hole is indistinguishable
+    //      from a benign Instant gap;
+    //   2. LoadFromGenesis's ArchiveOlderThanRetentionFloor guard is tautological after this
+    //      operation, because PruneArchiveOlderThan recomputes the floor from whatever survived;
+    //   3. replay then returns Result.Ok() over a partial history - a WRONG state that looks fine.
+    //
+    // The invariant these tests pin: whatever survives a time-based prune is a contiguous PREFIX
+    // of the LSN sequence. A backwards clock step may only ever cause the prune to keep MORE.
+
+    private void WriteSegmentsWithLsns(string coldPath, params (long lsn, long ticks)[] entries) {
+        var archiveDir = Path.Combine(coldPath, WalArchive.ArchiveDirectoryName);
+        foreach (var (lsn, ticks) in entries)
+            Assert.That(WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(lsn, ticks)], 1), Is.Null);
+    }
+
+    [Test]
+    public void ACollectionPass_LeavesTheSurvivingHistoryAContiguousPrefixOfTheLsnSequence() {
+        var coldPath = CreateStore();
+        try {
+            var cold = RhinoDB.Lib.Cold.ColdStore.Open(coldPath).Unwrap();
+            // S1 and S2 predate the cutoff; S3 and S4 do not. That is an ordinary, healthy prune:
+            // the old PREFIX goes, so the survivors are the newest entries - and they must be
+            // contiguous. (The direction matters: a time prune removes the oldest history.)
+            WriteSegmentsWithLsns(coldPath, (1, January), (2, January), (3, Recent), (4, Recent));
+
+            cold.PruneArchiveOlderThan(new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).UtcTicks);
+
+            var history = WalArchive.ReadHistory(coldPath, [], 0).Unwrap();
+            var lsns = history.Select(h => h.Entry.Lsn).ToArray();
+            Assert.That(lsns, Is.EqualTo(new[] { 3L, 4L }),
+                "the survivors must be an unbroken run of the newest entries - never 1, 2, 4 with 3 missing");
+            cold.Dispose();
+        } finally {
+            try { Directory.Delete(coldPath, recursive: true); } catch { }
+        }
+    }
+
+    [Test]
+    public void ACollectionPass_WithABackwardsClockStep_KeepsTheWholePrefixRatherThanLeavingAHole() {
+        var coldPath = CreateStore();
+        try {
+            var cold = RhinoDB.Lib.Cold.ColdStore.Open(coldPath).Unwrap();
+            // The flaw's exact shape: S2's clock stamp precedes the cutoff while its neighbours do
+            // not - what an NTP step backwards looks like on disk. Deleting S2 alone would leave a
+            // hole, so the prefix-monotonic prune must instead stop at S1 and delete NOTHING.
+            WriteSegmentsWithLsns(coldPath, (1, Recent), (2, January), (3, Recent));
+
+            var deleted = cold.PruneArchiveOlderThan(new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).UtcTicks);
+
+            Assert.That(deleted.Unwrap(), Is.EqualTo(0),
+                "a backwards clock step must make the prune keep MORE, never carve a hole at S2");
+            var history = WalArchive.ReadHistory(coldPath, [], 0).Unwrap();
+            Assert.That(history.Select(h => h.Entry.Lsn), Is.EqualTo(new[] { 1L, 2L, 3L }),
+                "all three segments must survive intact");
+            cold.Dispose();
+        } finally {
+            try { Directory.Delete(coldPath, recursive: true); } catch { }
+        }
+    }
+
+    [Test]
+    public void ACollectionPass_WhoseClockRanBackBeforeAnOldSegment_StillNeverEmitsANonContiguousHistory() {
+        var coldPath = CreateStore();
+        try {
+            var cold = RhinoDB.Lib.Cold.ColdStore.Open(coldPath).Unwrap();
+            // Several interior segments carry stamps older than the cutoff while their neighbours do
+            // not - a clock that ran back and forth. Whatever the prune decides, the history it leaves
+            // must be replayable without silently losing changes; that is the whole point.
+            WriteSegmentsWithLsns(coldPath, (1, Recent), (2, January), (3, Recent), (4, January), (5, Recent));
+
+            cold.PruneArchiveOlderThan(new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).UtcTicks);
+
+            var lsns = WalArchive.ReadHistory(coldPath, [], 0).Unwrap().Select(h => h.Entry.Lsn).ToArray();
+            for (var i = 1; i < lsns.Length; i++)
+                Assert.That(lsns[i], Is.EqualTo(lsns[i - 1] + 1),
+                    $"surviving LSNs {string.Join(",", lsns)} must be contiguous - a hole at index {i} " +
+                    "means replay would rebuild a WRONG state, silently");
+            cold.Dispose();
+        } finally {
+            try { Directory.Delete(coldPath, recursive: true); } catch { }
+        }
+    }
+
+    [Test]
+    public void ACollectionPass_KeepsAnUnstampedSegmentThatSitsBeforeTheDeletablePrefix() {
+        var coldPath = CreateStore();
+        try {
+            var cold = RhinoDB.Lib.Cold.ColdStore.Open(coldPath).Unwrap();
+            var archiveDir = Path.Combine(coldPath, WalArchive.ArchiveDirectoryName);
+            // Unstamped first: its age cannot be proven, so it is never a deletion candidate. Under
+            // the prefix-monotonic rule it also stops the prune dead - the conservative outcome.
+            WalArchive.WriteSegment(archiveDir, Guid.NewGuid(),
+                [new DecodedWalEntry(1, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, [1], [9])])], 1);
+            WriteSegmentsWithLsns(coldPath, (2, January), (3, January));
+
+            var deleted = cold.PruneArchiveOlderThan(new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks);
+
+            Assert.That(deleted.Unwrap(), Is.EqualTo(0));
+            Assert.That(SegmentFiles(coldPath), Has.Length.EqualTo(3));
+            cold.Dispose();
+        } finally {
+            try { Directory.Delete(coldPath, recursive: true); } catch { }
+        }
+    }
+
 
     [Test]
     public void FromConfig_AConfigJsonSayingEnabledFalse_YieldsNoPolicy() {
@@ -272,4 +391,74 @@ public class ArchiveRetentionTests {
     }
 
     private sealed class NoRetentionDb(RhinoDB.Lib.Cold.ColdStore cold) : RhinoDB.Lib.Execution.DbContext(cold);
+
+    // ---- the generation-based prune obeys the same prefix rule as the time-based one ----
+
+    [Test]
+    public void AGenerationPrune_WithANonMonotonicArchive_StopsAtThePrefixAndLeavesNoHole() {
+        // Generations are monotonic in practice, but nothing enforces it. If a future change ever
+        // tagged a later segment lower, `break` must keep MORE segments rather than carve a hole -
+        // the same safe direction the timestamp prune takes.
+        var coldPath = CreateStore();
+        try {
+            var cold = RhinoDB.Lib.Cold.ColdStore.Open(coldPath).Unwrap();
+            WriteSegments(coldPath, (March, 3), (March, 7), (March, 5));   // deliberately out of order
+
+            var deleted = cold.PruneArchiveOlderThanGeneration(6);
+
+            Assert.That(deleted.Unwrap(), Is.EqualTo(1), "only the gen-3 prefix is below the floor.");
+            Assert.That(SegmentFiles(coldPath), Has.Length.EqualTo(2), "gen 7 and gen 5 both survive.");
+            Assert.That(WalArchive.ReadHistory(coldPath, [], 0).Unwrap(), Has.Count.EqualTo(2),
+                "survivors are a contiguous suffix, so replay is not missing a range.");
+            cold.Dispose();
+        } finally {
+            try { Directory.Delete(coldPath, recursive: true); } catch { }
+        }
+    }
+
+    [Test]
+    public void AGenerationPrune_WithMonotonicGenerations_StillDeletesEverythingBelowTheFloor() {
+        // The prefix rule must not change the ordinary outcome: "keep the last N generations".
+        var coldPath = CreateStore();
+        try {
+            var cold = RhinoDB.Lib.Cold.ColdStore.Open(coldPath).Unwrap();
+            WriteSegments(coldPath, (March, 1), (March, 2), (March, 3), (March, 4));
+
+            var deleted = cold.PruneArchiveOlderThanGeneration(3);
+
+            Assert.That(deleted.Unwrap(), Is.EqualTo(2), "generations 1 and 2 are both below the floor.");
+            Assert.That(SegmentFiles(coldPath), Has.Length.EqualTo(2));
+            Assert.That(cold.ReadRetainedFromGeneration().Unwrap(), Is.EqualTo(3));
+            cold.Dispose();
+        } finally {
+            try { Directory.Delete(coldPath, recursive: true); } catch { }
+        }
+    }
+
+    [Test]
+    public void BothPrunePaths_DeleteAPrefixAndNeverTheWholeTail() {
+        // The two paths are meant to be structurally identical, so give both the same
+        // backwards-clock archive and assert they agree on what survives.
+        var byTime = CreateStore();
+        var byGeneration = CreateStore();
+        try {
+            var timeStore = RhinoDB.Lib.Cold.ColdStore.Open(byTime).Unwrap();
+            var genStore = RhinoDB.Lib.Cold.ColdStore.Open(byGeneration).Unwrap();
+            // Segment 2 is old; segments 1 and 3 are recent. Neither prune may keep 1 and 3 while
+            // dropping 2 - that is the hole, and both paths must keep the whole prefix instead.
+            WriteSegments(byTime, (March, 1), (January, 1), (March, 1));
+            WriteSegments(byGeneration, (March, 1), (March, 1), (March, 1));
+
+            timeStore.PruneArchiveOlderThan(new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks);
+            genStore.PruneArchiveOlderThanGeneration(9);
+
+            Assert.That(SegmentFiles(byTime), Has.Length.EqualTo(3), "a middle old segment stops the time prune entirely.");
+            Assert.That(SegmentFiles(byGeneration), Is.Empty, "a floor of 9 sits above every generation here, so the whole archive goes - prefix rule and all.");
+            timeStore.Dispose();
+            genStore.Dispose();
+        } finally {
+            try { Directory.Delete(byTime, recursive: true); } catch { }
+            try { Directory.Delete(byGeneration, recursive: true); } catch { }
+        }
+    }
 }

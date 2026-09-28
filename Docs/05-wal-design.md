@@ -764,6 +764,76 @@ explicit offset removes the question entirely.
   was hand-built rather than decoded from a WAL, so its age cannot be proven. Deleting
   history on a guess is the one failure mode this design exists to avoid.
 
+### FIXED 2026-09-22: the prune is now prefix-monotonic (was: per-segment, could leave a hole)
+
+**The flaw (found by review, reproduced by test before fixing).** The rule above is the right
+invariant applied **one level too low**. It protected a single segment's internal integrity, but
+said nothing about the *ordering* of the segments that survive - and the survivors need not be a
+contiguous run of the LSN sequence.
+
+`WalArchive.DeleteSegmentsOlderThanTimestamp` used to evaluate each segment **independently** and
+continue past any segment that failed the age test, so with segments S1..S4 it would delete S2
+and keep S1, S3, S4 - a hole exactly where S2's LSN range was. Wall-clock going backwards is
+enough to produce that arrangement, and the three causes named in the section above (NTP
+correction, VM snapshot, an operator changing the clock) are exactly the scenarios in which a
+*later* segment carries an *earlier* stamp.
+
+Nothing downstream caught it:
+
+1. **`MergeInOrder` could not see it.** It enforces only "strictly increasing + dedupe"; the `+1`
+   contiguity check was deliberately deleted during the Stage 5.5 LSN refactor, because
+   Instant-only transactions create *legitimate* LSN gaps in the WAL. A prune-induced hole was
+   therefore indistinguishable from a benign Instant gap.
+2. **The retention-floor guard was tautological after this operation.** The generated
+   `LoadFromGenesis` refuses with `ArchiveOlderThanRetentionFloor` only when the oldest surviving
+   segment's generation is *below* the recorded `RetainedFromGeneration` - but
+   `ColdStore.PruneArchiveOlderThan` recomputed that floor from whatever survived
+   (`newFloor = oldestSurviving ?? currentFloor`). The floor was *defined as* the oldest survivor,
+   so after a timestamp prune it could not fire for a hole the prune itself created.
+3. **Replay then succeeded.** `LoadFromGenesis` walked the merged stream and called `ReplayChange`
+   per entry; the missing segment's changes were simply absent, so the rebuilt state was **wrong
+   without looking wrong**, and `Result.Ok()` was returned.
+
+Severity was above an operator typo: `ArchiveRetentionCollector` runs `RunOnce` from a `Timer` on
+`policy.Interval` and swallows exceptions ("a failed collection must never take the server down"),
+so a background collector could carve the hole unattended and the failure would surface much later
+as an incorrect replay with no error anywhere to trace it to.
+
+**The fix, shipped.** `DeleteSegmentsOlderThanTimestamp` now walks segments in
+`OrderBy(Ordinal)` sequence order and **stops at the first segment that is not wholly older than
+the cutoff**, instead of evaluating each and continuing past it. Every survivor is therefore a
+contiguous run of the newest history. Segments being immutable and never renumbered is exactly
+what makes filename order equal LSN order, so no new state was needed. A backwards clock step can
+now only ever make the prune keep *more*, which is the safe direction.
+
+`ColdStore.PruneArchiveOlderThan` also now advances the floor **only forward**
+(`oldestGeneration > currentFloor ? oldestGeneration : currentFloor`), matching the
+`RetentionFloorCannotMoveBackward` guard the generation-based prune already had. That asymmetry
+was the tell; with the prune prefix-monotonic the branch is unreachable today, and it stays as
+insurance so a future change to either path cannot quietly move retention backwards.
+
+**Invariant, now pinned by tests** (`ArchiveRetentionTests`): whatever survives a prune is
+contiguous in the LSN sequence. The reproducing case writes segments whose stamps read
+`Recent, January, Recent` and asserts the backwards-clock prune deletes **nothing** - before the
+fix it deleted the middle segment and left `1, 3` (and, in the five-segment variant, `1, 3, 5`),
+which is precisely the silent wrong state described above.
+
+**Both prune paths now obey that rule identically (synced 2026-09-22).** `DeleteSegmentsOlderThan`
+(generation-based) was still evaluating segments one at a time and `continue`-ing past any segment
+at or above the floor, and it did not even order the directory - so it relied on generations being
+monotonic along sequence order, an invariant **enforced nowhere**. Generations are monotonic in
+practice (a segment is tagged with the generation current at its checkpoint, and consolidation
+re-tags a whole range uniformly), so it was not yet a live bug - but the two paths no longer
+looked alike, which is exactly how the timestamp path gets the bug re-introduced. It now takes the
+identical shape: `OrderBy(Ordinal)` then `break` at the first segment to keep. With monotonic
+generations the behaviour is unchanged ("keep the last N generations" still deletes everything
+below the floor); if a future change ever put a lower generation later in the sequence, it keeps
+MORE segments instead of carving a hole - the same safe direction the timestamp path takes. The
+assumption is now written down in the method comment rather than left implicit, and three tests
+pin it: a non-monotonic archive (`3, 7, 5` against a floor of 6) keeps the `7, 5` suffix, the
+ordinary monotonic case still deletes every generation below the floor, and a side-by-side case
+gives both paths the same backwards-clock archive and asserts they agree.
+
 Timestamps survive archiving: `WriteSegment` and `ConsolidateSegments` re-encode from
 `DecodedWalEntry`, and both now pass `entry.UtcTicks` through. Re-stamping there would have
 overwritten every history timestamp with the checkpoint's time and made pruning meaningless.

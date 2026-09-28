@@ -95,7 +95,8 @@ static public class WalArchive {
         if (!Directory.Exists(archiveDirectory)) return Result.Ok(0);
 
         var deleted = 0;
-        foreach (var segmentPath in Directory.EnumerateFiles(archiveDirectory, $"*{SegmentExtension}")) {
+        var filesInOrder = Directory.EnumerateFiles(archiveDirectory, $"*{SegmentExtension}").OrderBy(p => p, StringComparer.Ordinal);
+        foreach (var segmentPath in filesInOrder) {
             byte[] headerBytes;
             try {
                 using var stream = new FileStream(segmentPath, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -107,7 +108,7 @@ static public class WalArchive {
             }
 
             if (!WalFileHeaderCodec.TryDecode(headerBytes, out var header)) return Result<int>.Error(DbError.WalCorrupted());
-            if ((int)header.Generation >= targetGeneration) continue;
+            if ((int)header.Generation >= targetGeneration) break;
 
             try {
                 File.Delete(segmentPath);
@@ -225,7 +226,7 @@ static public class WalArchive {
     }
 
     static private void TryDeletePartialSegment(string segmentPath) {
-        try { File.Delete(segmentPath); } catch { }
+        try { File.Delete(segmentPath); } catch { /* */ }
     }
 
     static public Result<int> DeleteSegmentsOlderThanTimestamp(string coldStorePath, long cutoffUtcTicks) {
@@ -233,12 +234,13 @@ static public class WalArchive {
         if (!Directory.Exists(archiveDirectory)) return Result.Ok(0);
 
         var deleted = 0;
-        foreach (var segmentPath in Directory.EnumerateFiles(archiveDirectory, $"*{SegmentExtension}")) {
+        var filesInOrder = Directory.EnumerateFiles(archiveDirectory, $"*{SegmentExtension}").OrderBy(p => p, StringComparer.Ordinal);
+        foreach (var segmentPath in filesInOrder) {
             var readResult = ReadSegment(segmentPath);
             if (readResult.IsError()) return readResult.Void();
 
             var (_, entries) = readResult.Unwrap();
-            if (!IsWhollyOlderThan(entries, cutoffUtcTicks)) continue;
+            if (!IsWhollyOlderThan(entries, cutoffUtcTicks)) break;
 
             try {
                 File.Delete(segmentPath);

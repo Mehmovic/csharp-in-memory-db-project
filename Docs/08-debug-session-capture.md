@@ -79,8 +79,17 @@ Stage 5.5 close-out built all three prerequisites:
 **What:** a per-entry timestamp in the frame - one `long` per *transaction*,
 not per change. A transaction is "at" one moment by definition; its changes
 are simultaneous, so per-change timestamps would multiply frame bytes for zero
-debugging benefit. The frame header grows from 17 bytes
-(`4 + 4 + 8 + 1`) to 25, and `WalFileHeaderCodec` grows from 24 to 32.
+debugging benefit. The frame header is now 25 bytes (`4 + 4 + 8 + 8 + 1`).
+
+**Corrected 2026-09-22 (implemented, verified):** this shipped as a **frame-only**
+change. `WalFileHeaderCodec` was deliberately left untouched - still `Size = 24`,
+`CurrentVersion = 1`, `version`/`databaseId`/`generation` only. The file header
+does **not** grow, and no format-version bump is needed. The pre-release gate
+predicted below therefore **did not apply**: putting the stamp in the frame
+rather than the versioned header sidestepped it entirely, so there is no
+"field absent means legacy" special case to carry forever on every read path.
+The gate only becomes real if a *future* change needs to touch the header
+itself.
 
 **Why in-frame rather than debug-tool-only:** (a) time-addressable replay of
 persistent history must not require debug capture to have been switched on;
@@ -90,25 +99,39 @@ and frame formats, so the archive inherits time-addressability for free - one
 decision, not two.
 
 **Timestamp source:** one shared wall-clock source per host process, read once
-per commit at `EndScope`. A single per-process source makes cross-actor
-ordering within a host skew-free by construction; per-database sources would
+per commit. Implemented in `WriteAheadLog.AppendOnly` - the same call that
+writes the LSN, on the writer thread - with a `CaptureTimestampNow = -1`
+sentinel resolving to `DateTime.UtcNow.Ticks`. A timestamp can therefore never
+drift away from the entry it labels, and wall-clock time enters the system in
+exactly one place. A single per-process source makes cross-actor ordering
+within a host skew-free by construction; per-database sources would
 reintroduce exactly the skew problem session merging then has to fight.
 Cross-host correlation is out of scope (single-host actor model) - see the
 open item in section 10.
 
-**Cost:** 8 bytes per transaction plus one clock read per commit - noise next
-to the fsync. Nothing on the read path pays for it until someone actually
-filters by time.
+**Cost (measured before landing, `WalTimestampBenchmarks`):** 8 bytes/frame
+exact; `DateTime.UtcNow.Ticks` ~20ns flat across payload sizes. Against an
+operation costing ~3.4us end to end that is **~0.6%**. `Stopwatch.GetTimestamp`
+measured ~7ns cheaper; not worth the complexity at that ratio.
 
-**The gate - same shape as the migration doc's section 12:** as of 2026-09-22,
-`WalFileHeaderCodec.CurrentVersion` is still `1`, nothing has been released,
-and the generation field already rode in at version 1 (pre-release, so no
-version bump was ever needed for it). The timestamp field must land **before
-the first release**. After that, version-1 frames exist in the wild and "field
-absent means unknown" becomes a permanent legacy special case on every read
-path - replay filters, archive walks, and the debug tooling all dispatch on
-format version forever. The whole point of recording this now is that the
-window is open exactly once and closes silently.
+**The gate - no longer applies, but the reasoning is kept.** The prediction
+below was that the timestamp must land before the first release, because a
+version-1 frame with the field absent would become a permanent legacy case on
+every read path. The implementation **avoided** this by putting the stamp in
+the frame rather than the versioned file header, so no version bump was
+required and the pre-release window closed without cost. The lesson is kept
+because it still governs the *next* header-touching change: `CurrentVersion`
+is still `1` and nothing has shipped, so the window is open - but it is now
+about the header alone, not about timestamps.
+
+**`Unstamped == 0` is a real semantic, not a sentinel default.** Verified in
+the implementation: `WalRecordCodec.Encode` stays pure and defaults to
+`Unstamped (0)` rather than "capture now" (so two encodes of the same input
+produce identical bytes - caught by the existing overload-equality tests). That
+zero now *means* "this frame was hand-built, its age cannot be proven," and
+time-based retention **always keeps** any segment containing one. See
+[05-wal-design.md](05-wal-design.md) for the retention rules and the known
+prune flaw recorded there.
 
 ## 5. Gap 2 - the sidecar (debug capture for instant tables)
 
@@ -267,6 +290,17 @@ Each step independently green-buildable/testable:
 - **Sidecar retention default:** per-session directory deleted wholesale when
   the session is archived, vs size-capped delete-oldest. Proposed: wholesale,
   with the manifest recording that the session is no longer replayable.
+- **Time-prune hole hazard - FIXED 2026-09-22, recorded in
+  [05-wal-design.md](05-wal-design.md).** `DeleteSegmentsOlderThanTimestamp`
+  used to evaluate segments independently and could leave a non-contiguous
+  history that genesis replay cannot detect (`MergeInOrder`'s contiguity check
+  was deliberately removed in Stage 5.5). It is now prefix-monotonic: the walk
+  stops at the first segment it may not delete, so survivors are always
+  contiguous and a backwards clock step can only cause the prune to keep more.
+  Pinned by four tests in `ArchiveRetentionTests`. The sidecar's own
+  delete-oldest policy was never exposed to this - rotation is sequential, so
+  deleting oldest-first is always a prefix - and should stay that way rather
+  than becoming timestamp-based.
 
 ## 11. Relationship to the other docs and the plan
 

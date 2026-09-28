@@ -264,7 +264,9 @@ public sealed class ColdStore : IDisposable {
 
         var oldestSurviving = WalArchive.ReadOldestRetainedGeneration(DirectoryPath);
         if (oldestSurviving.IsError()) return oldestSurviving.Void();
-        var newFloor = oldestSurviving.Unwrap().TryGet(out var oldestGeneration) ? oldestGeneration : currentFloor;
+        var newFloor = oldestSurviving.Unwrap().TryGet(out var oldestGeneration) && oldestGeneration > currentFloor
+            ? oldestGeneration
+            : currentFloor;
 
         var written = WriteRetainedFromGeneration(newFloor);
         if (written.IsError()) return Result<int>.Error(written.GetError());
