@@ -1,6 +1,6 @@
 namespace RhinoDB.Tools.Dev;
 
-static public class DevTool {
+static public class WalTool {
     static public int Run(string[] args) {
         if (args.Length == 0) {
             PrintUsage();
@@ -8,13 +8,13 @@ static public class DevTool {
         }
 
         return args[0] switch {
-            "reset" => DevResetCommand.Run(args[1..]),
+            "prune" => WalPruneCommand.Run(args[1..]),
             _ => Unknown(args[0]),
         };
     }
 
     static private int Unknown(string verb) {
-        Console.Error.WriteLine($"rhinodb dev: unknown command '{verb}'");
+        Console.Error.WriteLine($"rhinodb wal: unknown command '{verb}'");
         PrintUsage();
         return 1;
     }
@@ -22,7 +22,7 @@ static public class DevTool {
     static private void PrintUsage() {
         Console.WriteLine("""
             Usage:
-              rhinodb dev reset [--project <path>] [--cold-path <path>]... [--yes]
+              rhinodb wal prune --cold-path <path> [--older-than <timestamp> | --keep-generations <n>] [--yes]
             """);
     }
 }

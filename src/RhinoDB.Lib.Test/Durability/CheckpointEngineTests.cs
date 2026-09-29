@@ -126,7 +126,7 @@ public class CheckpointEngineTests {
     public async Task RunCheckpoint_AfterAMigrationBumpedTheGeneration_ArchivesTheSegmentTaggedWithTheCurrentGeneration() {
         // Regression: RunCheckpoint used to hardcode the archived segment's generation to 0 regardless of
         // what WriteGeneration had actually committed - silently mistagging every segment archived after a
-        // real migration, which both genesis replay and Phase 6's Prune/ConsolidateArchive depend on being
+        // real migration, which both genesis replay and Phase 6's Prune/MigrateWalArchive depend on being
         // accurate.
         using var wal = CreateWal();
         var engine = new CheckpointEngine(env, wal, archiveDir);
@@ -284,7 +284,7 @@ public class CheckpointEngineTests {
         // flag (as it originally did, shared with the write path), the FIRST-EVER read on a truly fresh
         // store - one that's never had anything written to __rhinodb_checkpoint__ - would cache a dbi
         // handle that the abort had just invalidated, and every later WRITE reusing that cached handle
-        // (same CheckpointEngine instance) would fail with MDBX_BAD_DBI. RhinoRunMode.Prune's backward-guard
+        // (same CheckpointEngine instance) would fail with MDBX_BAD_DBI. RhinoRunMode.WalPrune's backward-guard
         // read (ReadRetainedFromGeneration) followed by its own write is exactly this sequence on a
         // never-checkpointed database.
         using var wal = CreateWal();

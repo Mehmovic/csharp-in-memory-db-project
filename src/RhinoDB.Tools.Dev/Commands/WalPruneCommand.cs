@@ -6,7 +6,7 @@ using RhinoDB.Lib.Hosting;
 
 namespace RhinoDB.Tools.Dev;
 
-static public class DevPruneCommand {
+static public class WalPruneCommand {
     static public int Run(string[] args) {
         var coldPaths = ColdPathArg.Resolve(args, out var resolveError);
         if (resolveError is not null) {
@@ -14,7 +14,7 @@ static public class DevPruneCommand {
             return 1;
         }
         if (coldPaths.Count == 0) {
-            Console.Error.WriteLine("rhinodb dev prune: --cold-path <dir> is required (repeatable).");
+            Console.Error.WriteLine("rhinodb wal prune: --cold-path <dir> is required (repeatable).");
             return 1;
         }
 
@@ -23,7 +23,7 @@ static public class DevPruneCommand {
 
         if (hasOlderThan == hasKeepGenerations) {
             Console.Error.WriteLine(
-                "rhinodb dev prune: give exactly one of --older-than <timestamp> or --keep-generations <n>. " + "Two retention policies at once is ambiguous, not a merge."
+                "rhinodb wal prune: give exactly one of --older-than <timestamp> or --keep-generations <n>. " + "Two retention policies at once is ambiguous, not a merge."
             );
             return 1;
         }

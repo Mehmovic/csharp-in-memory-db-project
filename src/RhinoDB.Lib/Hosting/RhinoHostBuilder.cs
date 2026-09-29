@@ -94,15 +94,15 @@ public sealed class RhinoHostBuilder {
                     return Result<object>.Error(MissingConfig(nameof(options.LoadFromGenesis), because: "RhinoRunMode.Replay needs it"));
                 case RhinoRunMode.Migrate when options.RunMigration is null:
                     return Result<object>.Error(MissingConfig(nameof(options.RunMigration), because: "RhinoRunMode.Migrate needs it"));
-                case RhinoRunMode.Prune when parsed.PruneTargetGeneration is null && parsed.PruneOlderThanUtcTicks is null:
+                case RhinoRunMode.WalPrune when parsed.WalKeepGenerations is null && parsed.WalPruneOlderThanUtcTicks is null:
                     return Result<object>.Error(MissingPruneConfig());
-                case RhinoRunMode.ConsolidateArchive when options.ConsolidateArchive is null:
-                    return Result<object>.Error(MissingConfig(nameof(options.ConsolidateArchive), because: "RhinoRunMode.ConsolidateArchive needs it"));
+                case RhinoRunMode.WalMigrate when options.MigrateWalArchive is null:
+                    return Result<object>.Error(MissingConfig(nameof(options.MigrateWalArchive), because: "RhinoRunMode.WalMigrate needs it"));
             }
 
             var runResult = await RunOne(
                 parsed, createDb, options.LoadAsync, options.LoadFromGenesis,
-                options.RunMigration, options.GBinary, options.IsGenerationInvalid, options.ConsolidateArchive);
+                options.RunMigration, options.GBinary, options.IsGenerationInvalid, options.MigrateWalArchive);
             if (runResult.IsError()) return runResult.Void();
 
             builtDb = runResult.Unwrap();
@@ -115,7 +115,7 @@ public sealed class RhinoHostBuilder {
         private DbError MissingPruneConfig() =>
             DbError.SystemFailure(
                 new InvalidOperationException(
-                    $"AddDatabase(\"{Name}\"): RhinoRunMode.Prune needs either --{Name}.prune-target-generation (keep the last N generations) or --{Name}.prune-older-than=<ISO-8601> (keep everything newer than a moment in time)."
+                    $"AddDatabase(\"{Name}\"): RhinoRunMode.WalPrune needs either --{Name}.wal-keep-generations (keep the last N generations) or --{Name}.wal-prune-older-than=<ISO-8601> (keep everything newer than a moment in time)."
                 )
             );
     }
@@ -128,7 +128,7 @@ public sealed class RhinoHostBuilder {
         Func<TDb, Result>? runMigration,
         int? binaryGeneration,
         Func<int, bool>? isGenerationInvalid,
-        Func<TDb, Result>? consolidateArchive
+        Func<TDb, Result>? migrateWalArchive
     ) where TDb : notnull {
         var coldResult = ColdStore.Open(options.ColdPath);
         if (coldResult.IsError()) return coldResult.Void();
@@ -187,10 +187,10 @@ public sealed class RhinoHostBuilder {
                 }
                 break;
             }
-            case RhinoRunMode.Prune: {
-                var pruneError = options.PruneTargetGeneration is { } pruneGeneration
+            case RhinoRunMode.WalPrune: {
+                var pruneError = options.WalKeepGenerations is { } pruneGeneration
                     ? cold.PruneArchiveOlderThanGeneration(pruneGeneration)
-                    : cold.PruneArchiveOlderThan(options.PruneOlderThanUtcTicks!.Value);
+                    : cold.PruneArchiveOlderThan(options.WalPruneOlderThanUtcTicks!.Value);
 
                 if (pruneError.IsError()) {
                     cold.Dispose();
@@ -198,11 +198,11 @@ public sealed class RhinoHostBuilder {
                 }
                 break;
             }
-            case RhinoRunMode.ConsolidateArchive: {
-                var consolidateResult = consolidateArchive!(db);
-                if (consolidateResult.IsError()) {
+            case RhinoRunMode.WalMigrate: {
+                var walMigrateResult = migrateWalArchive!(db);
+                if (walMigrateResult.IsError()) {
                     cold.Dispose();
-                    return consolidateResult;
+                    return walMigrateResult;
                 }
                 break;
             }

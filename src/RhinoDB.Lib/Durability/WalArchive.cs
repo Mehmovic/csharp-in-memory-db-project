@@ -123,7 +123,7 @@ static public class WalArchive {
             : Result<int>.Error(DbError.WalDirectorySyncFailed());
     }
 
-    static public Result ConsolidateSegments(
+    static public Result MigrateSegments(
         string coldStorePath,
         int targetGeneration,
         Func<uint, int, ChangeKind, byte[], byte[]?, (byte[] Key, byte[]? Row)?> transform
@@ -147,7 +147,7 @@ static public class WalArchive {
             var scan = WalRecordCodec.Scan(originalBytes.AsSpan(WalFileHeaderCodec.Size));
             if (scan.Status != WalScanStatus.Clean) return Result.Error(DbError.WalCorrupted());
 
-            var consolidatedEntries = new List<DecodedWalEntry>();
+            var migratedEntries = new List<DecodedWalEntry>();
             foreach (var entry in scan.Entries) {
                 if (entry.Kind != WalEntryKind.Operation) continue;
 
@@ -159,21 +159,21 @@ static public class WalArchive {
                     newChanges.Add(new WalChange(change.TableId, change.Kind, result.Key, result.Row));
                 }
 
-                if (newChanges.Count > 0) consolidatedEntries.Add(new DecodedWalEntry(entry.Lsn, entry.Kind, newChanges.ToArray(), entry.UtcTicks));
+                if (newChanges.Count > 0) migratedEntries.Add(new DecodedWalEntry(entry.Lsn, entry.Kind, newChanges.ToArray(), entry.UtcTicks));
             }
 
             try {
-                if (consolidatedEntries.Count == 0) {
+                if (migratedEntries.Count == 0) {
                     File.Delete(segmentPath);
                     continue;
                 }
 
-                var tempPath = segmentPath + ".consolidating";
+                var tempPath = segmentPath + ".migrating";
                 using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None)) {
                     var newHeader = WalFileHeaderCodec.Encode(header.DatabaseId, (uint)targetGeneration);
                     fileStream.Write(newHeader, 0, newHeader.Length);
 
-                    foreach (var entry in consolidatedEntries) {
+                    foreach (var entry in migratedEntries) {
                         var frame = WalRecordCodec.Encode(entry.Lsn, entry.Kind, entry.Changes, entry.UtcTicks);
                         fileStream.Write(frame, 0, frame.Length);
                     }

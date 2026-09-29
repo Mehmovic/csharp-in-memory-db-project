@@ -104,12 +104,12 @@ public class RhinoHostOptionsTests {
 
     [Test]
     public void ResolveUtcTicks_AnUnparseableValue_FailsLoudlyWithTheFlagNameInTheMessage() {
-        var result = RhinoHostOptions.ResolveUtcTicks("last tuesday-ish", "--game.prune-older-than");
+        var result = RhinoHostOptions.ResolveUtcTicks("last tuesday-ish", "--game.wal-prune-older-than");
 
         Assert.That(result.IsError(), Is.True);
         Assert.That(result.GetError().Kind, Is.EqualTo(ErrorKind.SystemFailure));
         var thrown = Assert.Throws<ArgumentException>(result.ThrowIfError);
-        Assert.That(thrown!.Message, Does.Contain("--game.prune-older-than"),
+        Assert.That(thrown!.Message, Does.Contain("--game.wal-prune-older-than"),
             "the operator has to be able to tell WHICH flag was wrong, and which forms are accepted.");
     }
 
@@ -125,8 +125,8 @@ public class RhinoHostOptionsTests {
         var expected = new DateTimeOffset(wallClock, TimeZoneInfo.Local.GetUtcOffset(wallClock)).UtcTicks;
         var text = wallClock.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
 
-        var parsed = RhinoHostOptions.Parse(["--game.cold-path=db", $"--game.prune-older-than={text}"], "game").Unwrap();
+        var parsed = RhinoHostOptions.Parse(["--game.cold-path=db", $"--game.wal-prune-older-than={text}"], "game").Unwrap();
 
-        Assert.That(parsed.PruneOlderThanUtcTicks, Is.EqualTo(expected));
+        Assert.That(parsed.WalPruneOlderThanUtcTicks, Is.EqualTo(expected));
     }
 }

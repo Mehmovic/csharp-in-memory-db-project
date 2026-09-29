@@ -1818,12 +1818,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine("    }");
 
             sb.AppendLine();
-            sb.AppendLine("    public Result ConsolidateArchive() {");
+            sb.AppendLine("    public Result MigrateWalArchive() {");
             sb.AppendLine("        var currentGenerationResult = cold.ReadGeneration();");
             sb.AppendLine("        if (currentGenerationResult.IsError()) return currentGenerationResult.Void();");
             sb.AppendLine("        var targetGeneration = currentGenerationResult.Unwrap();");
             sb.AppendLine();
-            sb.AppendLine("        var transformResult = WalArchive.ConsolidateSegments(cold.DirectoryPath, targetGeneration, (tableId, fromGeneration, kind, key, row) => {");
+            sb.AppendLine("        var transformResult = WalArchive.MigrateSegments(cold.DirectoryPath, targetGeneration, (tableId, fromGeneration, kind, key, row) => {");
             sb.AppendLine("            switch (tableId) {");
             foreach (var table in persistentTables) {
                 var opsName = $"{database.SimpleName}{table.Accessor}Ops";

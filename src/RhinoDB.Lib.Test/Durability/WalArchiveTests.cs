@@ -202,17 +202,17 @@ public class WalArchiveTests {
     }
 
     [Test]
-    public void ConsolidateSegments_WithNothingArchived_IsANoOp() {
-        var result = WalArchive.ConsolidateSegments(dir, 2, static (_, _, _, key, row) => (key, row));
+    public void MigrateSegments_WithNothingArchived_IsANoOp() {
+        var result = WalArchive.MigrateSegments(dir, 2, static (_, _, _, key, row) => (key, row));
 
         Assert.That(result.IsOk(), Is.True);
     }
 
     [Test]
-    public void ConsolidateSegments_TransformsBytesAndTagsTheSegmentWithTheTargetGeneration() {
+    public void MigrateSegments_TransformsBytesAndTagsTheSegmentWithTheTargetGeneration() {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1)], generation: 0);
 
-        var result = WalArchive.ConsolidateSegments(dir, 2, static (_, _, _, key, row) => (key, row!.Select(b => (byte)(b + 1)).ToArray()));
+        var result = WalArchive.MigrateSegments(dir, 2, static (_, _, _, key, row) => (key, row!.Select(b => (byte)(b + 1)).ToArray()));
 
         Assert.That(result.IsOk(), Is.True);
         var history = WalArchive.ReadHistory(dir, [], 2).Unwrap();
@@ -222,10 +222,10 @@ public class WalArchiveTests {
     }
 
     [Test]
-    public void ConsolidateSegments_PreservesLsnAndChangeKind() {
+    public void MigrateSegments_PreservesLsnAndChangeKind() {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(7)], generation: 0);
 
-        WalArchive.ConsolidateSegments(dir, 2, static (_, _, kind, key, row) => (key, row));
+        WalArchive.MigrateSegments(dir, 2, static (_, _, kind, key, row) => (key, row));
 
         var history = WalArchive.ReadHistory(dir, [], 2).Unwrap();
         Assert.That(history[0].Entry.Lsn, Is.EqualTo(7));
@@ -233,12 +233,12 @@ public class WalArchiveTests {
     }
 
     [Test]
-    public void ConsolidateSegments_SegmentsAtOrAboveTheTarget_AreUntouched() {
+    public void MigrateSegments_SegmentsAtOrAboveTheTarget_AreUntouched() {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1)], generation: 0);
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(2)], generation: 2);
         var transformCalls = new List<int>();
 
-        WalArchive.ConsolidateSegments(dir, 2, (_, fromGeneration, _, key, row) => { transformCalls.Add(fromGeneration); return (key, row); });
+        WalArchive.MigrateSegments(dir, 2, (_, fromGeneration, _, key, row) => { transformCalls.Add(fromGeneration); return (key, row); });
 
         Assert.That(transformCalls, Is.EqualTo(new[] { 0 }), "only the segment strictly below the target must be transformed.");
         var history = WalArchive.ReadHistory(dir, [], 2).Unwrap();
@@ -246,13 +246,13 @@ public class WalArchiveTests {
     }
 
     [Test]
-    public void ConsolidateSegments_WhenTheTransformReturnsNull_DropsThatChangeButKeepsTheRest() {
+    public void MigrateSegments_WhenTheTransformReturnsNull_DropsThatChangeButKeepsTheRest() {
         var change1 = new WalChange(1, ChangeKind.Insert, [1], [9]);
         var change2 = new WalChange(2, ChangeKind.Insert, [2], [9]);
         var entry = new DecodedWalEntry(1, WalEntryKind.Operation, [change1, change2]);
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [entry], generation: 0);
 
-        WalArchive.ConsolidateSegments(dir, 2, (tableId, _, _, key, row) => tableId == 1 ? (key, row) : null);
+        WalArchive.MigrateSegments(dir, 2, (tableId, _, _, key, row) => tableId == 1 ? (key, row) : null);
 
         var history = WalArchive.ReadHistory(dir, [], 2).Unwrap();
         Assert.That(history, Has.Count.EqualTo(1));
@@ -260,22 +260,22 @@ public class WalArchiveTests {
     }
 
     [Test]
-    public void ConsolidateSegments_WhenEveryChangeInASegmentIsDropped_DeletesItEntirely() {
+    public void MigrateSegments_WhenEveryChangeInASegmentIsDropped_DeletesItEntirely() {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1)], generation: 0);
 
-        var result = WalArchive.ConsolidateSegments(dir, 2, static (_, _, _, _, _) => null);
+        var result = WalArchive.MigrateSegments(dir, 2, static (_, _, _, _, _) => null);
 
         Assert.That(result.IsOk(), Is.True);
         Assert.That(Directory.GetFiles(archiveDir), Is.Empty);
     }
 
     [Test]
-    public void ConsolidateSegments_KeepsTheSameFilenameSoOrdinalOrderIsPreserved() {
+    public void MigrateSegments_KeepsTheSameFilenameSoOrdinalOrderIsPreserved() {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(1)], generation: 0);
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [Entry(2)], generation: 0);
         var filesBefore = Directory.GetFiles(archiveDir).Select(Path.GetFileName).OrderBy(f => f).ToArray();
 
-        WalArchive.ConsolidateSegments(dir, 2, static (_, _, _, key, row) => (key, row));
+        WalArchive.MigrateSegments(dir, 2, static (_, _, _, key, row) => (key, row));
 
         var filesAfter = Directory.GetFiles(archiveDir).Select(Path.GetFileName).OrderBy(f => f).ToArray();
         Assert.That(filesAfter, Is.EqualTo(filesBefore));

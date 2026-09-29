@@ -290,17 +290,17 @@ public class RhinoHostBuilderTests {
         Assert.That(hostResult.IsError(), Is.True, "One broken database must fail the whole build, not come up partially.");
     }
 
-    // ---- RhinoRunMode.Prune ----
+    // ---- RhinoRunMode.WalPrune ----
 
     [Test]
     public async Task BuildAsync_InPruneModeWithoutTargetGenerationConfigured_Fails() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=prune"])
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-prune"])
             .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
                 options.CreateDb = cold => new FakeDb(cold);
             })
             .BuildAsync();
 
-        Assert.That(hostResult.IsError(), Is.True, "Prune mode needs --game.prune-target-generation - fail loudly, not silently no-op.");
+        Assert.That(hostResult.IsError(), Is.True, "Prune mode needs --game.wal-keep-generations - fail loudly, not silently no-op.");
     }
 
     [Test]
@@ -309,7 +309,7 @@ public class RhinoHostBuilderTests {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [new DecodedWalEntry(1, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, [1], [9])])], generation: 0);
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [new DecodedWalEntry(2, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, [2], [9])])], generation: 2);
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=prune", "--game.prune-target-generation=2"])
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-prune", "--game.wal-keep-generations=2"])
             .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
                 options.CreateDb = cold => new FakeDb(cold);
             })
@@ -328,7 +328,7 @@ public class RhinoHostBuilderTests {
         using (var seedCold = ColdStore.Open(dirA).Unwrap())
             Assert.That(seedCold.WriteRetainedFromGeneration(5).IsOk(), Is.True);
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=prune", "--game.prune-target-generation=3"])
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-prune", "--game.wal-keep-generations=3"])
             .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
                 options.CreateDb = cold => new FakeDb(cold);
             })
@@ -337,47 +337,47 @@ public class RhinoHostBuilderTests {
         Assert.That(hostResult.IsError(), Is.True, "the floor only ever moves forward - refuse a backward request.");
     }
 
-    // ---- RhinoRunMode.ConsolidateArchive ----
+    // ---- RhinoRunMode.WalMigrate ----
 
     [Test]
-    public async Task BuildAsync_InConsolidateArchiveModeWithoutItConfigured_Fails() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=consolidate-archive"])
+    public async Task BuildAsync_InMigrateWalArchiveModeWithoutItConfigured_Fails() {
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-migrate"])
             .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
                 options.CreateDb = cold => new FakeDb(cold);
             })
             .BuildAsync();
 
-        Assert.That(hostResult.IsError(), Is.True, "ConsolidateArchive mode needs the delegate configured - fail loudly, not silently no-op.");
+        Assert.That(hostResult.IsError(), Is.True, "MigrateWalArchive mode needs the delegate configured - fail loudly, not silently no-op.");
     }
 
     [Test]
-    public async Task BuildAsync_InConsolidateArchiveMode_CallsConsolidateArchive_NotAnyOtherDelegate() {
-        var consolidateArchiveCalled = false;
+    public async Task BuildAsync_InMigrateWalArchiveMode_CallsMigrateWalArchive_NotAnyOtherDelegate() {
+        var migrateWalArchiveCalled = false;
         var runMigrationCalled = false;
         var loadAsyncCalled = false;
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=consolidate-archive"])
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-migrate"])
             .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
                 options.RunMigration = _ => { runMigrationCalled = true; return Result.Ok(); };
-                options.ConsolidateArchive = _ => { consolidateArchiveCalled = true; return Result.Ok(); };
+                options.MigrateWalArchive = _ => { migrateWalArchiveCalled = true; return Result.Ok(); };
             })
             .BuildAsync();
 
         Assert.That(hostResult.IsOk(), Is.True);
-        Assert.That(consolidateArchiveCalled, Is.True);
+        Assert.That(migrateWalArchiveCalled, Is.True);
         Assert.That(runMigrationCalled, Is.False);
         Assert.That(loadAsyncCalled, Is.False);
         hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
     }
 
     [Test]
-    public async Task BuildAsync_InConsolidateArchiveMode_WhenItFails_PropagatesTheError() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=consolidate-archive"])
+    public async Task BuildAsync_InMigrateWalArchiveMode_WhenItFails_PropagatesTheError() {
+        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-migrate"])
             .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
                 options.CreateDb = cold => new FakeDb(cold);
-                options.ConsolidateArchive = _ => Result.Error(DbError.SystemFailure(new InvalidOperationException("boom")));
+                options.MigrateWalArchive = _ => Result.Error(DbError.SystemFailure(new InvalidOperationException("boom")));
             })
             .BuildAsync();
 

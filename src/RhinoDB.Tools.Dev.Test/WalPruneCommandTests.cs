@@ -3,11 +3,11 @@ using RhinoDB.Lib.Tables;
 
 namespace RhinoDB.Tools.Dev.Test;
 
-// `rhinodb dev prune` acts on a real cold-storage directory through the real ColdStore, because
+// `rhinodb wal prune` acts on a real cold-storage directory through the real ColdStore, because
 // the point of the command is that it calls the SAME prune the host's Prune mode calls rather than
 // re-implementing it. So these tests stand up a genuine mdbx directory, write genuine archived
 // segments into it, and assert on what the command reports and removes.
-public class DevPruneCommandTests {
+public class WalPruneCommandTests {
     static private readonly long January = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
     static private readonly long February = new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
     static private readonly long March = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
@@ -66,7 +66,7 @@ public class DevPruneCommandTests {
     public void DevPrune_DryRunByDefault_ShowsTheSegmentsAndRemovesNothing() {
         WriteSegments((January, 1), (February, 2), (March, 3));
 
-        var output = CaptureOut(() => DevTool.Run([
+        var output = CaptureOut(() => WalTool.Run([
             "prune", "--cold-path", dir, "--older-than", "2026-02-15T00:00:00Z",
         ]), out var exitCode);
 
@@ -81,7 +81,7 @@ public class DevPruneCommandTests {
     public void DevPrune_DryRun_ShowsTheResolvedUtcSoTheOperatorCanCheckTheCutoff() {
         WriteSegments((January, 1), (March, 2));
 
-        var output = CaptureOut(() => DevTool.Run([
+        var output = CaptureOut(() => WalTool.Run([
             "prune", "--cold-path", dir, "--older-than", "2026-02-15T00:00:00Z",
         ]), out _);
 
@@ -93,7 +93,7 @@ public class DevPruneCommandTests {
     public void DevPrune_WithYes_RemovesOnlyTheSegmentsWhollyOlderThanTheCutoff() {
         WriteSegments((January, 1), (March, 2));
 
-        var exitCode = DevTool.Run([
+        var exitCode = WalTool.Run([
             "prune", "--cold-path", dir, "--older-than", "2026-02-15T00:00:00Z", "--yes",
         ]);
 
@@ -107,7 +107,7 @@ public class DevPruneCommandTests {
         // floor has to land on the generation of the oldest thing still on disk (gen 5).
         WriteSegments((January, 4), (March, 5), (March + 1_000_000_000L, 6));
 
-        DevTool.Run(["prune", "--cold-path", dir, "--older-than", "2026-02-15T00:00:00Z", "--yes"]);
+        WalTool.Run(["prune", "--cold-path", dir, "--older-than", "2026-02-15T00:00:00Z", "--yes"]);
 
         var cold = RhinoDB.Lib.Cold.ColdStore.Open(dir).Unwrap();
         using (cold) {
@@ -120,7 +120,7 @@ public class DevPruneCommandTests {
     public void DevPrune_NothingMatchesThePolicy_SaysSoAndReturnsZero() {
         WriteSegments((March, 1), (March, 2));
 
-        var output = CaptureOut(() => DevTool.Run([
+        var output = CaptureOut(() => WalTool.Run([
             "prune", "--cold-path", dir, "--older-than", "2026-01-15T00:00:00Z",
         ]), out var exitCode);
 
@@ -131,7 +131,7 @@ public class DevPruneCommandTests {
 
     [Test]
     public void DevPrune_WithoutAnyPolicy_FailsRatherThanGuessing() {
-        var output = CaptureOut(() => DevTool.Run(["prune", "--cold-path", dir]), out var exitCode);
+        var output = CaptureOut(() => WalTool.Run(["prune", "--cold-path", dir]), out var exitCode);
 
         Assert.That(exitCode, Is.EqualTo(1));
         Assert.That(output, Does.Contain("exactly one of"));
@@ -139,7 +139,7 @@ public class DevPruneCommandTests {
 
     [Test]
     public void DevPrune_WithBothPolicies_FailsRatherThanGuessing() {
-        var output = CaptureOut(() => DevTool.Run([
+        var output = CaptureOut(() => WalTool.Run([
             "prune", "--cold-path", dir, "--older-than", "2026-02-15T00:00:00Z", "--keep-generations", "2",
         ]), out var exitCode);
 
@@ -149,7 +149,7 @@ public class DevPruneCommandTests {
 
     [Test]
     public void DevPrune_WithoutAColdPath_Fails() {
-        var output = CaptureOut(() => DevTool.Run(["prune", "--older-than", "2026-02-15T00:00:00Z"]), out var exitCode);
+        var output = CaptureOut(() => WalTool.Run(["prune", "--older-than", "2026-02-15T00:00:00Z"]), out var exitCode);
 
         Assert.That(exitCode, Is.EqualTo(1));
         Assert.That(output, Does.Contain("--cold-path"));
@@ -159,7 +159,7 @@ public class DevPruneCommandTests {
     public void DevPrune_WithAnUnparseableTimestamp_FailsBeforeTouchingTheDatabase() {
         WriteSegments((January, 1));
 
-        var output = CaptureOut(() => DevTool.Run([
+        var output = CaptureOut(() => WalTool.Run([
             "prune", "--cold-path", dir, "--older-than", "last tuesday", "--yes",
         ]), out var exitCode);
 
@@ -172,7 +172,7 @@ public class DevPruneCommandTests {
     public void DevPrune_KeepGenerations_KeepsTheMostRecentOnes() {
         WriteSegments((January, 1), (February, 2), (March, 3));
 
-        var exitCode = DevTool.Run(["prune", "--cold-path", dir, "--keep-generations", "2", "--yes"]);
+        var exitCode = WalTool.Run(["prune", "--cold-path", dir, "--keep-generations", "2", "--yes"]);
 
         Assert.That(exitCode, Is.EqualTo(0));
         Assert.That(SegmentFiles(), Has.Length.EqualTo(2), "keep 2 of 3 generations");
@@ -180,7 +180,7 @@ public class DevPruneCommandTests {
 
     [Test]
     public void DevPrune_KeepGenerationsWithANonNumericValue_Fails() {
-        var output = CaptureOut(() => DevTool.Run([
+        var output = CaptureOut(() => WalTool.Run([
             "prune", "--cold-path", dir, "--keep-generations", "lots", "--yes",
         ]), out var exitCode);
 

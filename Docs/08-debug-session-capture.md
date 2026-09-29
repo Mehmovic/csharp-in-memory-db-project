@@ -140,7 +140,7 @@ payload shape, written to a debug-only file, read by nothing in production.
 Every existing assumption that instant tables never touch durable storage
 stays intact - the migration doc's instant exemption, genesis replay's
 "nothing to do for instant tables by construction", the `WalUnknownTable`
-refusal boundary, archive consolidation and pruning: none of them ever see
+refusal boundary, archive migration and pruning: none of them ever see
 these bytes, because none of them look at `.ringsink` files.
 
 **Capture point.** `ChangeRingBuffer.Record` grows one optional sink:

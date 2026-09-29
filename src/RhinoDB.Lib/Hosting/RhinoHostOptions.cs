@@ -6,29 +6,29 @@ public enum RhinoRunMode {
     Run,
     Replay,
     Migrate,
-    Prune,
-    ConsolidateArchive,
+    WalPrune,
+    WalMigrate,
 }
 
 public sealed class RhinoHostOptions {
     public required string ColdPath { get; init; }
     public RhinoRunMode Mode { get; private init; } = RhinoRunMode.Run;
     public long? ReplayUpToLsn { get; private init; }
-    public int? PruneTargetGeneration { get; private init; }
-    public long? PruneOlderThanUtcTicks { get; private init; }
+    public int? WalKeepGenerations { get; private init; }
+    public long? WalPruneOlderThanUtcTicks { get; private init; }
 
     static public Result<RhinoHostOptions> Parse(string[] args, string prefix) {
         string? coldPath = null;
         var mode = RhinoRunMode.Run;
         long? upToLsn = null;
-        int? pruneTargetGeneration = null;
-        long? pruneOlderThanUtcTicks = null;
+        int? walKeepGenerations = null;
+        long? walPruneOlderThanUtcTicks = null;
 
         var coldPathFlag = $"--{prefix}.cold-path";
         var modeFlag = $"--{prefix}.mode";
         var upToLsnFlag = $"--{prefix}.replay-upto-lsn";
-        var pruneTargetGenerationFlag = $"--{prefix}.prune-target-generation";
-        var pruneOlderThanFlag = $"--{prefix}.prune-older-than";
+        var walKeepGenerationsFlag = $"--{prefix}.wal-keep-generations";
+        var walPruneOlderThanFlag = $"--{prefix}.wal-prune-older-than";
 
         foreach (var arg in args) {
             var (key, value) = SplitFlag(arg);
@@ -38,34 +38,34 @@ public sealed class RhinoHostOptions {
             } else if (key == modeFlag) {
                 if (!TryParseMode(value, out mode))
                     return Result<RhinoHostOptions>.Error(DbError.SystemFailure(
-                        new ArgumentException($"Unknown {modeFlag} '{value}' - expected run, replay, migrate, prune, or consolidate-archive.")));
+                        new ArgumentException($"Unknown {modeFlag} '{value}' - expected run, replay, migrate, wal-prune, or wal-migrate.")));
             } else if (key == upToLsnFlag) {
                 if (!long.TryParse(value, out var lsn))
                     return Result<RhinoHostOptions>.Error(DbError.SystemFailure(
                         new ArgumentException($"{upToLsnFlag} must be an integer, got '{value}'.")));
                 upToLsn = lsn;
-            } else if (key == pruneTargetGenerationFlag) {
+            } else if (key == walKeepGenerationsFlag) {
                 if (!int.TryParse(value, out var generation))
                     return Result<RhinoHostOptions>.Error(DbError.SystemFailure(
-                        new ArgumentException($"{pruneTargetGenerationFlag} must be an integer, got '{value}'.")));
-                pruneTargetGeneration = generation;
-            } else if (key == pruneOlderThanFlag) {
-                var resolved = ResolveUtcTicks(value, pruneOlderThanFlag);
+                        new ArgumentException($"{walKeepGenerationsFlag} must be an integer, got '{value}'.")));
+                walKeepGenerations = generation;
+            } else if (key == walPruneOlderThanFlag) {
+                var resolved = ResolveUtcTicks(value, walPruneOlderThanFlag);
                 if (resolved.IsError()) return resolved.Void();
-                pruneOlderThanUtcTicks = resolved.Unwrap();
+                walPruneOlderThanUtcTicks = resolved.Unwrap();
             }
         }
 
         if (coldPath is null)
             return Result<RhinoHostOptions>.Error(DbError.SystemFailure(new ArgumentException($"{coldPathFlag} is required.")));
 
-        if (pruneTargetGeneration is not null && pruneOlderThanUtcTicks is not null)
+        if (walKeepGenerations is not null && walPruneOlderThanUtcTicks is not null)
             return Result<RhinoHostOptions>.Error(DbError.SystemFailure(new ArgumentException(
-                $"Give either {pruneTargetGenerationFlag} or {pruneOlderThanFlag}, not both - two retention policies at once is ambiguous.")));
+                $"Give either {walKeepGenerationsFlag} or {walPruneOlderThanFlag}, not both - two retention policies at once is ambiguous.")));
 
         return new RhinoHostOptions {
             ColdPath = coldPath, Mode = mode, ReplayUpToLsn = upToLsn,
-            PruneTargetGeneration = pruneTargetGeneration, PruneOlderThanUtcTicks = pruneOlderThanUtcTicks
+            WalKeepGenerations = walKeepGenerations, WalPruneOlderThanUtcTicks = walPruneOlderThanUtcTicks
         };
     }
 
@@ -92,8 +92,8 @@ public sealed class RhinoHostOptions {
             case "run": mode = RhinoRunMode.Run; return true;
             case "replay": mode = RhinoRunMode.Replay; return true;
             case "migrate": mode = RhinoRunMode.Migrate; return true;
-            case "prune": mode = RhinoRunMode.Prune; return true;
-            case "consolidate-archive": mode = RhinoRunMode.ConsolidateArchive; return true;
+            case "wal-prune": mode = RhinoRunMode.WalPrune; return true;
+            case "wal-migrate": mode = RhinoRunMode.WalMigrate; return true;
             default: mode = default; return false;
         }
     }

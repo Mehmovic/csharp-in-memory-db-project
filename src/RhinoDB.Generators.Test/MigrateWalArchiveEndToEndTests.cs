@@ -6,12 +6,12 @@ using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Generators.Test;
 
-// Phase 6, step 28: proves the generated {Db}.ConsolidateArchive() really rewrites an archived segment's
+// Phase 6, step 28: proves the generated {Db}.MigrateWalArchive() really rewrites an archived segment's
 // bytes forward, not just advances a watermark. Mirrors GenesisReplayGenerationAwareTests.cs's archive
 // seeding technique (an OLD [FrozenSchema(0)] shape's own Raw serializer, written directly into the
-// archive) - after ConsolidateArchive() runs, the same segment must decode as the CURRENT shape without
+// archive) - after MigrateWalArchive() runs, the same segment must decode as the CURRENT shape without
 // ever going through [Migration(0)] again, proving the bytes on disk actually changed.
-public class ConsolidateArchiveEndToEndTests {
+public class MigrateWalArchiveEndToEndTests {
     private const string Descriptor = """
                                       {
                                         "Databases": [ { "FullName": "global::TestNs.VaultDb", "Generation": 1, "InvalidGenerations": [], "RetainedFromGeneration": 0 } ],
@@ -48,8 +48,8 @@ public class ConsolidateArchiveEndToEndTests {
                                   """;
 
     [Test]
-    public async Task ConsolidateArchive_AnOldGenerationSegment_IsRewrittenToTheCurrentGenerationAndShape() {
-        var dir = Path.Combine(Path.GetTempPath(), "rhinodb-consolidate-archive-e2e-tests", Guid.NewGuid().ToString("N"));
+    public async Task MigrateWalArchive_AnOldGenerationSegment_IsRewrittenToTheCurrentGenerationAndShape() {
+        var dir = Path.Combine(Path.GetTempPath(), "rhinodb-wal-migrate-e2e-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try {
             var (asm, _) = GeneratorTestHost.CompileAndLoadWithDescriptor(Source, Descriptor);
@@ -69,11 +69,11 @@ public class ConsolidateArchiveEndToEndTests {
             Assert.That(cold.RunMigration(1, []).IsOk(), Is.True, "bump G_db to 1 (matching G_binary) with no rows to migrate - only the archive is under test here.");
 
             var db = Activator.CreateInstance(dbType, cold)!;
-            var consolidateResult = (Result)dbType.GetMethod("ConsolidateArchive")!.Invoke(db, null)!;
-            Assert.That(consolidateResult.IsOk(), Is.True);
+            var migrateResult = (Result)dbType.GetMethod("MigrateWalArchive")!.Invoke(db, null)!;
+            Assert.That(migrateResult.IsOk(), Is.True);
 
             Assert.That(cold.ReadRetainedFromGeneration().Unwrap(), Is.EqualTo(1),
-                "the watermark must advance to the same target generation the segments were consolidated to.");
+                "the watermark must advance to the same target generation the segments were migrated to.");
 
             var history = WalArchive.ReadHistory(dir, [], 1).Unwrap();
             Assert.That(history, Has.Count.EqualTo(1));
@@ -85,15 +85,15 @@ public class ConsolidateArchiveEndToEndTests {
             Assert.That(migratedRow.GetType().GetProperty("Id")!.GetValue(migratedRow), Is.EqualTo(7));
             Assert.That(migratedRow.GetType().GetProperty("Balance")!.GetValue(migratedRow), Is.EqualTo(150m));
             Assert.That(migratedRow.GetType().GetProperty("Tier")!.GetValue(migratedRow), Is.EqualTo("Bronze"),
-                "the bytes on disk must have actually gone through [Migration(0)] during consolidation, not just been re-tagged.");
+                "the bytes on disk must have actually gone through [Migration(0)] during migration, not just been re-tagged.");
         } finally {
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
     }
 
     [Test]
-    public async Task ConsolidateArchive_ASegmentAlreadyAtTheCurrentGeneration_IsLeftUntouched() {
-        var dir = Path.Combine(Path.GetTempPath(), "rhinodb-consolidate-archive-untouched-tests", Guid.NewGuid().ToString("N"));
+    public async Task MigrateWalArchive_ASegmentAlreadyAtTheCurrentGeneration_IsLeftUntouched() {
+        var dir = Path.Combine(Path.GetTempPath(), "rhinodb-wal-migrate-untouched-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try {
             var (asm, _) = GeneratorTestHost.CompileAndLoadWithDescriptor(Source, Descriptor);
@@ -112,9 +112,9 @@ public class ConsolidateArchiveEndToEndTests {
             Assert.That(cold.RunMigration(1, []).IsOk(), Is.True);
 
             var db = Activator.CreateInstance(dbType, cold)!;
-            var consolidateResult = (Result)dbType.GetMethod("ConsolidateArchive")!.Invoke(db, null)!;
+            var migrateResult = (Result)dbType.GetMethod("MigrateWalArchive")!.Invoke(db, null)!;
 
-            Assert.That(consolidateResult.IsOk(), Is.True);
+            Assert.That(migrateResult.IsOk(), Is.True);
             var history = WalArchive.ReadHistory(dir, [], 1).Unwrap();
             Assert.That(history[0].Entry.Changes[0].Row, Is.EqualTo(liveRowBytes), "already at the target generation - must be left byte-for-byte untouched.");
         } finally {

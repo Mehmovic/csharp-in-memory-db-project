@@ -729,9 +729,9 @@ the tail and then truncates the WAL to empty, so the WAL only ever holds "change
 the last checkpoint". There is nothing in it to retain or expire.
 
 **The archive is where retention lives**, and it was previously *generation*-only
-(`--X.prune-target-generation=N`). A generation has no fixed duration - it spans "since the
+(`--X.wal-keep-generations=N`). A generation has no fixed duration - it spans "since the
 last checkpoint", which depends on how busy the database was - so **"keep the last 7 days"
-was not expressible at all**. New: `--X.prune-older-than=<ISO-8601>`.
+was not expressible at all**. New: `--X.wal-prune-older-than=<ISO-8601>`.
 
 **The timestamp accepts whatever an operator actually types, and resolves it to UTC:**
 
@@ -822,7 +822,7 @@ which is precisely the silent wrong state described above.
 (generation-based) was still evaluating segments one at a time and `continue`-ing past any segment
 at or above the floor, and it did not even order the directory - so it relied on generations being
 monotonic along sequence order, an invariant **enforced nowhere**. Generations are monotonic in
-practice (a segment is tagged with the generation current at its checkpoint, and consolidation
+practice (a segment is tagged with the generation current at its checkpoint, and archive migration
 re-tags a whole range uniformly), so it was not yet a live bug - but the two paths no longer
 looked alike, which is exactly how the timestamp path gets the bug re-introduced. It now takes the
 identical shape: `OrderBy(Ordinal)` then `break` at the first segment to keep. With monotonic
@@ -834,7 +834,7 @@ pin it: a non-monotonic archive (`3, 7, 5` against a floor of 6) keeps the `7, 5
 ordinary monotonic case still deletes every generation below the floor, and a side-by-side case
 gives both paths the same backwards-clock archive and asserts they agree.
 
-Timestamps survive archiving: `WriteSegment` and `ConsolidateSegments` re-encode from
+Timestamps survive archiving: `WriteSegment` and `MigrateSegments` re-encode from
 `DecodedWalEntry`, and both now pass `entry.UtcTicks` through. Re-stamping there would have
 overwritten every history timestamp with the checkpoint's time and made pruning meaningless.
 
@@ -883,7 +883,7 @@ Two knobs, in `config.json`:
 
 `KeepFor` is a **duration**, not a cutoff timestamp, because that is how an operator thinks
 ("keep a month"). Each pass turns it into an absolute UTC cutoff and applies the same
-whole-segment rule as `--prune-older-than`. Nothing else needs to know about it. Both knobs are
+whole-segment rule as `--wal-prune-older-than`. Nothing else needs to know about it. Both knobs are
 validated: enabled-but-incomplete, a zero/negative duration, or an unparseable one all throw a
 `GeneratorConfigException` naming the offending field, rather than silently defaulting to zero.
 
@@ -962,12 +962,12 @@ Scheduling the prune as an ordinary `Run` operation fixes both for free: the sin
 model already serializes it against `BeginScope`'s checkpoint, since the delegate body and
 the checkpoint run on the same thread.
 
-### `rhinodb dev prune` - the same rules, from a terminal
+### `rhinodb wal prune` - the same rules, from a terminal
 
 Retention is reachable two ways, and they are deliberately the *same* code:
 
-    rhinodb dev prune --cold-path <dir> --older-than <timestamp>     keep everything newer
-    rhinodb dev prune --cold-path <dir> --keep-generations <n>       keep the last n generations
+    rhinodb wal prune --cold-path <dir> --older-than <timestamp>     keep everything newer
+    rhinodb wal prune --cold-path <dir> --keep-generations <n>       keep the last n generations
     (add --yes to actually delete; repeatable --cold-path for several databases)
 
 `--older-than` goes through the same `RhinoHostOptions.ResolveUtcTicks` the host flag uses, so
@@ -1001,4 +1001,4 @@ Configuration note: `config.json` is a **compile-time** `AdditionalFile` consume
 generators (`ServerConfig` currently holds only `Version`), so a GC interval placed there
 would need a recompile to change. The runtime home is `DatabaseOptions`, the same
 `AddDatabase(name, options => ...)` surface already used for `CreateDb` / `LoadAsync` /
-`LoadFromGenesis` / `ConsolidateArchive`.
+`LoadFromGenesis` / `MigrateWalArchive`.
