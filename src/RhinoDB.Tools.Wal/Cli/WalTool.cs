@@ -1,4 +1,4 @@
-namespace RhinoDB.Tools.Dev;
+namespace RhinoDB.Tools.Wal;
 
 static public class WalTool {
     static public int Run(string[] args) {

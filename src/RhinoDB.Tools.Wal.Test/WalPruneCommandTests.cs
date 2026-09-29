@@ -1,7 +1,7 @@
 using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Tables;
 
-namespace RhinoDB.Tools.Dev.Test;
+namespace RhinoDB.Tools.Wal.Test;
 
 // `rhinodb wal prune` acts on a real cold-storage directory through the real ColdStore, because
 // the point of the command is that it calls the SAME prune the host's Prune mode calls rather than

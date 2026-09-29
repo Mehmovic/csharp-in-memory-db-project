@@ -8,11 +8,6 @@ static internal class Program {
         return Dispatch(args);
     }
 
-    // Split from Main so MSBuildLocator.RegisterDefaults() runs before the JIT needs to resolve any
-    // Microsoft.Build.*/Microsoft.CodeAnalysis.MSBuild type reference - those assemblies don't exist at a
-    // fixed, discoverable location until MSBuildLocator finds the installed SDK and registers it. Dispatch
-    // itself, and everything it calls into (RhinoDB.Tools.Migration included), must stay out of Main's own
-    // method body for the same reason.
     static private int Dispatch(string[] args) {
         if (args.Length == 0) {
             PrintUsage();
@@ -22,7 +17,7 @@ static internal class Program {
         return args[0] switch {
             "migration" => RhinoDB.Tools.Migration.MigrationTool.Run(args[1..]),
             "dev" => RhinoDB.Tools.Dev.DevTool.Run(args[1..]),
-            "wal" => RhinoDB.Tools.Dev.WalTool.Run(args[1..]),
+            "wal" => RhinoDB.Tools.Wal.WalTool.Run(args[1..]),
             "contract" => RhinoDB.Tools.Contract.ContractTool.Run(args[1..]),
             _ => Unknown(args[0]),
         };

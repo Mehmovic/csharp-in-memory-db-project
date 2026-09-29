@@ -1,3 +1,4 @@
+using RhinoDB.Lib.Cli;
 using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Tools.Dev;

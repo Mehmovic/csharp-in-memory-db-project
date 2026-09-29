@@ -1,6 +1,6 @@
-namespace RhinoDB.Tools.Dev;
+namespace RhinoDB.Lib.Cli;
 
-static internal class ColdPathArg {
+static public class ColdPathArg {
     static public List<string> Resolve(string[] args, out string? error) {
         var paths = new List<string>();
 

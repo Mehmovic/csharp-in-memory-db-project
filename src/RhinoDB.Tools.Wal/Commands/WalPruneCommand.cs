@@ -1,10 +1,11 @@
 using System.Globalization;
 
+using RhinoDB.Lib.Cli;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Hosting;
 
-namespace RhinoDB.Tools.Dev;
+namespace RhinoDB.Tools.Wal;
 
 static public class WalPruneCommand {
     static public int Run(string[] args) {
