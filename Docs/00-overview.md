@@ -2,9 +2,9 @@
 
 ## What we're building
 
-RhinoDB is an in-process, embedded, transactional database library for C# (net11.0).
-It's linked directly into the host process — no wire protocol, no client/server round
-trip. A call into RhinoDB is a function call, not a network request.
+RhinoDB is an **embedded database engine tailored for online games**, for C# (net11.0).
+It is a library, not a standalone server: the application hosts it in-process, so a
+call into the engine is a function call, not a network request.
 
 Two table kinds cover every storage need:
 
@@ -15,6 +15,26 @@ Whether a table is persistent or instant is a declaration choice. Whether a give
 *call* is transactional is a separate, per-call decision — any call can open a
 transaction explicitly, and a single-operation write to a persistent table gets a
 no-ceremony `.Atomic` path that opens+commits a transaction internally.
+
+## Hosting: the application owns the process
+
+The host application always runs an HTTP server, the way ASP.NET Core applications do:
+
+- **REST** — administration and the command centre.
+- **Realtime** — the upgrade endpoint the subscribe-and-diff layer rides on. WebSocket is
+  the first transport; WebTransport and a reliable-UDP layer are possible later behind the
+  same abstraction, and only those transport implementations may know the HTTP server
+  exists. The subscription and fan-out code is written against the transport abstraction
+  and never against HTTP.
+
+`RhinoDB.Lib` does not reference ASP.NET Core, which is what keeps that separation real.
+The offline CLI tools (`contract`, `migration`, `wal`, `dev`) never start a server at all.
+
+**One data directory belongs to one process.** The engine holds its write-ahead log
+exclusively and libmdbx takes its own locks, so two processes must never be pointed at the
+same directory. "Embedded" means exactly that: the data lives inside the application that
+owns it. Scaling is therefore more `DbContext`s in one process, not more processes against
+one file.
 
 ## Why this exists
 
@@ -52,6 +72,16 @@ goal.
 - **[Architecture](02-architecture.md)** — the core model: table kinds, transactions,
   execution model, storage engine, indexing, cold storage.
 - **[Roadmap](03-roadmap.md)** — the build order, current status, and what's next.
+- **[Networking](04-networking.md)** — the realtime layer: sessions and frames, transport
+  abstraction, the REST command centre, and the boundary that keeps the HTTP server out of
+  the fan-out code.
+- **[WAL design](05-wal-design.md)** — durability: group commit, checkpoints, the archive,
+  time-based retention, and why reads never touch the log.
+- **[Schema migration](06-schema-migration.md)** — contract generations and how an on-disk
+  format is migrated at startup.
+- **[Client codegen](07-client-codegen.md)** — generating client bindings and their codec.
+- **[Debug session capture](08-debug-session-capture.md)** — capturing and replaying a live
+  session for diagnosis.
 
 These `Docs/` files are the authoritative, continuously-updated design — not a
 summary of something more detailed living elsewhere. Design work used to be
