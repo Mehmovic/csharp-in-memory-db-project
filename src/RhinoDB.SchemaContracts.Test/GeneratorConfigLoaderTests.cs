@@ -1,6 +1,6 @@
 namespace RhinoDB.SchemaContracts.Test;
 
-// config.json is one unified file, sections keyed by concern ("Generator", "Server", ...) rather than one
+// rdbsettings.json is one unified file, sections keyed by concern ("Generator", "Server", ...) rather than one
 // file per concern - GeneratorConfigLoader.Load/Parse stay shaped exactly like before (return just
 // GeneratorConfig) for every existing caller; LoadFull/ParseFull expose the whole RhinoDbConfig for callers
 // that need other sections too.

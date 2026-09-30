@@ -24,7 +24,7 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var configProtocol = context.AdditionalTextsProvider
-            .Where(static t => Path.GetFileName(t.Path) == "config.json")
+            .Where(static t => Path.GetFileName(t.Path) == "rdbsettings.json")
             .Collect()
             .Select(static (texts, ct) => {
                 if (texts.Length == 0) return ClientProtocolKind.Raw;

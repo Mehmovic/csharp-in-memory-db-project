@@ -363,7 +363,7 @@ public class DiagnosticsTests {
 
     [Test]
     public void RawProtocol_NeitherSerializationAttributeIsMandatory() {
-        // Raw is the default (no config.json at all) - a row with zero serialization
+        // Raw is the default (no rdbsettings.json at all) - a row with zero serialization
         // attributes compiles fine, since Raw's own SerializeRow/DeserializeRow is the whole client
         // pipeline for that project; RHINO015 never fires under Raw.
         const string source = """

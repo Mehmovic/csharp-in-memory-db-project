@@ -1,6 +1,6 @@
 <Project>
     <PropertyGroup>
-        <_RhinoConfigPath>$(MSBuildProjectDirectory)\config.json</_RhinoConfigPath>
+        <_RhinoConfigPath>$(MSBuildProjectDirectory)\rdbsettings.json</_RhinoConfigPath>
         <_RhinoConfigJson Condition="Exists('$(_RhinoConfigPath)')">$([System.IO.File]::ReadAllText('$(_RhinoConfigPath)'))</_RhinoConfigJson>
         <RhinoSourceParentDirectory Condition="'$(_RhinoConfigJson)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_RhinoConfigJson)', '"SourceParentDirectory"\s*:\s*"([^"]*)"').Groups[1].Value)</RhinoSourceParentDirectory>
         <RhinoSourceParentDirectory Condition="'$(RhinoSourceParentDirectory)' == ''">RhinoContracts</RhinoSourceParentDirectory>
@@ -18,6 +18,6 @@
 
     <ItemGroup>
         <AdditionalFiles Include="$(RhinoSchemaDescriptorPath)" Condition="Exists('$(RhinoSchemaDescriptorPath)')" />
-        <AdditionalFiles Include="config.json" Condition="Exists('config.json')" />
+        <AdditionalFiles Include="rdbsettings.json" Condition="Exists('rdbsettings.json')" />
     </ItemGroup>
 </Project>

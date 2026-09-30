@@ -34,16 +34,16 @@ static internal class GeneratorTestHost {
         CompileAndLoad(source, ImmutableArray<IIncrementalGenerator>.Empty, testName,
             ImmutableArray.Create<AdditionalText>(new InMemoryAdditionalText("Descriptor.json", descriptorJson)));
 
-    // config.json is consumed the same way Descriptor.json is (Part F, Phase 1) - a real MSBuild build
+    // rdbsettings.json is consumed the same way Descriptor.json is (Part F, Phase 1) - a real MSBuild build
     // supplies it as an <AdditionalFiles> item; this is the in-memory stand-in for tests. One unified file,
     // sections keyed by concern ("Generator", "Server", ...) - pass the full nested JSON here.
     static public (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoadWithConfig(
         string source, string configJson, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
         CompileAndLoad(source, ImmutableArray<IIncrementalGenerator>.Empty, testName,
-            ImmutableArray.Create<AdditionalText>(new InMemoryAdditionalText("config.json", configJson)));
+            ImmutableArray.Create<AdditionalText>(new InMemoryAdditionalText("rdbsettings.json", configJson)));
 
     // Convenience overload for the common case: most tests only care about the resolved ClientProtocol,
-    // not any of config.json's other (path-related, or Server-section) fields.
+    // not any of rdbsettings.json's other (path-related, or Server-section) fields.
     static public (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoadWithClientProtocol(
         string source, ClientProtocolKind clientProtocol, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
         CompileAndLoadWithConfig(source, $$$"""{"Generator": {"ClientProtocol": "{{{clientProtocol}}}"}}""", testName);
@@ -53,7 +53,7 @@ static internal class GeneratorTestHost {
         CompileAndLoad(source, ImmutableArray<IIncrementalGenerator>.Empty, testName,
             ImmutableArray.Create<AdditionalText>(
                 new InMemoryAdditionalText("Descriptor.json", descriptorJson),
-                new InMemoryAdditionalText("config.json", $$$"""{"Generator": {"ClientProtocol": "{{{clientProtocol}}}"}}""")));
+                new InMemoryAdditionalText("rdbsettings.json", $$$"""{"Generator": {"ClientProtocol": "{{{clientProtocol}}}"}}""")));
 
     // Also runs MemoryPack.Generator/MessagePackAnalyzer's real generators alongside TableGenerator,
     // proving end-to-end that a correctly-attributed row (or CustomType field) gets a REAL generated

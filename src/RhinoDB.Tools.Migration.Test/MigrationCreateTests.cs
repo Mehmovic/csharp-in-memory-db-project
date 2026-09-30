@@ -100,7 +100,7 @@ public class MigrationCreateTests {
         var csprojPath = CopyFixtureToTempDirectory();
         var projectDirectory = Path.GetDirectoryName(csprojPath)!;
         try {
-            File.WriteAllText(Path.Combine(projectDirectory, "config.json"), """{"Generator": {"ClientProtocol": "MessagePack"}}""");
+            File.WriteAllText(Path.Combine(projectDirectory, "rdbsettings.json"), """{"Generator": {"ClientProtocol": "MessagePack"}}""");
 
             var exitCode = RhinoDB.Tools.Migration.MigrationTool.Run(["create", "--project", csprojPath]);
             Assert.That(exitCode, Is.EqualTo(0));

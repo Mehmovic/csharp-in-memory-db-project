@@ -72,7 +72,7 @@ public class ShorthandExpansionRunnerTests {
 
     [Test]
     public void Generate_MalformedConfigJson_ReturnsErrorOutcomeInsteadOfThrowing() {
-        File.WriteAllText(Path.Combine(tempDir, "config.json"), "{ not valid json");
+        File.WriteAllText(Path.Combine(tempDir, "rdbsettings.json"), "{ not valid json");
 
         var outcome = ShorthandExpansionRunner.Generate(tempDir);
 

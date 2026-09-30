@@ -411,7 +411,7 @@ public class RhinoHostBuilderTests {
 
     [Test]
     public async Task BuildAsync_WithRetentionOff_CreatesNoCollectorAndNoTimer() {
-        // config.json in the test output has no Server.ArchiveRetention, and no per-database
+        // rdbsettings.json in the test output has no Server.ArchiveRetention, and no per-database
         // override is set - so retention is off and must cost nothing: no collector object, and
         // since the collector owns the Timer, no Timer either.
         var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])

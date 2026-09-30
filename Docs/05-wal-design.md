@@ -226,7 +226,7 @@ successful experiment too, recorded and closed like the coalescing one was.
 - Crash rule: only the fsync'd prefix exists; everything past it is treated as
   never happened.
 
-**Sustained-load validation (2026-09-14, `WriteAheadLogSustainedLoadTests.cs`)** — Phase 0's
+**Sustained-load validation (2026-09-14; diagnostic since removed 2026-09-30)** — Phase 0's
 numbers were all single-burst (fire N concurrently, wait for all, done). A first attempt at a
 sustained-load check used 16 workers each awaiting their own append before issuing their next one
 — that measured **~280 μs/op, ~10x worse than Phase 0's burst numbers**, alarming until the model
@@ -240,6 +240,16 @@ across the run (second-half average lower than first-half). Confirms group commi
 longer sustained run, not just a single burst — and is a reminder that a benchmark's *concurrency
 shape*, not just its op count, has to match how the real caller actually behaves, or the number it
 produces is meaningless (worse: alarming in the wrong direction).
+
+> **Removed 2026-09-30.** The finding above stands and is the reason the diagnostic existed
+> (a benchmark whose concurrency shape does not match the real caller measures nothing useful). The test itself is
+> gone: it asserted per-op throughput, which is a property of the machine, not of the code. It failed
+> intermittently under full-solution parallel load (one batch spiking ~30x from Defender realtime scanning,
+> commit be219e6) and passed in isolation, so it was measuring fsync throughput on a loaded box.
+> Measured properties belong to `WalPrototypeBenchmarks.BatchFreshKeyConfirmedInserts`, which BenchmarkDotNet
+> already repeats across many invocations and reports per-iteration statistics. The accepted cost is that a
+> genuine resource leak in the group-commit path would now show as drift in a benchmark report rather than a
+> red test - which is the right way round for a durability path, and the reports are committed.
 
 **Correctness review findings (2026-09-14) — two real bugs, both fixed:**
 
@@ -865,7 +875,7 @@ The collector **never touches the live WAL.** Every checkpoint archives the tail
 the WAL to empty, so it holds only "changes since the last checkpoint" - there is nothing in
 it to expire. What expires is the ARCHIVE.
 
-Two knobs, in `config.json`:
+Two knobs, in `rdbsettings.json`:
 
 ```json
 {
@@ -887,7 +897,7 @@ whole-segment rule as `--wal-prune-older-than`. Nothing else needs to know about
 validated: enabled-but-incomplete, a zero/negative duration, or an unparseable one all throw a
 `GeneratorConfigException` naming the offending field, rather than silently defaulting to zero.
 
-**The policy is FROZEN, like every other value in config.json.** config.json is a build-time
+**The policy is FROZEN, like every other value in rdbsettings.json.** rdbsettings.json is a build-time
 `AdditionalFiles` input and is deliberately NOT copied to the output, so a policy read from a
 file at runtime would not exist there - and a retention window that can be edited underneath a
 running server is one nobody can reason about. The application reads it once, at startup, through
@@ -906,7 +916,7 @@ await RhinoHostBuilder.Create(args)
     .BuildAsync();
 ```
 
-Changing the window means editing config.json and **restarting**. `DatabaseOptions.ArchiveRetention`
+Changing the window means editing rdbsettings.json and **restarting**. `DatabaseOptions.ArchiveRetention`
 wins over the file, for tests and for a server giving each game a different window; and
 `DbContext<TTx>.ConfiguredArchiveRetention` is a virtual defaulting to `null` (retention off), so a
 generated database can carry its own frozen policy later without the host knowing.
@@ -997,7 +1007,7 @@ with what replay would actually read.
 `DeleteSegmentsOlderThan` now returns `Result<int>` (a count) so both policies report how
 much they removed, and the host's Prune case was collapsed from ~40 lines of inline floor
 handling onto the two shared `ColdStore` methods.
-Configuration note: `config.json` is a **compile-time** `AdditionalFile` consumed by the
+Configuration note: `rdbsettings.json` is a **compile-time** `AdditionalFile` consumed by the
 generators (`ServerConfig` currently holds only `Version`), so a GC interval placed there
 would need a recompile to change. The runtime home is `DatabaseOptions`, the same
 `AddDatabase(name, options => ...)` surface already used for `CreateDb` / `LoadAsync` /

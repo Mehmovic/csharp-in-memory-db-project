@@ -141,7 +141,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         "RHINO015",
         "Table row missing mandatory client-protocol serialization attribute",
         "Row type '{0}' is [Table]-attributed but is missing {1} - this project's ClientProtocol "
-        + "(config.json's Generator section) requires it on every table row ([MemoryPackable] needs "
+        + "(rdbsettings.json's Generator section) requires it on every table row ([MemoryPackable] needs "
         + "GenerateType.VersionTolerant if the row has any reference-typed field - MemoryPack rejects "
         + "VersionTolerant on a fully-unmanaged struct), so client access always has a real, "
         + "source-generated formatter available for whichever protocol this project chose",
@@ -231,8 +231,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private readonly DiagnosticDescriptor MalformedGeneratorConfigDiagnostic = new(
         "RHINO024",
-        "config.json is malformed",
-        "The committed config.json additional file failed to parse: {0} - fix or regenerate it; "
+        "rdbsettings.json is malformed",
+        "The committed rdbsettings.json additional file failed to parse: {0} - fix or regenerate it; "
         + "until then ClientProtocol falls back to its default (Raw) rather than blocking the build outright",
         "RhinoDB.Generators",
         DiagnosticSeverity.Warning,
@@ -244,7 +244,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var configResult = context.AdditionalTextsProvider
-            .Where(static t => Path.GetFileName(t.Path) == "config.json")
+            .Where(static t => Path.GetFileName(t.Path) == "rdbsettings.json")
             .Collect()
             .Select(static (texts, ct) => {
                 if (texts.Length == 0) return (Protocol: ClientProtocolKind.Raw, ParseError: (Diagnostic?)null);

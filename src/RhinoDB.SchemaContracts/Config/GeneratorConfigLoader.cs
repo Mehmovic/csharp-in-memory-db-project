@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace RhinoDB.SchemaContracts;
 
 static public class GeneratorConfigLoader {
-    public const string ConfigFileName = "config.json";
+    public const string ConfigFileName = "rdbsettings.json";
 
     static public GeneratorConfig Load(string projectDirectory) => LoadFull(projectDirectory).Generator;
 
