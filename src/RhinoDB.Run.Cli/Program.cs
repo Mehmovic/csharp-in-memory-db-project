@@ -1,5 +1,7 @@
 using Microsoft.Build.Locator;
 
+using RhinoDB.Lib.Cli;
+
 namespace RhinoDB.Run.Cli;
 
 static internal class Program {
@@ -9,6 +11,8 @@ static internal class Program {
     }
 
     static private int Dispatch(string[] args) {
+        if (ShowPaths.Requested(args)) return ShowPaths.Run(args);
+        
         if (args.Length == 0) {
             PrintUsage();
             return 1;
@@ -40,6 +44,9 @@ static internal class Program {
               rhinodb wal prune --cold-path <path> [--older-than <timestamp> | --keep-generations <n>] [--yes]
               rhinodb contract generate [--project <path>] [--no-clean]
               rhinodb contract clean [--project <path>]
+
+            Add --show-paths to any command to print the project and cold paths it would
+            use, then exit without doing the work.
             """);
     }
 }
