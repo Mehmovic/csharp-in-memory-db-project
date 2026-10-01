@@ -42,6 +42,11 @@ public class DenseArray<T>
         return index;
     }
 
+    public void Truncate(int count) {
+        if (count <= Count) return;
+        Count = count;
+    }
+
     public void EnsureCapacity(int totalCount) {
         var neededChunks = (totalCount + chunkSize - 1) >> chunkShift;
         if (neededChunks <= chunkCount) return;

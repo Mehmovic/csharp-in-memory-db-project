@@ -982,6 +982,36 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine();
     }
 
+    static private void EmitUndoPreamble(StringBuilder sb, TableModel table) {
+        sb.AppendLine($"        using var undoBuilder = StackArrayPoolContainerBuilder<UndoRecord<{table.RowTypeFullName}>>.Create(changes.Count);");
+        sb.AppendLine($"        var undoCount = 0;");
+        sb.AppendLine($"        var preApplyCount = storage.Count;");
+        sb.AppendLine($"        try {{");
+    }
+
+    static private void EmitUndoCatch(StringBuilder sb, TableModel table) {
+        sb.AppendLine($"        }}");
+        sb.AppendLine($"        }}");
+        sb.AppendLine($"        catch {{");
+        sb.AppendLine($"            Undo(storage, undoBuilder.BufferResult().Unwrap(), undoCount, preApplyCount);");
+        sb.AppendLine($"            throw;");
+        sb.AppendLine($"        }}");
+    }
+
+    static private void EmitUndoMethod(StringBuilder sb, TableModel table) {
+        sb.AppendLine();
+        sb.AppendLine($"    private void Undo(DenseArray<{table.RowTypeFullName}> target, System.ReadOnlySpan<UndoRecord<{table.RowTypeFullName}>> journal, int count, int preApplyCount) {{");
+        sb.AppendLine($"        for (var i = count - 1; i >= 0; i--) {{");
+        sb.AppendLine($"            var step = journal[i];");
+        sb.AppendLine($"            target.Set(step.Offset, step.Row);");
+        sb.AppendLine($"            primaryIndex.Insert(step.Row.{table.PrimaryKeyName}, step.Offset);");
+        foreach (var idx in table.Indexes)
+            sb.AppendLine($"            {IndexFieldName(idx)}.Insert({KeyExpr("step.Row", idx)}, step.Offset);");
+        sb.AppendLine($"        }}");
+        sb.AppendLine($"        target.Truncate(preApplyCount);");
+
+        sb.AppendLine($"    }}");
+    }
     static private void EmitValidateMethod(StringBuilder sb, TableModel table) {
         var uniqueIndexes = table.Indexes.Where(i => i.Uniqueness == Uniqueness.Unique).ToImmutableArray();
         sb.AppendLine("    public bool Validate() {");
@@ -1289,6 +1319,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
     static private void EmitInstantApply(StringBuilder sb, TableModel table) {
         sb.AppendLine("    public void Apply(long lsn) {");
         sb.AppendLine("        using var deleteOffsetsBuilder = StackArrayPoolContainerBuilder<int>.Create(changes.Count);");
+        EmitUndoPreamble(sb, table);
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
         sb.AppendLine("            switch (c.Kind) {");
         sb.AppendLine("                case ChangeKind.Insert: {");
@@ -1306,6 +1337,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
+        sb.AppendLine($"                    undoBuilder.Add(new UndoRecord<{table.RowTypeFullName}>(offset, oldRow)); undoCount++;");
         sb.AppendLine("                    storage.Set(offset, c.Row);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
@@ -1322,6 +1354,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
+        sb.AppendLine($"                    undoBuilder.Add(new UndoRecord<{table.RowTypeFullName}>(offset, oldRow)); undoCount++;");
         sb.AppendLine("                    primaryIndex.Delete(c.Key);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
@@ -1332,11 +1365,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
-        sb.AppendLine("        }");
+        EmitUndoCatch(sb, table);
         EmitDeleteCompactionPass(sb, table);
         sb.AppendLine("        changes.Clear();");
         sb.AppendLine("        Dirty = false;");
         sb.AppendLine("    }");
+        EmitUndoMethod(sb, table);
     }
 
     static private void EmitDeleteCompactionPass(StringBuilder sb, TableModel table) {
@@ -1420,6 +1454,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
     static private void EmitPersistentApply(StringBuilder sb, TableModel table) {
         sb.AppendLine("    public void Apply(long lsn) {");
         sb.AppendLine("        using var deleteOffsetsBuilder = StackArrayPoolContainerBuilder<int>.Create(changes.Count);");
+        EmitUndoPreamble(sb, table);
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
         sb.AppendLine("            switch (c.Kind) {");
         sb.AppendLine("                case ChangeKind.Insert: {");
@@ -1442,6 +1477,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
+        sb.AppendLine($"                    undoBuilder.Add(new UndoRecord<{table.RowTypeFullName}>(offset, oldRow)); undoCount++;");
         sb.AppendLine("                    storage.Set(offset, c.Row);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
@@ -1462,6 +1498,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
+        sb.AppendLine($"                    undoBuilder.Add(new UndoRecord<{table.RowTypeFullName}>(offset, oldRow)); undoCount++;");
         sb.AppendLine("                    primaryIndex.Delete(c.Key);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
@@ -1474,11 +1511,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
-        sb.AppendLine("        }");
+        EmitUndoCatch(sb, table);
         EmitDeleteCompactionPass(sb, table);
         sb.AppendLine("        changes.Clear();");
         sb.AppendLine("        Dirty = false;");
         sb.AppendLine("    }");
+        EmitUndoMethod(sb, table);
     }
 
     static private void EmitReplayApply(StringBuilder sb, TableModel table) {
