@@ -68,6 +68,24 @@ static internal class GeneratorTestHost {
         string source, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
         CompileAndLoad(source, SerializationGenerators, testName, ImmutableArray<AdditionalText>.Empty);
 
+    // Runs DbErrorGenerator alone over a source snippet and returns its emitted trees by hint
+    // name. DbErrorGenerator has no [Table] fixture to compile against, so it cannot go through
+    // CompileAndLoad - and re-deriving a driver here would duplicate the reference set.
+    static public Dictionary<string, string> RunDbErrorGenerator(string source, string assemblyName) {
+        var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest));
+        var compilation = CSharpCompilation.Create(assemblyName, [tree], References,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var driver = CSharpGeneratorDriver.Create(new IIncrementalGenerator[] { new DbErrorGenerator() });
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
+
+
+        return output.SyntaxTrees
+            .Select(t => (Name: Path.GetFileName(t.FilePath), Text: t.GetText().ToString()))
+            .Where(entry => entry.Name.EndsWith(".g.cs"))
+            .ToDictionary(entry => entry.Name, entry => entry.Text, StringComparer.OrdinalIgnoreCase);
+    }
+    
     static private (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoad(
         string source, ImmutableArray<IIncrementalGenerator> extraGenerators, string testName, ImmutableArray<AdditionalText> additionalTexts) {
         var assemblyName = $"Gen_{testName}_{Guid.NewGuid():N}";
