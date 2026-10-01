@@ -78,14 +78,26 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
             txCreated = true;
             result = operation!.Invoke(ctx, tx, args);
             if (result.IsOk()) {
-                var applyResult = tx.Apply();
-                if (applyResult.IsError()) result = TValue.FromError(applyResult.GetError());
+                try {
+                    var applyResult = tx.Apply();
+                    if (applyResult.IsError()) result = TValue.FromError(applyResult.GetError());
+                }
+                catch (Exception ex) {
+                    cold?.PoisonDurability(DbError.ApplyFailedMidOperation());
+                    result = TValue.FromException(ex);
+                }
             }
         }
         catch (Exception ex) { result = TValue.FromException(ex); }
         if (txCreated && !result.IsOk()) tx.Discard();
 
-        Complete(result, ctx, cold?.EndScope(commit: result.IsOk(), mode, tx.LastLsn ?? 0));
+        try {
+            Complete(result, ctx, cold?.EndScope(commit: result.IsOk(), mode, tx.LastLsn ?? 0));
+        }
+        catch (Exception ex) {
+            cold?.PoisonDurability(DbError.ApplyFailedMidOperation());
+            try { core.SetResult(TValue.FromException(ex)); } catch { /* already completed */ }
+        }
     }
 
     private void Complete(TValue result, DbContext<TTx> ctx, Task<DbError?>? durabilityTask) {

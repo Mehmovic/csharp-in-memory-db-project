@@ -39,7 +39,8 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
 
     private async Task RunLoop() {
         await foreach (var item in channel.Reader.ReadAllAsync()) {
-            item.Run();
+            try { item.Run(); }
+            catch (Exception) { /* Already handled loudly */ }
         }
     }
 }

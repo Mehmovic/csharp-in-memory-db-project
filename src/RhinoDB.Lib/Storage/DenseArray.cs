@@ -42,6 +42,16 @@ public class DenseArray<T>
         return index;
     }
 
+    public void EnsureCapacity(int totalCount) {
+        var neededChunks = (totalCount + chunkSize - 1) >> chunkShift;
+        if (neededChunks <= chunkCount) return;
+
+        while (chunkCount < neededChunks) {
+            values.Add(new T[chunkSize]);
+            chunkCount += 1;
+        }
+    }
+
     public T Get(int index) {
         var chunkIndex = index >> chunkShift;
         return CollectionsMarshal.AsSpan(values)[chunkIndex][index & chunkMask];

@@ -986,6 +986,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var uniqueIndexes = table.Indexes.Where(i => i.Uniqueness == Uniqueness.Unique).ToImmutableArray();
         sb.AppendLine("    public bool Validate() {");
         sb.AppendLine("        var span = CollectionsMarshal.AsSpan(changes);");
+        sb.AppendLine("        var insertCount = 0;");
+        sb.AppendLine("        foreach (ref readonly var c in span) { if (c.Kind == ChangeKind.Insert) insertCount++; }");
+        sb.AppendLine("        if (insertCount > 0) storage.EnsureCapacity(storage.Count + insertCount);");
         sb.AppendLine("        for (var i = 0; i < span.Length; i++) {");
         sb.AppendLine("            ref readonly var c = ref span[i];");
         sb.AppendLine("            if (c.Kind == ChangeKind.Delete) continue;");
