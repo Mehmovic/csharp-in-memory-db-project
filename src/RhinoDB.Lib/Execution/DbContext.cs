@@ -9,6 +9,8 @@ public class DbContext<TTx> where TTx : ITransaction {
 
     public CleanupCollector Cleanup { get; private init; }
     internal ColdStore? Cold { get; }
+    internal DbError? Poison { get; private set; }
+    public bool IsPoisoned => Poison is not null;
 
     protected DbContext(bool startPaused = false, CleanupCollector? cleanupCollector = null) {
         executionLoop = new DbExecutionLoop<TTx>(this, startPaused);
@@ -20,6 +22,8 @@ public class DbContext<TTx> where TTx : ITransaction {
         executionLoop = new DbExecutionLoop<TTx>(this, startPaused);
         Cleanup = cleanupCollector ?? new CleanupCollector(CleanupTrigger.PerTime);
     }
+    
+    internal void PoisonDatabase(DbError error) => Poison ??= error;
 
     protected internal void ResumeExecution() => executionLoop.Resume();
 

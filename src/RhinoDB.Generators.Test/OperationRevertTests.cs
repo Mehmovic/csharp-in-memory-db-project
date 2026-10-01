@@ -102,6 +102,12 @@ public class OperationRevertTests {
         }));
     }
 
+    static private void ArmRevertFault(object tx, string accessor) {
+        var ops = T(tx, accessor);
+        ops.GetType().GetProperty("TestOnlyRevertFault")!.SetValue(ops, (Action)(() =>
+            throw new InvalidOperationException("injected fault during revert")));
+    }
+
     // ---- tests ----
 
     [Test]
@@ -212,5 +218,38 @@ public class OperationRevertTests {
             Assert.That((int)Probe(asm, "AccountBalance", tx, "Account", 1)!, Is.EqualTo(250));
             return Result.Ok();
         });
+    }
+
+    // RevertDb is built on the parameterless DbContext ctor, so it has no ColdStore.
+    // Poisoning used to be routed through the cold store only, which made it a no-op
+    // here: the database kept accepting operations after a failure it could not undo,
+    // and served memory it knew was wrong. The symptom would only surface once a
+    // client subscribed and received state that never existed.
+    [Test]
+    public void AFailedRevert_PoisonsAnInstantOnlyDatabaseSoLaterOperationsAreRefused() {
+        var (db, txType, asm) = NewDb();
+
+        Run(db, txType, (tx, _) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 100, 7)); return Result.Ok(); });
+
+        var failed = Run(db, txType, (tx, _) => {
+            ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 2, 300, 7));
+            ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 3, 400, 7));
+            ArmFault(tx, "Account", 1);
+            ArmRevertFault(tx, "Account");
+            return Result.Ok();
+        });
+        Assert.That(failed.GetError().Kind, Is.EqualTo(ErrorKind.ApplyFailed));
+
+        // The next operation must be refused outright - not run against memory the
+        // database already knows it cannot trust.
+        var afterwards = Run(db, txType, (tx, _) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 4, 500, 7)); return Result.Ok(); });
+        Assert.That(afterwards.GetError().Kind, Is.EqualTo(ErrorKind.ApplyFailed),
+            "an instant-only database must refuse work after an unrevertible failure");
+
+        var read = Run(db, txType, (tx, _) => {
+            ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 5, 600, 7));
+            return Result.Ok();
+        });
+        Assert.That(read.IsError(), Is.True);
     }
 }

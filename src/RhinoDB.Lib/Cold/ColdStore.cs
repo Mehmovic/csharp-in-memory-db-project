@@ -24,12 +24,8 @@ public sealed class ColdStore : IDisposable {
     private readonly Dictionary<uint, EvictionDropRegistration> evictionDrops = [];
     private readonly List<EvictionCandidate> drainedEvictions = [];
     private readonly List<EvictionCandidate> appliedEvictions = [];
-    private DbError? durabilityFailure;
 
     internal readonly WriteAheadLog Wal;
-    internal DbError DurabilityFailureError => durabilityFailure!.Value;
-    internal void PoisonDurability(DbError error) => durabilityFailure ??= error;
-    public bool IsDurabilityPoisoned => durabilityFailure is not null;
 
     public bool IsScopeActive { get; private set; }
 

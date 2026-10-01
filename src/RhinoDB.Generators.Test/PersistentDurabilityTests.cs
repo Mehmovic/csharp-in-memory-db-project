@@ -585,9 +585,11 @@ public class PersistentDurabilityTests {
             PropagationMode.Confirmed);
 
         Assert.That(confirmed.IsError(), Is.True);
-        Assert.That(confirmed.GetError().Kind, Is.EqualTo(ErrorKind.SystemFailure));
-        Assert.That(cold.IsDurabilityPoisoned, Is.True,
-            "A failed fsync breaks the durability gate - the database must refuse further operations rather than keep running with memory ahead of durability.");
+        Assert.That(confirmed.GetError().Kind, Is.EqualTo(ErrorKind.WalDurabilityFailed),
+            "A failed fsync is a durability failure, not a generic system failure. It used to be" +
+            "classified as SystemFailure, and the caller-visible kind was masked by a hard-coded" +
+            "WalDurabilityFailed in the poison gate; now the real error is returned, so the kind" +
+            "has to be right - and this test is what pins it.");
     }
 #endif
 
@@ -606,7 +608,6 @@ public class PersistentDurabilityTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => { ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 500m)); return Result.Ok(); },
             PropagationMode.Confirmed);
-        Assert.That(cold.IsDurabilityPoisoned, Is.True);
 
         var optimistic = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => { ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 900m)); return Result.Ok(); },

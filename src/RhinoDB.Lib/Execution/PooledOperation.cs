@@ -64,8 +64,8 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
     public void Run() {
         var ctx = context!;
         var cold = ctx.Cold;
-        if (cold is { IsDurabilityPoisoned: true }) {
-            Complete(TValue.FromError(DbError.WalDurabilityFailed()), ctx, null);
+        if (ctx.Poison is { } poisoned) {
+            Complete(TValue.FromError(poisoned), ctx, null);
             return;
         }
 
@@ -84,7 +84,7 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
                 }
                 catch (ApplyFailedException ex) {
                     var error = DbError.ApplyFailed(ex.InnerException);
-                    cold?.PoisonDurability(error);
+                    ctx.PoisonDatabase(error);
                     result = TValue.FromError(error);
                 }
             }
@@ -96,7 +96,7 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
             Complete(result, ctx, cold?.EndScope(commit: result.IsOk(), mode, tx.LastLsn ?? 0));
         }
         catch (Exception ex) {
-            cold?.PoisonDurability(DbError.ApplyFailed(ex));
+            ctx.PoisonDatabase(DbError.ApplyFailed(ex));
             try { core.SetResult(TValue.FromException(ex)); } catch { /* already completed */ }
         }
 
@@ -120,7 +120,7 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
     static private TValue Finalize(TValue result, Task<DbError?>? durabilityTask, DbContext<TTx> ctx) {
         if (durabilityTask is not { Result: { } err }) return result;
         
-        ctx.Cold?.PoisonDurability(err);
+        ctx.PoisonDatabase(err);
         return TValue.FromError(err);
     }
 }

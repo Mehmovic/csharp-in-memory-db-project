@@ -135,7 +135,7 @@ public sealed class WriteAheadLog : IDisposable {
                 fileStream.Flush(flushToDisk: true);
             }
         } catch (Exception ex) {
-            return DbError.SystemFailure(ex);
+            return DbError.WalDurabilityFailed(ex);
         }
 
         Interlocked.Exchange(ref bytesSinceLastFlush, 0);
@@ -174,7 +174,7 @@ public sealed class WriteAheadLog : IDisposable {
                 fileStream.Flush(flushToDisk: true);
                 Interlocked.Exchange(ref bytesSinceLastFlush, 0);
             } catch (Exception ex) {
-                error = DbError.SystemFailure(ex);
+                error = DbError.WalDurabilityFailed(ex);
             }
 
             lock (groupLock) { if (ReferenceEquals(inFlightGroup, tcs)) inFlightGroup = null; }
@@ -192,7 +192,7 @@ public sealed class WriteAheadLog : IDisposable {
             lock (appendLock) {
                 lock (groupLock) { if (ReferenceEquals(inFlightGroup, tcs)) inFlightGroup = null; }
             }
-            tcs.SetResult(DbError.SystemFailure(ex));
+            tcs.SetResult(DbError.WalDurabilityFailed(ex));
             return true;
         }
     }

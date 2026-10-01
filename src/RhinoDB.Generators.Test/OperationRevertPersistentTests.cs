@@ -239,7 +239,7 @@ public class OperationRevertPersistentTests {
 
     // A failed operation must leave the database able to accept the next one - for a
     // persistent table that also means not being poisoned, since poison is sticky and
-    // ColdStore.PoisonDurability is what sets it.
+    // DbContext.PoisonDatabase is what sets it.
     [Test]
     public void ARevertedPersistentOperation_LeavesTheDatabaseUsableForTheNextOperation() {
         using var cold = ColdStore.Open(dir).Unwrap();
