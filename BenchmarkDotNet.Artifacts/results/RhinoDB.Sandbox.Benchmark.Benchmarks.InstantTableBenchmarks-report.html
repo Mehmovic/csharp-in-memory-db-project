@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>RhinoDB.Sandbox.Benchmark.Benchmarks.InstantTableBenchmarks-20261001-213931</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.26300.9457)
+Unknown processor
+.NET SDK 11.0.100-rc.1.26425.128
+  [Host]   : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  ShortRun : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+</code></pre>
+<pre><code>Job=ShortRun  IterationCount=3  LaunchCount=1  
+WarmupCount=3  
+</code></pre>
+
+<table>
+<thead><tr><th>Method</th><th>RecordCount</th><th>Mean</th><th>Error</th><th>StdDev</th><th>Gen0</th><th>Gen1</th><th>Allocated</th>
+</tr>
+</thead><tbody><tr><td>Get</td><td>100</td><td>5.350 &mu;s</td><td>5.4113 &mu;s</td><td>0.2966 &mu;s</td><td>-</td><td>-</td><td>88 B</td>
+</tr><tr><td>Insert</td><td>100</td><td>13.061 &mu;s</td><td>90.4602 &mu;s</td><td>4.9584 &mu;s</td><td>0.0153</td><td>-</td><td>128 B</td>
+</tr><tr><td>Update</td><td>100</td><td>4.120 &mu;s</td><td>3.5165 &mu;s</td><td>0.1928 &mu;s</td><td>-</td><td>-</td><td>88 B</td>
+</tr><tr><td>GetArgs</td><td>100</td><td>3.738 &mu;s</td><td>2.8714 &mu;s</td><td>0.1574 &mu;s</td><td>-</td><td>-</td><td>32 B</td>
+</tr><tr><td>InsertArgs</td><td>100</td><td>3.873 &mu;s</td><td>3.2340 &mu;s</td><td>0.1773 &mu;s</td><td>-</td><td>-</td><td>48 B</td>
+</tr><tr><td>UpdateArgs</td><td>100</td><td>4.507 &mu;s</td><td>12.1313 &mu;s</td><td>0.6650 &mu;s</td><td>-</td><td>-</td><td>32 B</td>
+</tr><tr><td>Get</td><td>10000</td><td>3.635 &mu;s</td><td>6.9327 &mu;s</td><td>0.3800 &mu;s</td><td>0.0076</td><td>-</td><td>88 B</td>
+</tr><tr><td>Insert</td><td>10000</td><td>5.992 &mu;s</td><td>37.7306 &mu;s</td><td>2.0681 &mu;s</td><td>0.0153</td><td>0.0076</td><td>128 B</td>
+</tr><tr><td>Update</td><td>10000</td><td>4.377 &mu;s</td><td>7.0088 &mu;s</td><td>0.3842 &mu;s</td><td>0.0076</td><td>-</td><td>88 B</td>
+</tr><tr><td>GetArgs</td><td>10000</td><td>3.557 &mu;s</td><td>0.9050 &mu;s</td><td>0.0496 &mu;s</td><td>-</td><td>-</td><td>32 B</td>
+</tr><tr><td>InsertArgs</td><td>10000</td><td>3.796 &mu;s</td><td>1.6020 &mu;s</td><td>0.0878 &mu;s</td><td>0.0076</td><td>-</td><td>48 B</td>
+</tr><tr><td>UpdateArgs</td><td>10000</td><td>3.670 &mu;s</td><td>0.3678 &mu;s</td><td>0.0202 &mu;s</td><td>-</td><td>-</td><td>32 B</td>
+</tr><tr><td>Get</td><td>1000000</td><td>7.241 &mu;s</td><td>4.1280 &mu;s</td><td>0.2263 &mu;s</td><td>0.0076</td><td>-</td><td>88 B</td>
+</tr><tr><td>Insert</td><td>1000000</td><td>4.349 &mu;s</td><td>6.8611 &mu;s</td><td>0.3761 &mu;s</td><td>0.0153</td><td>-</td><td>128 B</td>
+</tr><tr><td>Update</td><td>1000000</td><td>4.076 &mu;s</td><td>6.3873 &mu;s</td><td>0.3501 &mu;s</td><td>0.0076</td><td>-</td><td>88 B</td>
+</tr><tr><td>GetArgs</td><td>1000000</td><td>3.392 &mu;s</td><td>1.5180 &mu;s</td><td>0.0832 &mu;s</td><td>-</td><td>-</td><td>32 B</td>
+</tr><tr><td>InsertArgs</td><td>1000000</td><td>3.917 &mu;s</td><td>1.8888 &mu;s</td><td>0.1035 &mu;s</td><td>0.0076</td><td>-</td><td>48 B</td>
+</tr><tr><td>UpdateArgs</td><td>1000000</td><td>3.506 &mu;s</td><td>1.7117 &mu;s</td><td>0.0938 &mu;s</td><td>-</td><td>-</td><td>32 B</td>
+</tr></tbody></table>
+</body>
+</html>
