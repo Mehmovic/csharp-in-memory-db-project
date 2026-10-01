@@ -97,7 +97,7 @@ public sealed class DbErrorGenerator : IIncrementalGenerator {
         sb.AppendLine("        ErrorKind.SystemFailure => systemException!,");
         sb.AppendLine("        ErrorKind.Custom => new Exception($\"Custom database error (code {CustomCode})\"),");
         foreach (var error in errors)
-            sb.AppendLine($"        ErrorKind.{error.FactoryName} => new {error.ExceptionType}(),");
+            sb.AppendLine($"        ErrorKind.{error.FactoryName} => new {error.ExceptionType}(systemException),");
         sb.AppendLine("        _ => new Exception(\"Unexpected error, empty exception caught\")");
         sb.AppendLine("    };");
 

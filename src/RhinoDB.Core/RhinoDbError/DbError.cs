@@ -17,5 +17,12 @@ public readonly partial struct DbError {
         systemException = exception ?? new Exception("Something went wrong, no exception captured.");
     }
 
+    private DbError(ErrorKind kind, Exception? exception) {
+        Kind = kind;
+        systemException = exception;
+    }
+
     static public DbError SystemFailure(Exception exception) => new DbError(exception);
+
+    static public DbError WithCause(ErrorKind kind, Exception exception) => new DbError(kind, exception ?? new Exception("Something went wrong, no exception captured."));
 }
