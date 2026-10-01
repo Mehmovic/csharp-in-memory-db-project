@@ -14,6 +14,25 @@ public sealed class ChangeRingBuffer(int capacity) {
         if (count < slots.Length) count++;
     }
 
+    public int RevertFrom(long lsn) {
+        if (count == 0) return 0;
+
+        var oldestIndex = writePosition - count;
+        var newWritePosition = writePosition;
+        while (newWritePosition > oldestIndex) {
+            var entry = slots[(int)((newWritePosition - 1) % slots.Length)];
+            if (entry.Lsn < lsn) break;
+            newWritePosition--;
+        }
+
+        var removed = (int)(writePosition - newWritePosition);
+        if (removed == 0) return 0;
+
+        writePosition = newWritePosition;
+        count -= removed;
+        return removed;
+    }
+
     public Result<ArrayPoolContainer<RingEntry>> TryGetChangesSince(long lsn) {
         if (count == 0) return ArrayPoolContainer<RingEntry>.Empty();
 

@@ -66,8 +66,17 @@ public class OperationRevertTests {
     static private object NewLedger(System.Reflection.Assembly asm, int id, int amount, int accountId)
         => Activator.CreateInstance(asm.GetType("TestNs.Ledger")!, id, amount, accountId)!;
 
-    static private object T(object tx, string accessor)
-        => tx.GetType().GetProperty(accessor)!.GetValue(tx)!;
+    // The transaction exposes each table accessor as a public readonly *field*
+    // (`TableGenerator`: "public readonly {Db}{Accessor}Ops {Accessor};"), NOT a
+    // property. `GetProperty` therefore returns null here, and the `null!.GetValue`
+    // that followed threw a NullReferenceException *inside the operation body* - which
+    // aborted the whole body, so an operation silently did nothing and a test could
+    // pass without running a single assertion. GetField is the correct accessor.
+    static private object T(object tx, string accessor) {
+        var type = tx.GetType();
+        var field = type.GetField(accessor);
+        return field is not null ? field.GetValue(tx)! : type.GetProperty(accessor)!.GetValue(tx)!;
+    }
 
     static private Result Run(object db, Type txType, Func<object, object, Result> body)
         => (Result)((Task<Result>)GeneratorTestHost.RunTransactional(db, txType, (ctx, tx) => body(tx, txType), PropagationMode.Optimistic)).Result;
@@ -75,27 +84,22 @@ public class OperationRevertTests {
     static private object? Probe(System.Reflection.Assembly asm, string method, object tx, string accessor, params object?[] args)
         => GeneratorTestHost.InvokeHelper(asm, "TestNs.Probe", method, [T(tx, accessor), .. args]);
 
-    // Arms a fault on one table's Apply, at the given change ordinal (0-based).
+    // Arms a fault on one table's Apply, at the given change ordinal (0-based): that
+    // change - and only that one - throws. The property is typed System.Action<int>,
+    // a plain BCL delegate that is identical across assemblies, so an ordinary lambda
+    // binds to it directly; the expression-tree construction this used to do was both
+    // unnecessary and broken (Expression.Convert(int, string) has no coercion).
     static private void ArmFault(object tx, string accessor, int throwAt) {
         var ops = T(tx, accessor);
         var prop = ops.GetType().GetProperty("TestOnlyApplyFault")!;
-        // Built with an Expression rather than a lambda literal because the target
-        // property is typed as System.Action<int> only inside the dynamically-compiled
-        // assembly - there is no static type to write a lambda against here.
-        var pi = System.Linq.Expressions.Expression.Parameter(typeof(int), "i");
-        var ctor = typeof(InvalidOperationException).GetConstructor([typeof(string)])!;
-        var msg = System.Linq.Expressions.Expression.Call(
-            typeof(string).GetMethod("Concat", [typeof(string), typeof(string)])!,
-            System.Linq.Expressions.Expression.Constant("injected fault at change "),
-            System.Linq.Expressions.Expression.Convert(pi, typeof(string)));
-        var body = System.Linq.Expressions.Expression.Block(
-            System.Linq.Expressions.Expression.Throw(
-                System.Linq.Expressions.Expression.New(ctor, msg)),
-            System.Linq.Expressions.Expression.Empty());
-        prop.SetValue(ops, System.Linq.Expressions.Expression
-            .Lambda(System.Linq.Expressions.Expression.Convert(
-                body, typeof(Action<int>)), pi)
-            .Compile());
+        prop.SetValue(ops, (Action<int>)(i => {
+            if (i != throwAt) return;
+            // One-shot: the ops object is a per-transaction singleton that outlives this
+            // operation, so a fault left armed would fire again on the next operation and
+            // make "the database is usable afterwards" untestable.
+            prop.SetValue(ops, null);
+            throw new InvalidOperationException($"injected fault at change {i}");
+        }));
     }
 
     // ---- tests ----

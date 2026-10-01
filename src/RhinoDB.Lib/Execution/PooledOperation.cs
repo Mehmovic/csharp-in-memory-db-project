@@ -99,6 +99,10 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
             cold?.PoisonDurability(DbError.ApplyFailed(ex));
             try { core.SetResult(TValue.FromException(ex)); } catch { /* already completed */ }
         }
+
+        if (txCreated && result.IsOkOrReverted() && ctx.Cleanup.ShouldSweep(tx.PendingStorageOrphanCount)) {
+            try { tx.SweepDeleted(); } catch { /* garbage stays until the next sweep */ }
+        }
     }
 
     private void Complete(TValue result, DbContext<TTx> ctx, Task<DbError?>? durabilityTask) {

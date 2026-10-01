@@ -90,6 +90,7 @@ public class WriteAheadLogTests {
         Assert.That(scan.Entries[0].Changes[0].Key, Is.EqualTo(BitConverter.GetBytes(42L)));
     }
 
+#if DEBUG
     [Test]
     public void AppendConfirmed_TwoCallsArrivingWhileAGroupIsInFlight_ShareOneCompletion() {
         using var wal = CreateWal();
@@ -109,6 +110,7 @@ public class WriteAheadLogTests {
         Assert.That(task1.Wait(TimeSpan.FromSeconds(5)), Is.True);
         Assert.That(task1.Result, Is.Null);
     }
+#endif
 
     [Test]
     public async Task AppendConfirmed_ACallArrivingAfterThePriorGroupAlreadyCompleted_GetsItsOwn() {
@@ -124,6 +126,7 @@ public class WriteAheadLogTests {
         Assert.That(await task2, Is.Null);
     }
 
+#if DEBUG
     [Test]
     public void AppendOptimistic_ReturnsImmediatelyWithoutWaitingOnAFlush() {
         using var wal = CreateWal();
@@ -134,7 +137,9 @@ public class WriteAheadLogTests {
 
         flushGate.Set();
     }
+#endif
 
+#if DEBUG
     [Test]
     public void AppendOptimistic_CrossingTheSizeThresholdWithoutAnyConfirmedCall_TriggersAFlush() {
         using var wal = CreateWal(sizeThresholdBytes: 1);
@@ -146,7 +151,9 @@ public class WriteAheadLogTests {
         Assert.That(flushEntered.Wait(TimeSpan.FromSeconds(5)), Is.True,
             "An Optimistic append that crosses the size threshold must trigger its own flush, with no Confirmed call involved.");
     }
+#endif
 
+#if DEBUG
     [Test]
     public void AppendOptimistic_WithNoTriggerCrossedYet_NeverFlushesOnItsOwn() {
         using var wal = CreateWal(sizeThresholdBytes: long.MaxValue);
@@ -158,7 +165,9 @@ public class WriteAheadLogTests {
         Assert.That(flushEntered.Wait(TimeSpan.FromMilliseconds(300)), Is.False,
             "Without a Confirmed arrival, a crossed size threshold, or a periodic tick, an Optimistic append must not force a flush.");
     }
+#endif
 
+#if DEBUG
     [Test]
     public void PeriodicTick_WithPendingUnflushedBytes_EventuallyTriggersAFlush() {
         using var wal = CreateWal(sizeThresholdBytes: long.MaxValue, periodicFlushInterval: TimeSpan.FromMilliseconds(20));
@@ -170,7 +179,9 @@ public class WriteAheadLogTests {
         Assert.That(flushEntered.Wait(TimeSpan.FromSeconds(2)), Is.True,
             "The periodic tick must eventually flush a pending Optimistic append with no Confirmed call and no threshold crossing.");
     }
+#endif
 
+#if DEBUG
     [Test]
     public void PeriodicTick_WithNothingPending_NeverFlushes() {
         using var wal = CreateWal(sizeThresholdBytes: long.MaxValue, periodicFlushInterval: TimeSpan.FromMilliseconds(20));
@@ -180,6 +191,7 @@ public class WriteAheadLogTests {
         Assert.That(flushEntered.Wait(TimeSpan.FromMilliseconds(200)), Is.False,
             "The periodic tick must not fire a flush when there is nothing unflushed to flush.");
     }
+#endif
 
     [Test]
     public void Dispose_FlushesAnyOutstandingAppendsBeforeClosing() {

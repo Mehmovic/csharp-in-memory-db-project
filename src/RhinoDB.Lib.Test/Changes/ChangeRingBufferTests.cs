@@ -140,10 +140,85 @@ public class ChangeRingBufferTests {
         for (var i = 0; i < buffer.Length; i++) Assert.That(buffer[i].Lsn, Is.EqualTo(7));
     }
 
+    static private long[] LsnsSince(ChangeRingBuffer ring, long lsn) {
+        using var entries = ring.TryGetChangesSince(lsn).Unwrap();
+        return LsnsOf(entries);
+    }
+
     static private long[] LsnsOf(ArrayPoolContainer<RingEntry> entries) {
         var buffer = entries.Buffer();
         var result = new long[buffer.Length];
         for (var i = 0; i < buffer.Length; i++) result[i] = buffer[i].Lsn;
         return result;
+    }
+    // ---- RevertFrom: dropping the entries of an operation that was rolled back ----
+    [Test]
+    public void RevertFrom_DropsEveryEntryRecordedAtOrAfterTheGivenLsn() {
+        var ring = new ChangeRingBuffer(capacity: 8);
+        ring.Record(1, ChangeKind.Insert, 1, Bytes(1), Bytes(1));
+        ring.Record(1, ChangeKind.Insert, 2, Bytes(2), Bytes(2));
+        ring.Record(1, ChangeKind.Insert, 3, Bytes(3), Bytes(3));
+        var removed = ring.RevertFrom(2);
+        Assert.That(removed, Is.EqualTo(2));
+        Assert.That(LsnsSince(ring, 0), Is.EqualTo(new long[] { 1 }));
+    }
+
+    [Test]
+    public void RevertFrom_DropsOnlyTheRevertedOperationAndLeavesEarlierOnes() {
+        // One operation can record several changes, all sharing its LSN. Reverting the
+        // newest operation has to drop all of its changes and none of the earlier one.
+        var ring = new ChangeRingBuffer(capacity: 8);
+        ring.Record(1, ChangeKind.Insert, 10, Bytes(1), Bytes(1));
+        ring.Record(1, ChangeKind.Update, 11, Bytes(1), Bytes(2));
+        ring.Record(1, ChangeKind.Delete, 11, Bytes(1), null);
+
+        var removed = ring.RevertFrom(11);
+
+        Assert.That(removed, Is.EqualTo(2));
+        Assert.That(LsnsSince(ring, 0), Is.EqualTo(new long[] { 10 }));
+    }
+
+    [Test]
+    public void RevertFrom_AtAnOlderLsn_AlsoDropsNewerEntries() {
+        // Documents the contract: RevertFrom drops everything at or after the LSN. Revert
+        // itself only ever passes the newest operation's LSN, so this never strands an
+        // entry - but the behaviour is pinned so a future change cannot quietly assume it.
+        var ring = new ChangeRingBuffer(capacity: 8);
+        ring.Record(1, ChangeKind.Insert, 5, Bytes(1), Bytes(1));
+        ring.Record(1, ChangeKind.Insert, 6, Bytes(2), Bytes(2));
+
+        var removed = ring.RevertFrom(5);
+
+        Assert.That(removed, Is.EqualTo(2));
+        Assert.That(LsnsSince(ring, 0), Is.Empty);
+    }
+
+    [Test]
+    public void RevertFrom_OnAFreshRing_ChangesNothing() {
+        var ring = new ChangeRingBuffer(capacity: 8);
+        Assert.That(ring.RevertFrom(1), Is.EqualTo(0));
+        Assert.That(LsnsSince(ring, 0), Is.Empty);
+    }
+
+    [Test]
+    public void RevertFrom_OnAnEmptyRingAfterRevertingEverything_ChangesNothing() {
+        var ring = new ChangeRingBuffer(capacity: 8);
+        ring.Record(1, ChangeKind.Insert, 1, Bytes(1), Bytes(1));
+        ring.Record(1, ChangeKind.Insert, 2, Bytes(2), Bytes(2));
+        Assert.That(ring.RevertFrom(1), Is.EqualTo(2));
+        Assert.That(ring.RevertFrom(1), Is.EqualTo(0), "a second revert must not walk below the start");
+        Assert.That(LsnsSince(ring, 0), Is.Empty);
+    }
+
+    [Test]
+    public void RevertFrom_ThenRecordAgain_KeepsWorking() {
+        // writePosition is rewound, so the next Record has to land in the freed slot rather
+        // than leaving a hole in the ring.
+        var ring = new ChangeRingBuffer(capacity: 8);
+        ring.Record(1, ChangeKind.Insert, 1, Bytes(1), Bytes(1));
+        ring.Record(1, ChangeKind.Insert, 2, Bytes(2), Bytes(2));
+        ring.RevertFrom(2);
+        ring.Record(1, ChangeKind.Insert, 3, Bytes(3), Bytes(3));
+        Assert.That(LsnsSince(ring, 0), Is.EqualTo(new long[] { 1, 3 }));
     }
 }

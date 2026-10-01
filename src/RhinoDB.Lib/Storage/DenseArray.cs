@@ -43,8 +43,9 @@ public class DenseArray<T>
     }
 
     public void Truncate(int count) {
-        if (count <= Count) return;
+        if (count == Count) return;
         Count = count;
+        currentChunk = count == 0 ? 0 : (count - 1) >> chunkShift;
     }
 
     public void EnsureCapacity(int totalCount) {

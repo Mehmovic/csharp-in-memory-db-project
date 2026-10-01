@@ -28,6 +28,7 @@ public readonly struct Result<T> : IResult<Result<T>> {
 
     public bool IsOk() => error is null;
     public bool IsError() => error is not null;
+    public bool IsOkOrReverted() => error is null || error.Value.Kind == ErrorKind.ApplyFailedButRevertedSuccessfully;
 
     public DbError GetError() {
         return error ?? throw new InvalidOperationException("Result was successful, there is no exception.");

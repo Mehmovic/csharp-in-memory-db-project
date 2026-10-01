@@ -765,6 +765,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private string IndexFieldName(IndexModel idx) => $"{Camel(idx.AccessorName)}Index";
 
+    static private string UndoInsertDeleteArgs(IndexModel idx) =>
+        idx.Uniqueness == Uniqueness.Unique
+            ? KeyExpr("inserted", idx)
+            : $"{KeyExpr("inserted", idx)}, i";
+
     static private uint ComputeTableId(string accessor) => TableIdHash.Compute(accessor);
 
     static private string EmitOpsClass(TableModel table, DatabaseModel database, DatabaseContractDescriptor? descriptor, ClientProtocolKind clientProtocol) =>
@@ -817,8 +822,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    private UndoRecord<{row}>[]? undoJournal;");
         sb.AppendLine("    private int undoJournalCount;");
         sb.AppendLine("    private int preApplyCount;");
+        sb.AppendLine("    private long appliedLsn;");
+        sb.AppendLine("    private System.Collections.Generic.HashSet<int>? orphanOffsets;");
+        sb.AppendLine("    public int PendingStorageOrphanCount => orphanOffsets?.Count ?? 0;");
         sb.AppendLine("    public bool AppliedInOperation { get; private set; }");
+        sb.AppendLine("    #if DEBUG");
         sb.AppendLine("    public System.Action<int>? TestOnlyApplyFault { get; set; }");
+        sb.AppendLine("    public System.Action? TestOnlyRevertFault { get; set; }");
+        sb.AppendLine("    #endif");
         sb.AppendLine("    public DbError LastError => lastError;");
         sb.AppendLine();
     }
@@ -841,10 +852,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
     static private void EmitIterMethod(StringBuilder sb, TableModel table, string ownerSimpleName) {
         var row = table.RowTypeFullName;
         sb.AppendLine($"    public QuerySet<{row}> Iter() {{");
-        sb.AppendLine("        var count = storage.Count;");
-        sb.AppendLine("        using var offsetsBuilder = StackArrayPoolContainerBuilder<int>.Create(count);");
-        sb.AppendLine("        for (var i = 0; i < count; i++) offsetsBuilder.Add(i);");
-        sb.AppendLine($"        return new QuerySet<{row}>(storage, offsetsBuilder.Build().Unwrap(), rowMutator);");
+        sb.AppendLine("        using var live = primaryIndex.GetOffsetsIter();");
+        sb.AppendLine("        var buffer = live.Buffer();");
+        sb.AppendLine($"        if (orphanOffsets is null || orphanOffsets.Count == 0) return new QuerySet<{row}>(storage, live, rowMutator);");
+        sb.AppendLine("        using var builder = StackArrayPoolContainerBuilder<int>.Create(buffer.Length);");
+        sb.AppendLine("        foreach (var offset in buffer)");
+        sb.AppendLine("            if (!orphanOffsets.Contains(offset)) builder.Add(offset);");
+        sb.AppendLine($"        return new QuerySet<{row}>(storage, builder.Build().Unwrap(), rowMutator);");
         sb.AppendLine("    }");
         sb.AppendLine();
     }
@@ -990,8 +1004,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private void EmitUndoPreamble(StringBuilder sb, TableModel table) {
         sb.AppendLine($"        AppliedInOperation = true;");
+        sb.AppendLine($"        appliedLsn = lsn;");
         sb.AppendLine($"        preApplyCount = storage.Count;");
         sb.AppendLine($"        undoJournalCount = 0;");
+        sb.AppendLine($"        orphanOffsets = null;");
         sb.AppendLine($"        undoJournal ??= ArrayPool<UndoRecord<{table.RowTypeFullName}>>.Shared.Rent(Math.Max(changes.Count, 1));");
     }
 
@@ -1001,14 +1017,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
     
     static private void EmitUndoMethod(StringBuilder sb, TableModel table) {
         sb.AppendLine();
-        sb.AppendLine($"    private void RecordUndo(int offset, {table.RowTypeFullName} oldRow) {{");
+        sb.AppendLine($"    private void RecordUndo(UndoKind kind, int offset, {table.RowTypeFullName} oldRow) {{");
         sb.AppendLine($"        undoJournalCount++;");
         sb.AppendLine($"        if (undoJournal is null || undoJournal.Length < undoJournalCount) {{");
         sb.AppendLine($"            var grown = ArrayPool<UndoRecord<{table.RowTypeFullName}>>.Shared.Rent(Math.Max(undoJournalCount * 2, 4));");
         sb.AppendLine($"            if (undoJournal is not null) ArrayPool<UndoRecord<{table.RowTypeFullName}>>.Shared.Return(undoJournal);");
         sb.AppendLine($"            undoJournal = grown;");
         sb.AppendLine($"        }}");
-        sb.AppendLine($"        undoJournal[undoJournalCount - 1] = new UndoRecord<{table.RowTypeFullName}>(offset, oldRow);");
+        sb.AppendLine($"        undoJournal[undoJournalCount - 1] = new UndoRecord<{table.RowTypeFullName}>(kind, offset, oldRow);");
         sb.AppendLine($"    }}");
         sb.AppendLine();
         sb.AppendLine($"    public void ReleaseUndoJournal() {{");
@@ -1021,13 +1037,43 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine();
         sb.AppendLine($"    public bool RevertUndo() {{");
         sb.AppendLine($"        try {{");
+        sb.AppendLine("            #if DEBUG");
+        sb.AppendLine("            if (TestOnlyRevertFault is not null) TestOnlyRevertFault();");
+        sb.AppendLine("            #endif");
         sb.AppendLine($"            for (var i = undoJournalCount - 1; i >= 0; i--) {{");
         sb.AppendLine($"                var step = undoJournal![i];");
-        sb.AppendLine($"                storage.Set(step.Offset, step.Row);");
-        sb.AppendLine($"                primaryIndex.Insert(step.Row.{table.PrimaryKeyName}, step.Offset);");
+        sb.AppendLine($"                switch (step.Kind) {{");
+        sb.AppendLine($"                    case UndoKind.Update: {{");
+        sb.AppendLine($"                        var applied = storage.Get(step.Offset);");
+        sb.AppendLine($"                        storage.Set(step.Offset, step.Row);");
+        foreach (var idx in table.Indexes) {
+            var undoDeleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("applied", idx) : $"{KeyExpr("applied", idx)}, step.Offset";
+            sb.AppendLine($"                        if (!{KeyExpr("applied", idx)}.Equals({KeyExpr("step.Row", idx)})) {{");
+            sb.AppendLine($"                            {IndexFieldName(idx)}.Delete({undoDeleteArgs});");
+            sb.AppendLine($"                            {IndexFieldName(idx)}.Insert({KeyExpr("step.Row", idx)}, step.Offset);");
+            sb.AppendLine($"                        }}");
+        }
+        sb.AppendLine($"                        break;");
+        sb.AppendLine($"                    }}");
+        sb.AppendLine($"                    default: {{");
+        sb.AppendLine("                        orphanOffsets?.Remove(step.Offset);");
+        sb.AppendLine($"                        storage.Set(step.Offset, step.Row);");
+        sb.AppendLine($"                        primaryIndex.Insert(step.Row.{table.PrimaryKeyName}, step.Offset);");
         foreach (var idx in table.Indexes)
-            sb.AppendLine($"                {IndexFieldName(idx)}.Insert({KeyExpr("step.Row", idx)}, step.Offset);");
+            sb.AppendLine($"                        {IndexFieldName(idx)}.Insert({KeyExpr("step.Row", idx)}, step.Offset);");
+        sb.AppendLine($"                        break;");
+        sb.AppendLine($"                    }}");
+        sb.AppendLine($"                }}");
         sb.AppendLine($"            }}");
+        sb.AppendLine("");
+        sb.AppendLine("            for (var i = preApplyCount; i < storage.Count; i++) {");
+        sb.AppendLine($"                var inserted = storage.Get(i);");
+        sb.AppendLine($"                primaryIndex.Delete(inserted.{table.PrimaryKeyName});");
+        foreach (var idx in table.Indexes)
+            sb.AppendLine($"                {IndexFieldName(idx)}.Delete({UndoInsertDeleteArgs(idx)});");
+        sb.AppendLine("            }");
+        sb.AppendLine("");
+        if (table.RingBufferCapacity > 0) sb.AppendLine($"            ring.RevertFrom(appliedLsn);");
         sb.AppendLine($"            storage.Truncate(preApplyCount);");
         sb.AppendLine($"            changes.Clear();");
         sb.AppendLine($"            Dirty = false;");
@@ -1325,9 +1371,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
         AppendAutoIncrementAndIndexAssignments(sb, table);
         EmitIndexWiringConstruction(sb, table, ownerSimpleName);
         sb.AppendLine("    }");
+        if (table.RingBufferCapacity > 0) {
+            sb.AppendLine("");
+            sb.AppendLine("    public Result<ArrayPoolContainer<RingEntry>> TryGetChangesSince(long lsn) => ring.TryGetChangesSince(lsn);");
+            sb.AppendLine("");
+        }
         sb.AppendLine();
 
         EmitIterMethod(sb, table, ownerSimpleName);
+        EmitSweepMethod(sb, table);
         EmitStagingMethods(sb, table);
         EmitRawSerializer(sb, table);
         SchemaWalk.EmitProtocolWrapperMethods(sb, table.RowTypeFullName, clientProtocol);
@@ -1347,12 +1399,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private void EmitInstantApply(StringBuilder sb, TableModel table) {
         sb.AppendLine("    public void Apply(long lsn) {");
-        sb.AppendLine("        using var deleteOffsetsBuilder = StackArrayPoolContainerBuilder<int>.Create(changes.Count);");
         EmitUndoPreamble(sb, table);
         sb.AppendLine($"        var changeIndex = -1;");
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
         sb.AppendLine($"            changeIndex++;");
+        sb.AppendLine($"            #if DEBUG");
         sb.AppendLine($"            if (TestOnlyApplyFault is not null) TestOnlyApplyFault(changeIndex);");
+        sb.AppendLine($"            #endif");
         sb.AppendLine("            switch (c.Kind) {");
         sb.AppendLine("                case ChangeKind.Insert: {");
         sb.AppendLine($"                    var pk = c.Row.{table.PrimaryKeyName};");
@@ -1369,7 +1422,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
-        sb.AppendLine($"                    RecordUndo(offset, oldRow);");
+        sb.AppendLine($"                    RecordUndo(UndoKind.Update, offset, oldRow);");
         sb.AppendLine("                    storage.Set(offset, c.Row);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
@@ -1386,29 +1439,35 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
-        sb.AppendLine($"                    RecordUndo(offset, oldRow);");
+        sb.AppendLine($"                    RecordUndo(UndoKind.Delete, offset, oldRow);");
         sb.AppendLine("                    primaryIndex.Delete(c.Key);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
             sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
         }
-        sb.AppendLine("                    deleteOffsetsBuilder.Add(offset);");
+        sb.AppendLine($"                    (orphanOffsets ??= new()).Add(offset);");
         EmitRingBufferRecordCall(sb, table, "Delete", "SerializeKey(c.Key)", "null");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
         EmitUndoCatch(sb, table);
-        EmitDeleteCompactionPass(sb, table);
         sb.AppendLine("        changes.Clear();");
         sb.AppendLine("        Dirty = false;");
         sb.AppendLine("    }");
         EmitUndoMethod(sb, table);
     }
 
-    static private void EmitDeleteCompactionPass(StringBuilder sb, TableModel table) {
-        sb.AppendLine("        using var deleteOffsets = deleteOffsetsBuilder.Build().Unwrap();");
-        sb.AppendLine("        if (deleteOffsets.Count > 0) {");
-        sb.AppendLine("            using var relocations = storage.DeleteMany(deleteOffsets.Buffer());");
+    static private void EmitSweepMethod(StringBuilder sb, TableModel table) {
+        sb.AppendLine("    public void SweepDeleted() {");
+        sb.AppendLine("        if (orphanOffsets is null || orphanOffsets.Count == 0) return;");
+        sb.AppendLine("        var orphans = orphanOffsets;");
+        sb.AppendLine("        var rented = ArrayPool<int>.Shared.Rent(orphans.Count);");
+        sb.AppendLine("        try {");
+        sb.AppendLine("            var targets = rented.AsSpan(0, orphans.Count);");
+        sb.AppendLine("            var n = 0;");
+        sb.AppendLine("            foreach (var offset in orphans) targets[n++] = offset;");
+        sb.AppendLine("            orphans.Clear();");
+        sb.AppendLine("            using var relocations = storage.DeleteMany(targets);");
         sb.AppendLine("            foreach (var relocation in relocations) {");
         sb.AppendLine($"                var relocatedPk = relocation.Row.{table.PrimaryKeyName};");
         sb.AppendLine("                primaryIndex.Delete(relocatedPk);");
@@ -1419,7 +1478,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
             sb.AppendLine($"                {IndexFieldName(idx)}.Insert({KeyExpr("relocation.Row", idx)}, relocation.NewOffset);");
         }
         sb.AppendLine("            }");
+        sb.AppendLine("        } finally {");
+        sb.AppendLine("            ArrayPool<int>.Shared.Return(rented);");
         sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine();
     }
 
     static private string EmitPersistentOpsClass(TableModel table, string ownerSimpleName, List<RevisionHistoryEntry> revisionHistory, ClientProtocolKind clientProtocol) {
@@ -1459,9 +1522,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
         EmitIndexWiringConstruction(sb, table, ownerSimpleName);
         if (table.Evictable) sb.AppendLine("        cold.RegisterEvictionDrop(TableId, TryGetCurrentRowBytesForEviction, EvictDrop);");
         sb.AppendLine("    }");
+        if (table.RingBufferCapacity > 0) {
+            sb.AppendLine("");
+            sb.AppendLine("    public Result<ArrayPoolContainer<RingEntry>> TryGetChangesSince(long lsn) => ring.TryGetChangesSince(lsn);");
+            sb.AppendLine("");
+        }
         sb.AppendLine();
 
         EmitIterMethod(sb, table, ownerSimpleName);
+        EmitSweepMethod(sb, table);
         EmitStagingMethods(sb, table);
         EmitRawSerializer(sb, table);
         SchemaWalk.EmitProtocolWrapperMethods(sb, table.RowTypeFullName, clientProtocol);
@@ -1485,12 +1554,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private void EmitPersistentApply(StringBuilder sb, TableModel table) {
         sb.AppendLine("    public void Apply(long lsn) {");
-        sb.AppendLine("        using var deleteOffsetsBuilder = StackArrayPoolContainerBuilder<int>.Create(changes.Count);");
         EmitUndoPreamble(sb, table);
         sb.AppendLine($"        var changeIndex = -1;");
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
         sb.AppendLine($"            changeIndex++;");
+        sb.AppendLine($"            #if DEBUG");
         sb.AppendLine($"            if (TestOnlyApplyFault is not null) TestOnlyApplyFault(changeIndex);");
+        sb.AppendLine($"            #endif");
         sb.AppendLine("            switch (c.Kind) {");
         sb.AppendLine("                case ChangeKind.Insert: {");
         sb.AppendLine("                    if (!cold.IsScopeActive) { lastError = DbError.NoActiveTransaction(); break; }");
@@ -1512,7 +1582,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
-        sb.AppendLine($"                    RecordUndo(offset, oldRow);");
+        sb.AppendLine($"                    RecordUndo(UndoKind.Update, offset, oldRow);");
         sb.AppendLine("                    storage.Set(offset, c.Row);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
@@ -1533,13 +1603,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
-        sb.AppendLine($"                    RecordUndo(offset, oldRow);");
+        sb.AppendLine($"                    RecordUndo(UndoKind.Delete, offset, oldRow);");
         sb.AppendLine("                    primaryIndex.Delete(c.Key);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
             sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
         }
-        sb.AppendLine("                    deleteOffsetsBuilder.Add(offset);");
+        sb.AppendLine($"                    (orphanOffsets ??= new()).Add(offset);");
         sb.AppendLine("                    var deleteKeyBytes = SerializeKey(c.Key);");
         sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Delete, deleteKeyBytes, null);");
         EmitRingBufferRecordCall(sb, table, "Delete", "deleteKeyBytes", "null");
@@ -1547,7 +1617,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                }");
         sb.AppendLine("            }");
         EmitUndoCatch(sb, table);
-        EmitDeleteCompactionPass(sb, table);
         sb.AppendLine("        changes.Clear();");
         sb.AppendLine("        Dirty = false;");
         sb.AppendLine("    }");
@@ -1755,12 +1824,29 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        }");
         sb.AppendLine("        catch (Exception ex) {");
         sb.AppendLine("            var reverted = true;");
-        foreach (var table in tables.Reverse())
-            sb.AppendLine($"            if ({table.Accessor}.AppliedInOperation && !{table.Accessor}.RevertUndo()) reverted = false;");
-        sb.Append("            if (!reverted) throw new ApplyFailedException(ex);").AppendLine();
+        foreach (var table in tables.Reverse()) {
+            sb.AppendLine($"            if ({table.Accessor}.AppliedInOperation && !{table.Accessor}.RevertUndo()) {{");
+            sb.AppendLine("                reverted = false;");
+            sb.AppendLine("            }");
+        }
+        sb.AppendLine("            if (!reverted) throw new ApplyFailedException(ex);");
         sb.AppendLine("            return Result.Error(DbError.ApplyFailedButRevertedSuccessfully(ex));");
         sb.AppendLine("        }");
         sb.AppendLine("        return Result.Ok();");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    public int PendingStorageOrphanCount {");
+        sb.AppendLine("        get {");
+        sb.AppendLine("            var total = 0;");
+        foreach (var table in tables)
+            sb.AppendLine($"            total += {table.Accessor}.PendingStorageOrphanCount;");
+        sb.AppendLine("            return total;");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    public void SweepDeleted() {");
+        foreach (var table in tables)
+            sb.AppendLine($"        {table.Accessor}.SweepDeleted();");
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine("    public void Discard() {");

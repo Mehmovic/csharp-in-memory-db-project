@@ -1,3 +1,4 @@
+using RhinoDB.Lib.Storage;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Durability;
 
@@ -6,15 +7,18 @@ namespace RhinoDB.Lib.Execution;
 public class DbContext<TTx> where TTx : ITransaction {
     private readonly DbExecutionLoop<TTx> executionLoop;
 
+    public CleanupCollector Cleanup { get; private init; }
     internal ColdStore? Cold { get; }
 
-    protected DbContext(bool startPaused = false) {
+    protected DbContext(bool startPaused = false, CleanupCollector? cleanupCollector = null) {
         executionLoop = new DbExecutionLoop<TTx>(this, startPaused);
+        Cleanup = cleanupCollector ?? new CleanupCollector(CleanupTrigger.PerTime);
     }
 
-    protected DbContext(ColdStore cold, bool startPaused = false) {
+    protected DbContext(ColdStore cold, bool startPaused = false, CleanupCollector? cleanupCollector = null) {
         Cold = cold;
         executionLoop = new DbExecutionLoop<TTx>(this, startPaused);
+        Cleanup = cleanupCollector ?? new CleanupCollector(CleanupTrigger.PerTime);
     }
 
     protected internal void ResumeExecution() => executionLoop.Resume();

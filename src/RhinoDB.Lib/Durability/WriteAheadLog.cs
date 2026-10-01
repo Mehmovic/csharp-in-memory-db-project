@@ -17,7 +17,9 @@ public sealed class WriteAheadLog : IDisposable {
     private long bytesSinceLastFlush;
     private bool disposed;
 
+    #if DEBUG
     internal Action? TestOnlyBeforeFlush { get; set; }
+    #endif
     public Guid DatabaseId { get; }
     public uint Generation { get; }
 
@@ -161,7 +163,9 @@ public sealed class WriteAheadLog : IDisposable {
     }
 
     private void RunFlush(TaskCompletionSource<DbError?> tcs) {
+    #if DEBUG
         if (TestOnlyBeforeFlushInvocationFailed(tcs)) return;
+    #endif
         
         DbError? error = null;
 
@@ -179,6 +183,7 @@ public sealed class WriteAheadLog : IDisposable {
         tcs.SetResult(error);
     }
 
+    #if DEBUG
     private bool TestOnlyBeforeFlushInvocationFailed(TaskCompletionSource<DbError?> tcs) {
         try {
             TestOnlyBeforeFlush?.Invoke();
@@ -191,6 +196,7 @@ public sealed class WriteAheadLog : IDisposable {
             return true;
         }
     }
+    #endif
 
     public void Dispose() {
         if (disposed) return;

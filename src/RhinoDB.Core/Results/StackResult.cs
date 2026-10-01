@@ -27,6 +27,7 @@ public readonly ref struct StackResult : IStackResult<StackResult> {
 
     public bool IsOk() => error is null;
     public bool IsError() => error is not null;
+    public bool IsOkOrReverted() => error is null || error.Value.Kind == ErrorKind.ApplyFailedButRevertedSuccessfully;
 
     public TResult Match<TResult>(Func<TResult> onSuccess, Func<DbError, TResult> onFailure) =>
         error is null ? onSuccess() : onFailure(error.Value);

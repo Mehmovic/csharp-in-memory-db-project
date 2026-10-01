@@ -26,7 +26,7 @@ public sealed class ColdStore : IDisposable {
     private readonly List<EvictionCandidate> appliedEvictions = [];
     private DbError? durabilityFailure;
 
-    internal readonly WriteAheadLog TestOnlyWal;
+    internal readonly WriteAheadLog Wal;
     internal DbError DurabilityFailureError => durabilityFailure!.Value;
     internal void PoisonDurability(DbError error) => durabilityFailure ??= error;
     public bool IsDurabilityPoisoned => durabilityFailure is not null;
@@ -35,7 +35,7 @@ public sealed class ColdStore : IDisposable {
 
     public string DirectoryPath { get; }
 
-    public int WalGeneration => (int)TestOnlyWal.Generation;
+    public int WalGeneration => (int)Wal.Generation;
 
     public DecodedWalEntry[] PendingWalTail { get; private set; }
 
@@ -51,9 +51,9 @@ public sealed class ColdStore : IDisposable {
         long evictionBatchThresholdBytes
     ) {
         this.env = env;
-        this.TestOnlyWal = wal;
+        Wal = wal;
         DirectoryPath = directoryPath;
-        this.PendingWalTail = pendingRecoveryEntries;
+        PendingWalTail = pendingRecoveryEntries;
         RecoveredLsn = recoveredLsn;
         checkpoint = new CheckpointEngine(env, wal, archiveDirectory);
         evictionBatch = new EvictionBatch(evictionBatchThresholdBytes);
@@ -202,9 +202,9 @@ public sealed class ColdStore : IDisposable {
 
         Task<DbError?> result;
         if (mode == PropagationMode.Confirmed) {
-            result = TestOnlyWal.AppendConfirmed(lsn, WalEntryKind.Operation, currentOperationChanges);
+            result = Wal.AppendConfirmed(lsn, WalEntryKind.Operation, currentOperationChanges);
         } else {
-            TestOnlyWal.AppendOptimistic(lsn, WalEntryKind.Operation, currentOperationChanges);
+            Wal.AppendOptimistic(lsn, WalEntryKind.Operation, currentOperationChanges);
             result = Task.FromResult<DbError?>(null);
         }
 
@@ -410,7 +410,7 @@ public sealed class ColdStore : IDisposable {
     }
 
     public void Dispose() {
-        TestOnlyWal.Dispose();
+        Wal.Dispose();
         env.Dispose();
     }
 }

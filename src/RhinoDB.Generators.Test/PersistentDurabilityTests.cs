@@ -567,6 +567,7 @@ public class PersistentDurabilityTests {
 
     // ---- Finding 3: a Confirmed fsync failure poisons the database ----
 
+#if DEBUG
     [Test]
     public async Task Confirmed_WhenTheWalFsyncFails_ReturnsTheFsyncErrorAndPoisonsTheDatabase() {
         using var cold = ColdStore.Open(dir).Unwrap();
@@ -577,7 +578,7 @@ public class PersistentDurabilityTests {
             PropagationMode.Confirmed);
         Assert.That(insert.IsOk(), Is.True);
 
-        cold.TestOnlyWal.TestOnlyBeforeFlush = () => throw new IOException("injected fsync failure");
+        cold.Wal.TestOnlyBeforeFlush = () => throw new IOException("injected fsync failure");
 
         var confirmed = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => { ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 500m)); return Result.Ok(); },
@@ -588,7 +589,9 @@ public class PersistentDurabilityTests {
         Assert.That(cold.IsDurabilityPoisoned, Is.True,
             "A failed fsync breaks the durability gate - the database must refuse further operations rather than keep running with memory ahead of durability.");
     }
+#endif
 
+#if DEBUG
     [Test]
     public async Task AfterAConfirmedFsyncFailure_EverySubsequentOperationIsRefusedUntilRestart() {
         using var cold = ColdStore.Open(dir).Unwrap();
@@ -598,7 +601,7 @@ public class PersistentDurabilityTests {
             db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
             PropagationMode.Confirmed);
 
-        cold.TestOnlyWal.TestOnlyBeforeFlush = () => throw new IOException("injected fsync failure");
+        cold.Wal.TestOnlyBeforeFlush = () => throw new IOException("injected fsync failure");
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => { ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 500m)); return Result.Ok(); },
@@ -617,4 +620,5 @@ public class PersistentDurabilityTests {
         Assert.That(confirmed.IsError(), Is.True);
         Assert.That(confirmed.GetError().Kind, Is.EqualTo(ErrorKind.WalDurabilityFailed));
     }
+#endif
 }

@@ -71,7 +71,13 @@ static internal class GeneratorTestHost {
     static private (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoad(
         string source, ImmutableArray<IIncrementalGenerator> extraGenerators, string testName, ImmutableArray<AdditionalText> additionalTexts) {
         var assemblyName = $"Gen_{testName}_{Guid.NewGuid():N}";
-        var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest));
+        // DEBUG is declared here AND handed to the driver below. Both are needed: this parse
+        // covers the fixture source, while the driver re-parses the trees a generator emits and
+        // uses whatever options it is given - defaulting to no symbols. Without the second one
+        // every `#if DEBUG` in generated code is compiled out and the TestOnly* fault hooks
+        // silently disappear.
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: ["DEBUG"]);
+        var tree = CSharpSyntaxTree.ParseText(source, parseOptions);
 
         var compilation = CSharpCompilation.Create(
             assemblyName,
@@ -81,7 +87,17 @@ static internal class GeneratorTestHost {
 
         var generators = ImmutableArray.Create<IIncrementalGenerator>(new TableGenerator(), new CustomTypeGenerator(), new FrozenSchemaGenerator()).AddRange(extraGenerators);
         var driver = CSharpGeneratorDriver.Create(generators.ToArray()).AddAdditionalTexts(additionalTexts);
-        driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var generatorDiagnostics);
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out var driverOutput, out var generatorDiagnostics);
+
+        // Re-parse the driver output with DEBUG declared. The driver parses the trees a
+        // generator emits using its own default options, which carry no preprocessor symbols,
+        // so every `#if DEBUG` in generated code would otherwise be compiled out - taking the
+        // TestOnly* fault hooks with it and making those tests fail for the wrong reason.
+        var outputCompilation = CSharpCompilation.Create(
+            assemblyName,
+            driverOutput.SyntaxTrees.Select(t => CSharpSyntaxTree.ParseText(t.GetText(), parseOptions, t.FilePath)),
+            driverOutput.References,
+            (CSharpCompilationOptions)driverOutput.Options);
 
         var generatorErrors = generatorDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToImmutableArray();
         if (!generatorErrors.IsEmpty)
