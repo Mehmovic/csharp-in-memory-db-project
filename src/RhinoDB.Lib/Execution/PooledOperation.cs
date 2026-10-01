@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using System.Threading.Tasks.Sources;
 
-using RhinoDB.Lib.Cold;
+using RhinoDB.Core.Exceptions;
 
 namespace RhinoDB.Lib.Execution;
 
@@ -82,9 +82,10 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
                     var applyResult = tx.Apply();
                     if (applyResult.IsError()) result = TValue.FromError(applyResult.GetError());
                 }
-                catch (Exception ex) {
-                    cold?.PoisonDurability(DbError.ApplyFailedMidOperation());
-                    result = TValue.FromException(ex);
+                catch (ApplyFailedException ex) {
+                    var error = DbError.ApplyFailed(ex.InnerException);
+                    cold?.PoisonDurability(error);
+                    result = TValue.FromError(error);
                 }
             }
         }
@@ -95,7 +96,7 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
             Complete(result, ctx, cold?.EndScope(commit: result.IsOk(), mode, tx.LastLsn ?? 0));
         }
         catch (Exception ex) {
-            cold?.PoisonDurability(DbError.ApplyFailedMidOperation());
+            cold?.PoisonDurability(DbError.ApplyFailed(ex));
             try { core.SetResult(TValue.FromException(ex)); } catch { /* already completed */ }
         }
     }

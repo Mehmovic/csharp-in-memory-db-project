@@ -781,6 +781,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
         sb.AppendLine("using System;");
+        sb.AppendLine("using System.Buffers;");
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using System.Runtime.InteropServices;");
         sb.AppendLine("using MemoryPack;");
@@ -813,6 +814,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    private readonly List<Change<{key}, {row}>> changes = [];");
         sb.AppendLine("    public bool Dirty { get; private set; }");
         sb.AppendLine("    private DbError lastError;");
+        sb.AppendLine($"    private UndoRecord<{row}>[]? undoJournal;");
+        sb.AppendLine("    private int undoJournalCount;");
+        sb.AppendLine("    private int preApplyCount;");
+        sb.AppendLine("    public bool AppliedInOperation { get; private set; }");
+        sb.AppendLine("    public System.Action<int>? TestOnlyApplyFault { get; set; }");
         sb.AppendLine("    public DbError LastError => lastError;");
         sb.AppendLine();
     }
@@ -983,34 +989,57 @@ public sealed class TableGenerator : IIncrementalGenerator {
     }
 
     static private void EmitUndoPreamble(StringBuilder sb, TableModel table) {
-        sb.AppendLine($"        using var undoBuilder = StackArrayPoolContainerBuilder<UndoRecord<{table.RowTypeFullName}>>.Create(changes.Count);");
-        sb.AppendLine($"        var undoCount = 0;");
-        sb.AppendLine($"        var preApplyCount = storage.Count;");
-        sb.AppendLine($"        try {{");
+        sb.AppendLine($"        AppliedInOperation = true;");
+        sb.AppendLine($"        preApplyCount = storage.Count;");
+        sb.AppendLine($"        undoJournalCount = 0;");
+        sb.AppendLine($"        undoJournal ??= ArrayPool<UndoRecord<{table.RowTypeFullName}>>.Shared.Rent(Math.Max(changes.Count, 1));");
     }
 
     static private void EmitUndoCatch(StringBuilder sb, TableModel table) {
         sb.AppendLine($"        }}");
-        sb.AppendLine($"        }}");
-        sb.AppendLine($"        catch {{");
-        sb.AppendLine($"            Undo(storage, undoBuilder.BufferResult().Unwrap(), undoCount, preApplyCount);");
-        sb.AppendLine($"            throw;");
-        sb.AppendLine($"        }}");
     }
-
+    
     static private void EmitUndoMethod(StringBuilder sb, TableModel table) {
         sb.AppendLine();
-        sb.AppendLine($"    private void Undo(DenseArray<{table.RowTypeFullName}> target, System.ReadOnlySpan<UndoRecord<{table.RowTypeFullName}>> journal, int count, int preApplyCount) {{");
-        sb.AppendLine($"        for (var i = count - 1; i >= 0; i--) {{");
-        sb.AppendLine($"            var step = journal[i];");
-        sb.AppendLine($"            target.Set(step.Offset, step.Row);");
-        sb.AppendLine($"            primaryIndex.Insert(step.Row.{table.PrimaryKeyName}, step.Offset);");
-        foreach (var idx in table.Indexes)
-            sb.AppendLine($"            {IndexFieldName(idx)}.Insert({KeyExpr("step.Row", idx)}, step.Offset);");
+        sb.AppendLine($"    private void RecordUndo(int offset, {table.RowTypeFullName} oldRow) {{");
+        sb.AppendLine($"        undoJournalCount++;");
+        sb.AppendLine($"        if (undoJournal is null || undoJournal.Length < undoJournalCount) {{");
+        sb.AppendLine($"            var grown = ArrayPool<UndoRecord<{table.RowTypeFullName}>>.Shared.Rent(Math.Max(undoJournalCount * 2, 4));");
+        sb.AppendLine($"            if (undoJournal is not null) ArrayPool<UndoRecord<{table.RowTypeFullName}>>.Shared.Return(undoJournal);");
+        sb.AppendLine($"            undoJournal = grown;");
         sb.AppendLine($"        }}");
-        sb.AppendLine($"        target.Truncate(preApplyCount);");
-
+        sb.AppendLine($"        undoJournal[undoJournalCount - 1] = new UndoRecord<{table.RowTypeFullName}>(offset, oldRow);");
         sb.AppendLine($"    }}");
+        sb.AppendLine();
+        sb.AppendLine($"    public void ReleaseUndoJournal() {{");
+        sb.AppendLine($"        if (undoJournal is null) return;");
+        sb.AppendLine($"        ArrayPool<UndoRecord<{table.RowTypeFullName}>>.Shared.Return(undoJournal);");
+        sb.AppendLine($"        AppliedInOperation = false;");
+        sb.AppendLine($"        undoJournal = null;");
+        sb.AppendLine($"        undoJournalCount = 0;");
+        sb.AppendLine($"    }}");
+        sb.AppendLine();
+        sb.AppendLine($"    public bool RevertUndo() {{");
+        sb.AppendLine($"        try {{");
+        sb.AppendLine($"            for (var i = undoJournalCount - 1; i >= 0; i--) {{");
+        sb.AppendLine($"                var step = undoJournal![i];");
+        sb.AppendLine($"                storage.Set(step.Offset, step.Row);");
+        sb.AppendLine($"                primaryIndex.Insert(step.Row.{table.PrimaryKeyName}, step.Offset);");
+        foreach (var idx in table.Indexes)
+            sb.AppendLine($"                {IndexFieldName(idx)}.Insert({KeyExpr("step.Row", idx)}, step.Offset);");
+        sb.AppendLine($"            }}");
+        sb.AppendLine($"            storage.Truncate(preApplyCount);");
+        sb.AppendLine($"            changes.Clear();");
+        sb.AppendLine($"            Dirty = false;");
+        sb.AppendLine($"            ReleaseUndoJournal();");
+        sb.AppendLine($"            return true;");
+        sb.AppendLine($"        }}");
+        sb.AppendLine($"        catch {{");
+        sb.AppendLine($"            ReleaseUndoJournal();");
+        sb.AppendLine($"            return false;");
+        sb.AppendLine($"        }}");
+        sb.AppendLine($"    }}");
+        sb.AppendLine();
     }
     static private void EmitValidateMethod(StringBuilder sb, TableModel table) {
         var uniqueIndexes = table.Indexes.Where(i => i.Uniqueness == Uniqueness.Unique).ToImmutableArray();
@@ -1320,7 +1349,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    public void Apply(long lsn) {");
         sb.AppendLine("        using var deleteOffsetsBuilder = StackArrayPoolContainerBuilder<int>.Create(changes.Count);");
         EmitUndoPreamble(sb, table);
+        sb.AppendLine($"        var changeIndex = -1;");
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
+        sb.AppendLine($"            changeIndex++;");
+        sb.AppendLine($"            if (TestOnlyApplyFault is not null) TestOnlyApplyFault(changeIndex);");
         sb.AppendLine("            switch (c.Kind) {");
         sb.AppendLine("                case ChangeKind.Insert: {");
         sb.AppendLine($"                    var pk = c.Row.{table.PrimaryKeyName};");
@@ -1337,7 +1369,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
-        sb.AppendLine($"                    undoBuilder.Add(new UndoRecord<{table.RowTypeFullName}>(offset, oldRow)); undoCount++;");
+        sb.AppendLine($"                    RecordUndo(offset, oldRow);");
         sb.AppendLine("                    storage.Set(offset, c.Row);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
@@ -1354,7 +1386,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
-        sb.AppendLine($"                    undoBuilder.Add(new UndoRecord<{table.RowTypeFullName}>(offset, oldRow)); undoCount++;");
+        sb.AppendLine($"                    RecordUndo(offset, oldRow);");
         sb.AppendLine("                    primaryIndex.Delete(c.Key);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
@@ -1455,7 +1487,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    public void Apply(long lsn) {");
         sb.AppendLine("        using var deleteOffsetsBuilder = StackArrayPoolContainerBuilder<int>.Create(changes.Count);");
         EmitUndoPreamble(sb, table);
+        sb.AppendLine($"        var changeIndex = -1;");
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
+        sb.AppendLine($"            changeIndex++;");
+        sb.AppendLine($"            if (TestOnlyApplyFault is not null) TestOnlyApplyFault(changeIndex);");
         sb.AppendLine("            switch (c.Kind) {");
         sb.AppendLine("                case ChangeKind.Insert: {");
         sb.AppendLine("                    if (!cold.IsScopeActive) { lastError = DbError.NoActiveTransaction(); break; }");
@@ -1477,7 +1512,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
-        sb.AppendLine($"                    undoBuilder.Add(new UndoRecord<{table.RowTypeFullName}>(offset, oldRow)); undoCount++;");
+        sb.AppendLine($"                    RecordUndo(offset, oldRow);");
         sb.AppendLine("                    storage.Set(offset, c.Row);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
@@ -1498,7 +1533,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("                    if (offsetResult.IsError()) { lastError = offsetResult.GetError(); break; }");
         sb.AppendLine("                    var offset = offsetResult.Unwrap();");
         sb.AppendLine("                    var oldRow = storage.Get(offset);");
-        sb.AppendLine($"                    undoBuilder.Add(new UndoRecord<{table.RowTypeFullName}>(offset, oldRow)); undoCount++;");
+        sb.AppendLine($"                    RecordUndo(offset, oldRow);");
         sb.AppendLine("                    primaryIndex.Delete(c.Key);");
         foreach (var idx in table.Indexes) {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
@@ -1674,6 +1709,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using RhinoDB.Core;");
+        sb.AppendLine("using RhinoDB.Core.Exceptions;");
         sb.AppendLine("using RhinoDB.Lib.Changes;");
         sb.AppendLine("using RhinoDB.Lib.Cold;");
         sb.AppendLine("using RhinoDB.Lib.Durability;");
@@ -1711,8 +1747,19 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var anyDirtyExpr = tables.Length > 0 ? string.Join(" || ", tables.Select(t => $"{t.Accessor}.Dirty")) : "false";
         sb.AppendLine($"        var anyDirty = {anyDirtyExpr};");
         sb.AppendLine("        LastLsn = anyDirty ? lsnSequence.Next() : null;");
+        sb.AppendLine("        try {");
         foreach (var table in tables)
-            sb.AppendLine($"        if ({table.Accessor}.Dirty) {table.Accessor}.Apply(LastLsn ?? 0);");
+            sb.AppendLine($"            if ({table.Accessor}.Dirty) {table.Accessor}.Apply(LastLsn ?? 0);");
+        foreach (var table in tables)
+            sb.AppendLine($"            {table.Accessor}.ReleaseUndoJournal();");
+        sb.AppendLine("        }");
+        sb.AppendLine("        catch (Exception ex) {");
+        sb.AppendLine("            var reverted = true;");
+        foreach (var table in tables.Reverse())
+            sb.AppendLine($"            if ({table.Accessor}.AppliedInOperation && !{table.Accessor}.RevertUndo()) reverted = false;");
+        sb.Append("            if (!reverted) throw new ApplyFailedException(ex);").AppendLine();
+        sb.AppendLine("            return Result.Error(DbError.ApplyFailedButRevertedSuccessfully(ex));");
+        sb.AppendLine("        }");
         sb.AppendLine("        return Result.Ok();");
         sb.AppendLine("    }");
         sb.AppendLine();
