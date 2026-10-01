@@ -78,7 +78,7 @@ public class OperationRevertIndexTests {
             // Reads the ring directly so the test can prove a reverted operation left no
             // trace for a client to sync.
             public static int RankPendingOrphans(RevDbRankOps t) => t.PendingStorageOrphanCount;
-            public static int RankRingCountSince(RevDbRankOps t, long lsn) {
+            public static int RankRingCountSince(RevDbRankOps t, ulong lsn) {
                 using var e = t.TryGetChangesSince(lsn).Unwrap();
                 return e.Count;
             }

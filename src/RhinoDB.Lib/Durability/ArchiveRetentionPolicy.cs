@@ -22,5 +22,5 @@ public sealed record ArchiveRetentionPolicy(TimeSpan Interval, TimeSpan KeepFor)
         return new ArchiveRetentionPolicy(interval.Value, keepFor.Value);
     }
 
-    public long CutoffUtcTicks(DateTimeOffset now) => now.UtcTicks - KeepFor.Ticks;
+    public ulong CutoffUtcTicks(DateTimeOffset now) => (ulong)(now.UtcTicks - KeepFor.Ticks);
 }

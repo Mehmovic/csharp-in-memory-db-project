@@ -14,15 +14,15 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
     private uint metadataDbi;
     private bool metadataDbiResolved;
 
-    public Result<long> ReadCheckpointedLsn() {
+    public Result<ulong> ReadCheckpointedLsn() {
         var rc = env.BeginTxn(0, out var txn);
-        if (rc != 0 || txn is null) return Result<long>.Error(MdbxErrorMapper.Map(rc));
+        if (rc != 0 || txn is null) return Result<ulong>.Error(MdbxErrorMapper.Map(rc));
         using var _ = txn;
 
-        if (!EnsureMetadataDbiForRead(txn)) return Result<long>.Ok(-1L);
+        if (!EnsureMetadataDbiForRead(txn)) return Result<ulong>.Ok(0UL);
 
         var getRc = txn.Get(metadataDbi, WatermarkKey, out var bytes);
-        return getRc != 0 ? Result<long>.Ok(-1L) : Result<long>.Ok(BitConverter.ToInt64(bytes));
+        return getRc != 0 ? Result<ulong>.Ok(0UL) : Result<ulong>.Ok(BitConverter.ToUInt64(bytes));
     }
 
     public Result<int> ReadGeneration() {
@@ -64,7 +64,7 @@ public sealed class CheckpointEngine(MdbxEnvironment env, WriteAheadLog wal, str
     }
 
     public async Task<Result> RunCheckpoint(
-        long boundaryLsn,
+        ulong boundaryLsn,
         IReadOnlyDictionary<uint, uint> tableDbis,
         IEnumerable<CheckpointRow> residentRows,
         IEnumerable<(uint TableId, byte[] Key)> deletedSinceLastCheckpoint,

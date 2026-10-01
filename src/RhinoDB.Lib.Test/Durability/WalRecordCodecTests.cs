@@ -59,7 +59,7 @@ public class WalRecordCodecTests {
 
         Assert.That(result.Status, Is.EqualTo(WalScanStatus.Clean));
         Assert.That(result.ValidLength, Is.EqualTo(buffer.Length));
-        Assert.That(result.Entries.Select(e => e.Lsn), Is.EqualTo(new long[] { 1, 2, 3 }));
+        Assert.That(result.Entries.Select(e => e.Lsn), Is.EqualTo(new ulong[] { 1, 2, 3 }));
     }
 
     [Test]
@@ -71,7 +71,7 @@ public class WalRecordCodecTests {
 
         Assert.That(result.Status, Is.EqualTo(WalScanStatus.TornTail));
         Assert.That(result.ValidLength, Is.EqualTo(frame1.Length));
-        Assert.That(result.Entries.Select(e => e.Lsn), Is.EqualTo(new long[] { 1 }));
+        Assert.That(result.Entries.Select(e => e.Lsn), Is.EqualTo(new ulong[] { 1 }));
     }
 
     [Test]
@@ -199,8 +199,8 @@ public class WalRecordCodecTests {
         var scan = WalRecordCodec.Scan(buffer);
 
         Assert.That(scan.Status, Is.EqualTo(WalScanStatus.Clean));
-        Assert.That(scan.Entries.Select(e => e.Lsn), Is.EqualTo(new long[] { 1, 2, 3 }));
-        Assert.That(scan.Entries.Select(e => e.UtcTicks), Is.EqualTo(new long[] { 1000L, 2000L, 3000L }));
+        Assert.That(scan.Entries.Select(e => e.Lsn), Is.EqualTo(new ulong[] { 1, 2, 3 }));
+        Assert.That(scan.Entries.Select(e => e.UtcTicks), Is.EqualTo(new ulong[] { 1000L, 2000L, 3000L }));
     }
 
     [Test]

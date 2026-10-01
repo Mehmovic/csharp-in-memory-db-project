@@ -9,19 +9,19 @@ static public class WalRecordCodec {
     public const long Unstamped = 0;
 
 
-    static public byte[] Encode(long lsn, WalEntryKind kind, WalChange[] changes, long utcTicks = Unstamped) =>
+    static public byte[] Encode(ulong lsn, WalEntryKind kind, WalChange[] changes, ulong utcTicks = Unstamped) =>
         BuildFrame(lsn, kind, changes.Length == 0 ? [] : MemoryPackSerializer.Serialize(changes), utcTicks);
 
-    static public byte[] Encode(long lsn, WalEntryKind kind, List<WalChange> changes, long utcTicks = Unstamped) =>
+    static public byte[] Encode(ulong lsn, WalEntryKind kind, List<WalChange> changes, ulong utcTicks = Unstamped) =>
         BuildFrame(lsn, kind, changes.Count == 0 ? [] : MemoryPackSerializer.Serialize(changes), utcTicks);
 
-    static private byte[] BuildFrame(long lsn, WalEntryKind kind, byte[] payload, long utcTicks) {
+    static private byte[] BuildFrame(ulong lsn, WalEntryKind kind, byte[] payload, ulong utcTicks) {
         var frame = new byte[HeaderSize + payload.Length];
         var span = frame.AsSpan();
 
         BinaryPrimitives.WriteUInt32LittleEndian(span[..4], (uint)payload.Length);
-        BinaryPrimitives.WriteInt64LittleEndian(span[8..16], lsn);
-        BinaryPrimitives.WriteInt64LittleEndian(span[16..24], utcTicks);
+        BinaryPrimitives.WriteUInt64LittleEndian(span[8..16], lsn);
+        BinaryPrimitives.WriteUInt64LittleEndian(span[16..24], utcTicks);
         span[24] = (byte)kind;
         payload.CopyTo(span[25..]);
 
@@ -45,8 +45,8 @@ static public class WalRecordCodec {
         var actualChecksum = Crc32.HashToUInt32(buffer[8..frameSize]);
         if (actualChecksum != storedChecksum) return buffer.Length == frameSize ? WalScanStatus.TornTail : WalScanStatus.Corrupted;
 
-        var lsn = BinaryPrimitives.ReadInt64LittleEndian(buffer[8..16]);
-        var utcTicks = BinaryPrimitives.ReadInt64LittleEndian(buffer[16..24]);
+        var lsn = BinaryPrimitives.ReadUInt64LittleEndian(buffer[8..16]);
+        var utcTicks = BinaryPrimitives.ReadUInt64LittleEndian(buffer[16..24]);
         var kind = (WalEntryKind)buffer[24];
         var payload = buffer[25..frameSize];
         var changes = payload.IsEmpty ? [] : MemoryPackSerializer.Deserialize<WalChange[]>(payload)!;

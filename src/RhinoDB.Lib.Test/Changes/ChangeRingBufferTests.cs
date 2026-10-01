@@ -64,7 +64,7 @@ public class ChangeRingBufferTests {
     [Test]
     public void Record_PastCapacity_OnlyTheNewestEntriesSurvive() {
         var ring = new ChangeRingBuffer(capacity: 4);
-        for (var lsn = 0; lsn < 10; lsn++) ring.Record(1, ChangeKind.Insert, lsn, Bytes(lsn), null);
+        for (ulong lsn = 0; lsn < 10; lsn++) ring.Record(1, ChangeKind.Insert, lsn, Bytes((int)lsn), null);
         // Oldest retained is lsn 6 (10 writes, capacity 4) - 5 is the boundary that still returns
         // everything retained without triggering a gap (see the dedicated boundary test below).
 
@@ -73,26 +73,26 @@ public class ChangeRingBufferTests {
         Assert.That(result.IsOk(), Is.True);
         using var entries = result.Unwrap();
         var lsns = LsnsOf(entries);
-        Assert.That(lsns, Is.EqualTo(new long[] { 6, 7, 8, 9 }));
+        Assert.That(lsns, Is.EqualTo(new ulong[] { 6, 7, 8, 9 }));
     }
 
     [Test]
     public void TryGetChangesSince_ExactlyAtTheOldestRetainedLsnMinusOne_ReturnsEverythingRetained() {
         var ring = new ChangeRingBuffer(capacity: 4);
-        for (var lsn = 0; lsn < 10; lsn++) ring.Record(1, ChangeKind.Insert, lsn, Bytes(lsn), null);
+        for (ulong lsn = 0; lsn < 10; lsn++) ring.Record(1, ChangeKind.Insert, lsn, Bytes((int)lsn), null);
         // Oldest retained is lsn 6 (10 writes, capacity 4 -> 6,7,8,9 survive).
 
         var result = ring.TryGetChangesSince(5);
 
         Assert.That(result.IsOk(), Is.True);
         using var entries = result.Unwrap();
-        Assert.That(LsnsOf(entries), Is.EqualTo(new long[] { 6, 7, 8, 9 }));
+        Assert.That(LsnsOf(entries), Is.EqualTo(new ulong[] { 6, 7, 8, 9 }));
     }
 
     [Test]
     public void TryGetChangesSince_OlderThanTheOldestRetainedLsn_ReturnsRingBufferGap() {
         var ring = new ChangeRingBuffer(capacity: 4);
-        for (var lsn = 0; lsn < 10; lsn++) ring.Record(1, ChangeKind.Insert, lsn, Bytes(lsn), null);
+        for (ulong lsn = 0; lsn < 10; lsn++) ring.Record(1, ChangeKind.Insert, lsn, Bytes((int)lsn), null);
         // Oldest retained is lsn 6 - requesting anything since 4 means we're missing lsn 5's history.
 
         var result = ring.TryGetChangesSince(4);
@@ -110,7 +110,7 @@ public class ChangeRingBufferTests {
         var ring = new ChangeRingBuffer(capacity: 8);
         ring.Record(1, ChangeKind.Insert, lsn: 50, Bytes(1), null);
 
-        var result = ring.TryGetChangesSince(-1);
+        var result = ring.TryGetChangesSince(0);
 
         Assert.That(result.IsOk(), Is.True);
         using var entries = result.Unwrap();
@@ -140,14 +140,14 @@ public class ChangeRingBufferTests {
         for (var i = 0; i < buffer.Length; i++) Assert.That(buffer[i].Lsn, Is.EqualTo(7));
     }
 
-    static private long[] LsnsSince(ChangeRingBuffer ring, long lsn) {
+    static private ulong[] LsnsSince(ChangeRingBuffer ring, ulong lsn) {
         using var entries = ring.TryGetChangesSince(lsn).Unwrap();
         return LsnsOf(entries);
     }
 
-    static private long[] LsnsOf(ArrayPoolContainer<RingEntry> entries) {
+    static private ulong[] LsnsOf(ArrayPoolContainer<RingEntry> entries) {
         var buffer = entries.Buffer();
-        var result = new long[buffer.Length];
+        var result = new ulong[buffer.Length];
         for (var i = 0; i < buffer.Length; i++) result[i] = buffer[i].Lsn;
         return result;
     }
@@ -160,7 +160,7 @@ public class ChangeRingBufferTests {
         ring.Record(1, ChangeKind.Insert, 3, Bytes(3), Bytes(3));
         var removed = ring.RevertFrom(2);
         Assert.That(removed, Is.EqualTo(2));
-        Assert.That(LsnsSince(ring, 0), Is.EqualTo(new long[] { 1 }));
+        Assert.That(LsnsSince(ring, 0), Is.EqualTo(new ulong[] { 1 }));
     }
 
     [Test]
@@ -175,7 +175,7 @@ public class ChangeRingBufferTests {
         var removed = ring.RevertFrom(11);
 
         Assert.That(removed, Is.EqualTo(2));
-        Assert.That(LsnsSince(ring, 0), Is.EqualTo(new long[] { 10 }));
+        Assert.That(LsnsSince(ring, 0), Is.EqualTo(new ulong[] { 10 }));
     }
 
     [Test]
@@ -219,6 +219,6 @@ public class ChangeRingBufferTests {
         ring.Record(1, ChangeKind.Insert, 2, Bytes(2), Bytes(2));
         ring.RevertFrom(2);
         ring.Record(1, ChangeKind.Insert, 3, Bytes(3), Bytes(3));
-        Assert.That(LsnsSince(ring, 0), Is.EqualTo(new long[] { 1, 3 }));
+        Assert.That(LsnsSince(ring, 0), Is.EqualTo(new ulong[] { 1, 3 }));
     }
 }

@@ -55,13 +55,13 @@ public class CheckpointEngineTests {
     }
 
     [Test]
-    public void ReadCheckpointedLsn_BeforeAnyCheckpoint_ReturnsMinusOne() {
+    public void ReadCheckpointedLsn_BeforeAnyCheckpoint_ReturnsZero() {
         using var wal = CreateWal();
         var engine = new CheckpointEngine(env, wal, archiveDir);
 
         var lsn = engine.ReadCheckpointedLsn().Unwrap();
 
-        Assert.That(lsn, Is.EqualTo(-1L));
+        Assert.That(lsn, Is.EqualTo(0UL));
     }
 
     [Test]
@@ -158,7 +158,7 @@ public class CheckpointEngineTests {
         var result = await engine.RunCheckpoint(5, tableDbis, [new CheckpointRow(TableId, [1], [42])], [], []);
 
         Assert.That(result.IsError(), Is.True);
-        Assert.That(engine.ReadCheckpointedLsn().Unwrap(), Is.EqualTo(-1L),
+        Assert.That(engine.ReadCheckpointedLsn().Unwrap(), Is.EqualTo(0UL),
             "A failed checkpoint must not leave a partially-advanced watermark.");
         Assert.That(ReadRaw(widgetsDbi, [1]), Is.Null, "A failed checkpoint's writes must not land anywhere, including unrelated dbis.");
     }
@@ -235,7 +235,7 @@ public class CheckpointEngineTests {
 
         Assert.That(result.IsError(), Is.True);
         Assert.That(result.GetError().Kind, Is.EqualTo(RhinoDB.Core.ErrorKind.SystemFailure));
-        Assert.That(engine.ReadCheckpointedLsn().Unwrap(), Is.EqualTo(-1L), "A refused checkpoint must not advance the watermark.");
+        Assert.That(engine.ReadCheckpointedLsn().Unwrap(), Is.EqualTo(0UL), "A refused checkpoint must not advance the watermark.");
         Assert.That(ReadRaw(widgetsDbi, [1]), Is.Null, "All-or-nothing: the known table row must not land either.");
         wal.Dispose();
         Assert.That(new FileInfo(path).Length, Is.GreaterThan(WalFileHeaderCodec.Size), "The WAL must not be truncated while it still holds changes we refused to checkpoint.");

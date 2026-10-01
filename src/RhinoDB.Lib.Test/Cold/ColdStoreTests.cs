@@ -35,7 +35,7 @@ public class ColdStoreTests {
     static private void Stage(ColdStore store, string tableName, ChangeKind kind, int key, Account? row) =>
         store.Stage(TableIdHash.Compute(tableName), kind, MemoryPackSerializer.Serialize(key), row is null ? null : MemoryPackSerializer.Serialize(row.Value));
 
-    static private async Task<DbError?> RunConfirmed(ColdStore store, Action stageActions, long lsn = 1) {
+    static private async Task<DbError?> RunConfirmed(ColdStore store, Action stageActions, ulong lsn = 1) {
         store.BeginScope();
         stageActions();
         return await store.EndScope(commit: true, PropagationMode.Confirmed, lsn);

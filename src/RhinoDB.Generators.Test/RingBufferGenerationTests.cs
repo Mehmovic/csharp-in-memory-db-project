@@ -88,7 +88,7 @@ public class RingBufferGenerationTests {
     // sentinel), so the shared LsnSequence's first real value is 0, not 1. A cursor of 0 would
     // incorrectly read as "already caught up to LSN 0" and silently exclude that first entry.
     static private RingEntry[] GetAllEntries(ChangeRingBuffer ring) {
-        using var entries = ring.TryGetChangesSince(-1).Unwrap();
+        using var entries = ring.TryGetChangesSince(0).Unwrap();
         return entries.Buffer().ToArray();
     }
 
@@ -107,7 +107,7 @@ public class RingBufferGenerationTests {
         Assert.That(entries[0].Change.TableId, Is.EqualTo(GetTableId(asm, "TestNs.RingDbWidgetOps")));
         Assert.That(entries[0].Change.Kind, Is.EqualTo(ChangeKind.Insert));
         Assert.That(entries[0].Change.Row, Is.Not.Null);
-        Assert.That(entries[0].Lsn, Is.EqualTo(0), "RingDb has a Persistent table, so ColdStore.RecoveredLsn seeds the shared LsnSequence at -1 for a fresh store - the first drawn value is 0, not 1.");
+        Assert.That(entries[0].Lsn, Is.EqualTo(1), "RingDb has a Persistent table, so ColdStore.RecoveredLsn seeds the shared LsnSequence at 0 for a fresh store - LSNs are 1-based, so the first drawn value is 1.");
     }
 
     [Test]
@@ -127,7 +127,7 @@ public class RingBufferGenerationTests {
         Assert.That(entries, Has.Length.EqualTo(2));
         Assert.That(entries[1].Change.Kind, Is.EqualTo(ChangeKind.Update));
         Assert.That(entries[1].Change.Row, Is.Not.Null);
-        Assert.That(entries[1].Lsn, Is.EqualTo(1), "LSN must strictly increase transaction over transaction.");
+        Assert.That(entries[1].Lsn, Is.EqualTo(2), "LSN must strictly increase transaction over transaction.");
     }
 
     [Test]
@@ -173,7 +173,7 @@ public class RingBufferGenerationTests {
         Assert.That(entries[0].Change.Row, Is.Not.Null);
         Assert.That(entries[1].Change.Row, Is.Not.Null);
         Assert.That(entries[2].Change.Row, Is.Null);
-        Assert.That(entries.Select(e => e.Lsn), Is.EqualTo(new long[] { 0, 1, 2 }));
+        Assert.That(entries.Select(e => e.Lsn), Is.EqualTo(new ulong[] { 1, 2, 3 }));
     }
 
     [Test]
@@ -193,8 +193,8 @@ public class RingBufferGenerationTests {
 
         Assert.That(widgetEntries, Has.Length.EqualTo(1));
         Assert.That(accountEntries, Has.Length.EqualTo(1));
-        Assert.That(widgetEntries[0].Lsn, Is.EqualTo(0), "An Instant-only transaction still draws from the shared sequence.");
-        Assert.That(accountEntries[0].Lsn, Is.EqualTo(1),
+        Assert.That(widgetEntries[0].Lsn, Is.EqualTo(1), "An Instant-only transaction still draws from the shared sequence.");
+        Assert.That(accountEntries[0].Lsn, Is.EqualTo(2),
             "The very next transaction, Persistent this time, continues the SAME sequence rather than starting its own - even though it lands in a completely separate ring buffer from Widget's.");
     }
 

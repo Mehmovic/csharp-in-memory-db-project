@@ -30,17 +30,17 @@ public class WalArchiveTests {
         try { Directory.Delete(dir, recursive: true); } catch { /* best-effort cleanup */ }
     }
 
-    static private DecodedWalEntry Entry(long lsn, long key = 1) =>
+    static private DecodedWalEntry Entry(ulong lsn, long key = 1) =>
         new(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(key), [9])]);
 
     // Same as Entry, but stamped - what a real committed operation looks like.
-    static private DecodedWalEntry StampedEntry(long lsn, long utcTicks, long key = 1) =>
+    static private DecodedWalEntry StampedEntry(ulong lsn, ulong utcTicks, long key = 1) =>
         new(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(key), [9])], utcTicks);
 
     // 2026-01-01T00:00:00Z, 2026-02-01T00:00:00Z, 2026-03-01T00:00:00Z as UTC ticks.
-    static private readonly long January = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
-    static private readonly long February = new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
-    static private readonly long March = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    static private readonly ulong January = (ulong)new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    static private readonly ulong February = (ulong)new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    static private readonly ulong March = (ulong)new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
 
     [Test]
     public void WriteSegment_WithEmptyEntries_CreatesNoFile() {
@@ -56,7 +56,7 @@ public class WalArchiveTests {
 
         Assert.That(error, Is.Null);
         var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
-        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 1, 2, 3 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new ulong[] { 1, 2, 3 }));
     }
 
     [Test]
@@ -82,7 +82,7 @@ public class WalArchiveTests {
 
         var history = WalArchive.ReadHistory(dir, [Entry(5), Entry(6)], 0).Unwrap();
 
-        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 1, 2, 3, 4, 5, 6 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new ulong[] { 1, 2, 3, 4, 5, 6 }));
     }
 
     [Test]
@@ -95,7 +95,7 @@ public class WalArchiveTests {
 
         var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
 
-        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 1, 2, 3 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new ulong[] { 1, 2, 3 }));
     }
 
     [Test]
@@ -106,7 +106,7 @@ public class WalArchiveTests {
 
         var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
 
-        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 4, 5 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new ulong[] { 4, 5 }));
     }
 
     [Test]
@@ -119,7 +119,7 @@ public class WalArchiveTests {
 
         var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
 
-        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 1, 2, 5, 6 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new ulong[] { 1, 2, 5, 6 }));
     }
 
     [Test]
@@ -128,7 +128,7 @@ public class WalArchiveTests {
 
         var history = WalArchive.ReadHistory(dir, [Entry(5), Entry(6)], 0).Unwrap();
 
-        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 1, 2, 5, 6 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new ulong[] { 1, 2, 5, 6 }));
     }
 
     [Test]
@@ -299,7 +299,7 @@ public class WalArchiveTests {
     [Test]
     public void WriteSegment_ThenReadHistory_PreservesEveryOriginalCommitTimestamp() {
         var dbId = Guid.NewGuid();
-        var error = WalArchive.WriteSegment(archiveDir, dbId, [StampedEntry(1, January), StampedEntry(2, February)], 0);
+        var error = WalArchive.WriteSegment(archiveDir, dbId, [StampedEntry(1, (ulong)January), StampedEntry(2, (ulong)February)], 0);
 
         Assert.That(error, Is.Null);
         var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
@@ -310,7 +310,7 @@ public class WalArchiveTests {
 
     [Test]
     public void ReadHistory_KeepsTimestampsOnEntriesThatCameFromTheLiveTail() {
-        var liveTail = new[] { StampedEntry(7, March) };
+        var liveTail = new[] { StampedEntry(7, (ulong)March) };
 
         var history = WalArchive.ReadHistory(dir, liveTail, 0).Unwrap();
 
@@ -322,22 +322,22 @@ public class WalArchiveTests {
 
     [Test]
     public void DeleteSegmentsOlderThanTimestamp_DropsOnlySegmentsEntirelyOlderThanTheCutoff() {
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, January)], 0);
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(2, February)], 0);
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(3, March)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, (ulong)January)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(2, (ulong)February)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(3, (ulong)March)], 0);
 
         var deleted = WalArchive.DeleteSegmentsOlderThanTimestamp(dir, February).Unwrap();
 
         Assert.That(deleted, Is.EqualTo(1), "only the January segment predates the February cutoff");
         var remaining = WalArchive.ReadHistory(dir, [], 0).Unwrap().Select(e => e.Entry.Lsn).ToArray();
-        Assert.That(remaining, Is.EqualTo(new long[] { 2, 3 }));
+        Assert.That(remaining, Is.EqualTo(new ulong[] { 2, 3 }));
     }
 
     [Test]
     public void DeleteSegmentsOlderThanTimestamp_KeepsASegmentThatStraddlesTheCutoff() {
         // A segment is the atomic unit: dropping half of it would leave a hole in the LSN
         // sequence, and a hole means missing changes - replay would rebuild a wrong state.
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, January), StampedEntry(2, March)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, (ulong)January), StampedEntry(2, (ulong)March)], 0);
 
         var deleted = WalArchive.DeleteSegmentsOlderThanTimestamp(dir, February).Unwrap();
 
@@ -349,7 +349,7 @@ public class WalArchiveTests {
     public void DeleteSegmentsOlderThanTimestamp_AlwaysKeepsASegmentHoldingAnyUnstampedEntry() {
         // UtcTicks == 0 means the frame was hand-built, not decoded from a WAL. We cannot
         // prove its age, and deleting history on a guess is what this design exists to avoid.
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, January), Entry(2)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, (ulong)January), Entry(2)], 0);
 
         var deleted = WalArchive.DeleteSegmentsOlderThanTimestamp(dir, March).Unwrap();
 
@@ -367,14 +367,14 @@ public class WalArchiveTests {
 
     [Test]
     public void DeleteSegmentsOlderThanTimestamp_AfterDeleting_LeavesReadableContiguousHistory() {
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, January)], 0);
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(2, February)], 0);
-        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(3, March)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(1, (ulong)January)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(2, (ulong)February)], 0);
+        WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(3, (ulong)March)], 0);
 
         WalArchive.DeleteSegmentsOlderThanTimestamp(dir, February).Unwrap();
 
         var history = WalArchive.ReadHistory(dir, [], 0).Unwrap();
-        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 2, 3 }));
+        Assert.That(history.Select(e => e.Entry.Lsn), Is.EqualTo(new ulong[] { 2, 3 }));
         Assert.That(history.Select(e => e.Entry.UtcTicks), Is.EqualTo(new[] { February, March }));
     }
 }

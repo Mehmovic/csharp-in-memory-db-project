@@ -15,11 +15,11 @@ namespace RhinoDB.Lib.Durability.Test;
 // The collector schedules itself as an ordinary Run, which is what serializes it against a
 // checkpoint's archive write - see ArchiveRetentionCollector's comment for why that matters.
 public class ArchiveRetentionTests {
-    static private readonly long January = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
-    static private readonly long March = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    static private readonly ulong January = (ulong)new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    static private readonly ulong March = (ulong)new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
     // AFTER the 2026-03-02 cutoff the hole tests prune against, so a segment stamped with it is a
     // genuine "too new to delete". (Using March itself there would make every segment deletable.)
-    static private readonly long Recent = new DateTimeOffset(2026, 3, 10, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    static private readonly ulong Recent = (ulong)new DateTimeOffset(2026, 3, 10, 0, 0, 0, TimeSpan.Zero).UtcTicks;
 
     // ---- policy: the two knobs ----
 
@@ -86,15 +86,15 @@ public class ArchiveRetentionTests {
         return dir;
     }
 
-    static private DecodedWalEntry StampedEntry(long lsn, long utcTicks) =>
-        new(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(lsn), [9])], utcTicks);
+    static private DecodedWalEntry StampedEntry(ulong lsn, ulong utcTicks) =>
+        new(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes((long)lsn), [9])], utcTicks);
 
-    private void WriteSegments(string coldPath, params (long ticks, uint generation)[] segments) {
+    private void WriteSegments(string coldPath, params (ulong ticks, uint generation)[] segments) {
         var archiveDir = Path.Combine(coldPath, WalArchive.ArchiveDirectoryName);
         // Each segment gets its OWN lsn: reusing one makes MergeInOrder dedupe the history down to
         // a single entry, which would hide whatever the test is actually about.
         for (var i = 0; i < segments.Length; i++)
-            Assert.That(WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(i + 1, segments[i].ticks)], segments[i].generation), Is.Null);
+            Assert.That(WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry((ulong)(i + 1), segments[i].ticks)], segments[i].generation), Is.Null);
     }
 
     private string[] SegmentFiles(string coldPath) {
@@ -175,7 +175,7 @@ public class ArchiveRetentionTests {
             Assert.That(File.Exists(walPath), Is.True, "ColdStore.Open creates the live WAL.");
             var lengthBefore = new FileInfo(walPath).Length;
 
-            cold.PruneArchiveOlderThan(new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks);
+            cold.PruneArchiveOlderThan((ulong)new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks);
 
             Assert.That(File.Exists(walPath), Is.True, "the collector must NEVER touch the live WAL.");
             Assert.That(new FileInfo(walPath).Length, Is.EqualTo(lengthBefore));
@@ -204,7 +204,7 @@ public class ArchiveRetentionTests {
     // The invariant these tests pin: whatever survives a time-based prune is a contiguous PREFIX
     // of the LSN sequence. A backwards clock step may only ever cause the prune to keep MORE.
 
-    private void WriteSegmentsWithLsns(string coldPath, params (long lsn, long ticks)[] entries) {
+    private void WriteSegmentsWithLsns(string coldPath, params (ulong lsn, ulong ticks)[] entries) {
         var archiveDir = Path.Combine(coldPath, WalArchive.ArchiveDirectoryName);
         foreach (var (lsn, ticks) in entries)
             Assert.That(WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(lsn, ticks)], 1), Is.Null);
@@ -220,7 +220,7 @@ public class ArchiveRetentionTests {
             // contiguous. (The direction matters: a time prune removes the oldest history.)
             WriteSegmentsWithLsns(coldPath, (1, January), (2, January), (3, Recent), (4, Recent));
 
-            cold.PruneArchiveOlderThan(new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).UtcTicks);
+            cold.PruneArchiveOlderThan((ulong)new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).UtcTicks);
 
             var history = WalArchive.ReadHistory(coldPath, [], 0).Unwrap();
             var lsns = history.Select(h => h.Entry.Lsn).ToArray();
@@ -242,7 +242,7 @@ public class ArchiveRetentionTests {
             // hole, so the prefix-monotonic prune must instead stop at S1 and delete NOTHING.
             WriteSegmentsWithLsns(coldPath, (1, Recent), (2, January), (3, Recent));
 
-            var deleted = cold.PruneArchiveOlderThan(new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).UtcTicks);
+            var deleted = cold.PruneArchiveOlderThan((ulong)new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).UtcTicks);
 
             Assert.That(deleted.Unwrap(), Is.EqualTo(0),
                 "a backwards clock step must make the prune keep MORE, never carve a hole at S2");
@@ -265,7 +265,7 @@ public class ArchiveRetentionTests {
             // must be replayable without silently losing changes; that is the whole point.
             WriteSegmentsWithLsns(coldPath, (1, Recent), (2, January), (3, Recent), (4, January), (5, Recent));
 
-            cold.PruneArchiveOlderThan(new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).UtcTicks);
+            cold.PruneArchiveOlderThan((ulong)new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero).UtcTicks);
 
             var lsns = WalArchive.ReadHistory(coldPath, [], 0).Unwrap().Select(h => h.Entry.Lsn).ToArray();
             for (var i = 1; i < lsns.Length; i++)
@@ -290,7 +290,7 @@ public class ArchiveRetentionTests {
                 [new DecodedWalEntry(1, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, [1], [9])])], 1);
             WriteSegmentsWithLsns(coldPath, (2, January), (3, January));
 
-            var deleted = cold.PruneArchiveOlderThan(new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks);
+            var deleted = cold.PruneArchiveOlderThan((ulong)new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks);
 
             Assert.That(deleted.Unwrap(), Is.EqualTo(0));
             Assert.That(SegmentFiles(coldPath), Has.Length.EqualTo(3));
@@ -449,7 +449,7 @@ public class ArchiveRetentionTests {
             WriteSegments(byTime, (March, 1), (January, 1), (March, 1));
             WriteSegments(byGeneration, (March, 1), (March, 1), (March, 1));
 
-            timeStore.PruneArchiveOlderThan(new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks);
+            timeStore.PruneArchiveOlderThan((ulong)new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks);
             genStore.PruneArchiveOlderThanGeneration(9);
 
             Assert.That(SegmentFiles(byTime), Has.Length.EqualTo(3), "a middle old segment stops the time prune entirely.");

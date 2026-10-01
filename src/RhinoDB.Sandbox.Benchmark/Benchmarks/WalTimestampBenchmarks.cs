@@ -24,7 +24,7 @@ namespace RhinoDB.Sandbox.Benchmark.Benchmarks;
 [SimpleJob(RunStrategy.Throughput, launchCount: 3, warmupCount: 8, iterationCount: 12)]
 public class WalTimestampBenchmarks {
     private const int FrameCount = 512;
-    private const long UtcBase = 638_000_000_000_000_000L;
+    private const ulong UtcBase = 638_000_000_000_000_000UL;
 
     [Params(128, 1024)]
     public int PayloadSize { get; set; }
@@ -32,7 +32,7 @@ public class WalTimestampBenchmarks {
     private byte[] payload = null!;
     private WalChange[] changes = null!;
     private byte[] scanBuffer = null!;
-    private long nextLsn;
+    private ulong nextLsn;
 
     [GlobalSetup]
     public void Setup() {
@@ -48,7 +48,7 @@ public class WalTimestampBenchmarks {
 
     // The stamp costs this much, once per operation, on the writer thread.
     [Benchmark(Baseline = true)]
-    public long Clock_UtcNow_Ticks() => DateTime.UtcNow.Ticks;
+    public ulong Clock_UtcNow_Ticks() => (ulong)DateTime.UtcNow.Ticks;
 
     [Benchmark]
     public long Clock_Stopwatch_GetTimestamp() => Stopwatch.GetTimestamp();
@@ -56,7 +56,7 @@ public class WalTimestampBenchmarks {
     // The real encode: MemoryPack the changes, build the 25-byte header, CRC it.
     [Benchmark]
     public int WalCodec_Encode_Stamped() =>
-        WalRecordCodec.Encode(nextLsn++, WalEntryKind.Operation, changes, DateTime.UtcNow.Ticks).Length;
+        WalRecordCodec.Encode(nextLsn++, WalEntryKind.Operation, changes, (ulong)DateTime.UtcNow.Ticks).Length;
 
     // Exactly the same work with no stamp - the closest remaining A/B, and the one that
     // isolates the timestamp from the rest of the encode.
@@ -66,12 +66,12 @@ public class WalTimestampBenchmarks {
 
     // The recovery/replay read path over 512 frames.
     [Benchmark]
-    public long Scan_512Frames() => Walk(scanBuffer);
+    public ulong Scan_512Frames() => Walk(scanBuffer);
 
     private byte[] BuildScanBuffer() {
         var frames = new List<byte[]>(FrameCount);
         for (var i = 0; i < FrameCount; i++)
-            frames.Add(WalRecordCodec.Encode(i + 1, WalEntryKind.Operation, changes, UtcBase + i));
+            frames.Add(WalRecordCodec.Encode((ulong)(i + 1), WalEntryKind.Operation, changes, UtcBase + (ulong)i));
 
         var total = frames.Sum(f => f.Length);
         var buffer = new byte[total];
@@ -85,14 +85,14 @@ public class WalTimestampBenchmarks {
 
     // Walks the buffer the way WriteAheadLog.Open does: length, CRC verify, read the header
     // fields, step. Uses the shipped header size rather than a hardcoded 17/25.
-    static private long Walk(ReadOnlySpan<byte> buffer) {
-        long sum = 0;
+    static private ulong Walk(ReadOnlySpan<byte> buffer) {
+        ulong sum = 0;
         var offset = 0;
         while (offset < buffer.Length) {
             var length = BinaryPrimitives.ReadUInt32LittleEndian(buffer[offset..]);
             var frameSize = WalRecordCodec.HeaderSize + (int)length;
-            sum += BinaryPrimitives.ReadInt64LittleEndian(buffer.Slice(offset + 8, 8));
-            sum += BinaryPrimitives.ReadInt64LittleEndian(buffer.Slice(offset + 16, 8));
+            sum += BinaryPrimitives.ReadUInt64LittleEndian(buffer.Slice(offset + 8, 8));
+            sum += BinaryPrimitives.ReadUInt64LittleEndian(buffer.Slice(offset + 16, 8));
             sum += Crc32.HashToUInt32(buffer.Slice(offset + 8, frameSize - 8));
             offset += frameSize;
         }

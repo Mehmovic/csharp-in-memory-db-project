@@ -69,7 +69,7 @@ public class RhinoHostBuilderTests {
     [Test]
     public async Task BuildAsync_InReplayMode_CallsLoadFromGenesisWithTheParsedUpToLsn_NotLoadAsync() {
         var loadAsyncCalled = false;
-        long? seenUpToLsn = null;
+        ulong? seenUpToLsn = null;
 
         var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=replay", "--game.replay-upto-lsn=7"])
             .AddDatabase<FakeDb, DefaultTransaction>("game", options => {

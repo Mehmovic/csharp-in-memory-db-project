@@ -29,7 +29,7 @@ static public class WalPruneCommand {
             return 1;
         }
 
-        long? cutoffUtcTicks = null;
+        ulong? cutoffUtcTicks = null;
         if (hasOlderThan) {
             var resolved = RhinoHostOptions.ResolveUtcTicks(olderThanText, "--older-than");
             if (resolved.IsError()) {
@@ -66,8 +66,8 @@ static public class WalPruneCommand {
             using (cold) {
                 Console.WriteLine(coldPath);
                 if (cutoffUtcTicks is { } cutoff) {
-                    var local = new DateTimeOffset(cutoff, TimeSpan.Zero).ToLocalTime();
-                    Console.WriteLine($"  keep everything newer than {Format(local)}  (local)  =  {Format(new DateTimeOffset(cutoff, TimeSpan.Zero))}  (UTC)");
+                    var local = new DateTimeOffset((long)cutoff, TimeSpan.Zero).ToLocalTime();
+                    Console.WriteLine($"  keep everything newer than {Format(local)}  (local)  =  {Format(new DateTimeOffset((long)cutoff, TimeSpan.Zero))}  (UTC)");
                 } else {
                     Console.WriteLine($"  keep generations {keepGenerations} and newer");
                 }
@@ -146,7 +146,7 @@ static public class WalPruneCommand {
         return $"{Format(FromTicks(segment.OldestUtcTicks))} .. {Format(FromTicks(segment.NewestUtcTicks))}";
     }
 
-    static private DateTimeOffset FromTicks(long utcTicks) => new DateTimeOffset(utcTicks, TimeSpan.Zero);
+    static private DateTimeOffset FromTicks(ulong utcTicks) => new DateTimeOffset((long)utcTicks, TimeSpan.Zero);
 
     static private string Format(DateTimeOffset value) => value.ToString("yyyy-MM-ddTHH:mm:ss'Z'", CultureInfo.InvariantCulture);
 }

@@ -49,7 +49,7 @@ internal sealed class ArchiveRetentionCollector<TTx> : IDisposable where TTx : I
 
 public readonly record struct ArchiveRetentionRunReport(
     DateTimeOffset RanAt,
-    long CutoffUtcTicks,
+    ulong CutoffUtcTicks,
     ArchiveRetentionPolicy Policy,
     int DeletedSegments
 );

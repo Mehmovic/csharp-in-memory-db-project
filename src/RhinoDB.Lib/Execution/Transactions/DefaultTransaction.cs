@@ -5,5 +5,5 @@ public readonly struct DefaultTransaction : ITransaction {
     public void Discard() { }
     public void SweepDeleted() { }
     public int PendingStorageOrphanCount => 0;
-    public long? LastLsn => null;
+    public ulong? LastLsn => null;
 }

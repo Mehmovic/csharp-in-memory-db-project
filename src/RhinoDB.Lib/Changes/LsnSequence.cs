@@ -1,7 +1,7 @@
 namespace RhinoDB.Lib.Changes;
 
-public sealed class LsnSequence(long seed = 0) {
-    private long current = seed;
+public sealed class LsnSequence(ulong seed = 0) {
+    private ulong current = seed;
 
-    public long Next() => ++current;
+    public ulong Next() => ++current;
 }

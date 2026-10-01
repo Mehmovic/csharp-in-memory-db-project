@@ -822,7 +822,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    private UndoRecord<{row}>[]? undoJournal;");
         sb.AppendLine("    private int undoJournalCount;");
         sb.AppendLine("    private int preApplyCount;");
-        sb.AppendLine("    private long appliedLsn;");
+        sb.AppendLine("    private ulong appliedLsn;");
         sb.AppendLine("    private System.Collections.Generic.HashSet<int>? orphanOffsets;");
         sb.AppendLine("    public int PendingStorageOrphanCount => orphanOffsets?.Count ?? 0;");
         sb.AppendLine("    public bool AppliedInOperation { get; private set; }");
@@ -1373,7 +1373,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         if (table.RingBufferCapacity > 0) {
             sb.AppendLine("");
-            sb.AppendLine("    public Result<ArrayPoolContainer<RingEntry>> TryGetChangesSince(long lsn) => ring.TryGetChangesSince(lsn);");
+            sb.AppendLine("    public Result<ArrayPoolContainer<RingEntry>> TryGetChangesSince(ulong lsn) => ring.TryGetChangesSince(lsn);");
             sb.AppendLine("");
         }
         sb.AppendLine();
@@ -1398,7 +1398,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
     }
 
     static private void EmitInstantApply(StringBuilder sb, TableModel table) {
-        sb.AppendLine("    public void Apply(long lsn) {");
+        sb.AppendLine("    public void Apply(ulong lsn) {");
         EmitUndoPreamble(sb, table);
         sb.AppendLine($"        var changeIndex = -1;");
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
@@ -1524,7 +1524,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         if (table.RingBufferCapacity > 0) {
             sb.AppendLine("");
-            sb.AppendLine("    public Result<ArrayPoolContainer<RingEntry>> TryGetChangesSince(long lsn) => ring.TryGetChangesSince(lsn);");
+            sb.AppendLine("    public Result<ArrayPoolContainer<RingEntry>> TryGetChangesSince(ulong lsn) => ring.TryGetChangesSince(lsn);");
             sb.AppendLine("");
         }
         sb.AppendLine();
@@ -1553,7 +1553,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
     }
 
     static private void EmitPersistentApply(StringBuilder sb, TableModel table) {
-        sb.AppendLine("    public void Apply(long lsn) {");
+        sb.AppendLine("    public void Apply(ulong lsn) {");
         EmitUndoPreamble(sb, table);
         sb.AppendLine($"        var changeIndex = -1;");
         sb.AppendLine("        foreach (ref readonly var c in CollectionsMarshal.AsSpan(changes)) {");
@@ -1798,7 +1798,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         foreach (var table in tables)
             sb.AppendLine($"    public readonly {database.SimpleName}{table.Accessor}Ops {table.Accessor};");
         sb.AppendLine("    private readonly LsnSequence lsnSequence;");
-        sb.AppendLine("    public long? LastLsn { get; private set; }");
+        sb.AppendLine("    public ulong? LastLsn { get; private set; }");
         sb.AppendLine();
         sb.Append($"    public {txName}(");
         sb.Append(string.Join(", ", tables.Select(t => $"{database.SimpleName}{t.Accessor}Ops {Camel(t.Accessor)}")));
@@ -1818,7 +1818,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        LastLsn = anyDirty ? lsnSequence.Next() : null;");
         sb.AppendLine("        try {");
         foreach (var table in tables)
-            sb.AppendLine($"            if ({table.Accessor}.Dirty) {table.Accessor}.Apply(LastLsn ?? 0);");
+            sb.AppendLine($"            if ({table.Accessor}.Dirty) {table.Accessor}.Apply(LastLsn ?? 0UL);");
         foreach (var table in tables)
             sb.AppendLine($"            {table.Accessor}.ReleaseUndoJournal();");
         sb.AppendLine("        }");
@@ -2039,7 +2039,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    public virtual Result LoadFromGenesis({database.SimpleName} db, ColdStore cold, long? upToLsn = null, Action<DecodedWalEntry>? onEntryApplied = null) {{");
+        sb.AppendLine($"    public virtual Result LoadFromGenesis({database.SimpleName} db, ColdStore cold, ulong? upToLsn = null, Action<DecodedWalEntry>? onEntryApplied = null) {{");
         sb.AppendLine("        var oldestGenerationResult = WalArchive.ReadOldestRetainedGeneration(cold.DirectoryPath);");
         sb.AppendLine("        if (oldestGenerationResult.IsError()) return oldestGenerationResult.Void();");
         sb.AppendLine($"        if (oldestGenerationResult.Unwrap().TryGet(out var oldestGeneration) && oldestGeneration < {database.SimpleName}.RetainedFromGeneration)");

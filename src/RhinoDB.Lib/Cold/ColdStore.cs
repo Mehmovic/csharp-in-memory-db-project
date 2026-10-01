@@ -39,7 +39,7 @@ public sealed class ColdStore : IDisposable {
 
     public DecodedWalEntry[] PendingWalTail { get; private set; }
 
-    public long RecoveredLsn { get; }
+    public ulong RecoveredLsn { get; }
 
     private ColdStore(
         MdbxEnvironment env,
@@ -47,7 +47,7 @@ public sealed class ColdStore : IDisposable {
         string directoryPath,
         string archiveDirectory,
         DecodedWalEntry[] pendingRecoveryEntries,
-        long recoveredLsn,
+        ulong recoveredLsn,
         long evictionBatchThresholdBytes
     ) {
         this.env = env;
@@ -193,7 +193,7 @@ public sealed class ColdStore : IDisposable {
     public void Stage(uint tableId, ChangeKind kind, byte[] key, byte[]? row) =>
         currentOperationChanges.Add(new WalChange(tableId, kind, key, row));
 
-    internal Task<DbError?> EndScope(bool commit, PropagationMode mode, long lsn) {
+    internal Task<DbError?> EndScope(bool commit, PropagationMode mode, ulong lsn) {
         IsScopeActive = false;
         if (!commit || currentOperationChanges.Count == 0) {
             currentOperationChanges.Clear();
@@ -254,7 +254,7 @@ public sealed class ColdStore : IDisposable {
 
     public Result<int> ReadRetainedFromGeneration() => checkpoint.ReadRetainedFromGeneration();
 
-    public Result<int> PruneArchiveOlderThan(long cutoffUtcTicks) {
+    public Result<int> PruneArchiveOlderThan(ulong cutoffUtcTicks) {
         var retained = ReadRetainedFromGeneration();
         if (retained.IsError()) return retained.Void();
         var currentFloor = retained.Unwrap();

@@ -8,13 +8,13 @@ public sealed class ChangeRingBuffer(int capacity) {
     private long writePosition;
     private int count;
 
-    public void Record(uint tableId, ChangeKind kind, long lsn, byte[] key, byte[]? row) {
+    public void Record(uint tableId, ChangeKind kind, ulong lsn, byte[] key, byte[]? row) {
         slots[(int)(writePosition % slots.Length)] = new RingEntry(lsn, new WalChange(tableId, kind, key, row));
         writePosition++;
         if (count < slots.Length) count++;
     }
 
-    public int RevertFrom(long lsn) {
+    public int RevertFrom(ulong lsn) {
         if (count == 0) return 0;
 
         var oldestIndex = writePosition - count;
@@ -33,7 +33,7 @@ public sealed class ChangeRingBuffer(int capacity) {
         return removed;
     }
 
-    public Result<ArrayPoolContainer<RingEntry>> TryGetChangesSince(long lsn) {
+    public Result<ArrayPoolContainer<RingEntry>> TryGetChangesSince(ulong lsn) {
         if (count == 0) return ArrayPoolContainer<RingEntry>.Empty();
 
         var oldestIndex = writePosition - count;
@@ -41,7 +41,7 @@ public sealed class ChangeRingBuffer(int capacity) {
         var newestLsn = slots[(int)((writePosition - 1) % slots.Length)].Lsn;
 
         var hasEvicted = writePosition > slots.Length;
-        if (hasEvicted && lsn < oldestLsn - 1) return Result<ArrayPoolContainer<RingEntry>>.Error(DbError.RingBufferGap());
+        if (hasEvicted && lsn + 1 < oldestLsn) return Result<ArrayPoolContainer<RingEntry>>.Error(DbError.RingBufferGap());
         if (lsn >= newestLsn) return ArrayPoolContainer<RingEntry>.Empty();
 
         var matchesBuilder = ArrayPoolContainerBuilder<RingEntry>.Create(count);

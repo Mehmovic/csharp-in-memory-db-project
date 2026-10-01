@@ -5,5 +5,5 @@ public interface ITransaction {
     void Discard();
     void SweepDeleted();
     int PendingStorageOrphanCount { get; }
-    long? LastLsn { get; }
+    ulong? LastLsn { get; }
 }

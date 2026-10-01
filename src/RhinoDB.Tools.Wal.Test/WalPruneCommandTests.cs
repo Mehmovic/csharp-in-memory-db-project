@@ -8,9 +8,9 @@ namespace RhinoDB.Tools.Wal.Test;
 // re-implementing it. So these tests stand up a genuine mdbx directory, write genuine archived
 // segments into it, and assert on what the command reports and removes.
 public class WalPruneCommandTests {
-    static private readonly long January = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
-    static private readonly long February = new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
-    static private readonly long March = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    static private readonly ulong January = (ulong)new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    static private readonly ulong February = (ulong)new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+    static private readonly ulong March = (ulong)new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
 
     private string dir = "";
 
@@ -32,14 +32,14 @@ public class WalPruneCommandTests {
         body(dir);
     }
 
-    static private DecodedWalEntry StampedEntry(long lsn, long utcTicks) =>
+    static private DecodedWalEntry StampedEntry(ulong lsn, ulong utcTicks) =>
         new(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(lsn), [9])], utcTicks);
 
-    private void WriteSegments(params (long ticks, uint generation)[] segments) {
+    private void WriteSegments(params (ulong ticks, uint generation)[] segments) {
         WithColdStore(coldPath => {
             var archiveDir = Path.Combine(coldPath, WalArchive.ArchiveDirectoryName);
             for (var i = 0; i < segments.Length; i++) {
-                var error = WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry(i + 1, segments[i].ticks)], segments[i].generation);
+                var error = WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [StampedEntry((ulong)(i + 1), segments[i].ticks)], segments[i].generation);
                 Assert.That(error, Is.Null);
             }
         });

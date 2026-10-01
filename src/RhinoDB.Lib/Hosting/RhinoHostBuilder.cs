@@ -124,7 +124,7 @@ public sealed class RhinoHostBuilder {
         RhinoHostOptions options,
         Func<ColdStore, TDb> createDb,
         Func<TDb, Task>? loadAsync,
-        Func<TDb, ColdStore, long?, Result>? loadFromGenesis,
+        Func<TDb, ColdStore, ulong?, Result>? loadFromGenesis,
         Func<TDb, Result>? runMigration,
         int? binaryGeneration,
         Func<int, bool>? isGenerationInvalid,

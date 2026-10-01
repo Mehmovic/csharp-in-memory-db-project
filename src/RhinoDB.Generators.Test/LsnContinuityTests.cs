@@ -65,10 +65,10 @@ public class LsnContinuityTests {
     static private ChangeRingBuffer GetRing(object db, string accessor) =>
         (ChangeRingBuffer)db.GetType().GetField($"{Camel(accessor)}Ring", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(db)!;
 
-    static private long[] GetAllRingLsns(ChangeRingBuffer ring) {
-        using var entries = ring.TryGetChangesSince(-1).Unwrap();
+    static private ulong[] GetAllRingLsns(ChangeRingBuffer ring) {
+        using var entries = ring.TryGetChangesSince(0).Unwrap();
         var buffer = entries.Buffer();
-        var result = new long[buffer.Length];
+        var result = new ulong[buffer.Length];
         for (var i = 0; i < buffer.Length; i++) result[i] = buffer[i].Lsn;
         return result;
     }
@@ -79,7 +79,7 @@ public class LsnContinuityTests {
         var dbType = asm.GetType("TestNs.GameDb")!;
         var txType = asm.GetType("TestNs.GameDbTransaction")!;
 
-        long[] ringLsns;
+        ulong[] ringLsns;
         using (var cold = ColdStore.Open(dir).Unwrap()) {
             var db = Activator.CreateInstance(dbType, cold)!;
 
@@ -98,7 +98,7 @@ public class LsnContinuityTests {
             ringLsns = GetAllRingLsns(GetRing(db, "Club")).Concat(GetAllRingLsns(GetRing(db, "Widget"))).OrderBy(lsn => lsn).ToArray();
         }
 
-        Assert.That(ringLsns, Is.EqualTo(new long[] { 0, 1, 2 }),
+        Assert.That(ringLsns, Is.EqualTo(new ulong[] { 1, 2, 3 }),
             "The union of every table's own ring buffer must cover every dirty transaction, Instant-only included, with no gap in the LSN run - even though each table's changes are now stored separately.");
 
         // wal.dat is held open (FileShare.None) by the ColdStore that wrote it - reopen fresh to read
@@ -106,7 +106,7 @@ public class LsnContinuityTests {
         using var reopenedCold = ColdStore.Open(dir).Unwrap();
         var walHistory = WalArchive.ReadHistory(reopenedCold.DirectoryPath, reopenedCold.PendingWalTail, reopenedCold.WalGeneration).Unwrap();
 
-        Assert.That(walHistory.Select(e => e.Entry.Lsn), Is.EqualTo(new long[] { 0, 2 }),
+        Assert.That(walHistory.Select(e => e.Entry.Lsn), Is.EqualTo(new ulong[] { 1, 3 }),
             "The WAL only ever sees Persistent-table transactions - Lsn 1 (Instant-only) is a real, expected gap, not corruption.");
     }
 
@@ -124,11 +124,11 @@ public class LsnContinuityTests {
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 2, 75)); return Result.Ok(); },
                 PropagationMode.Confirmed);
-            // Club Lsn=0, Club Lsn=1 - both WAL-recorded.
+        // Club Lsn=1, Club Lsn=2 - both WAL-recorded.
         }
 
         using var reopenedCold = ColdStore.Open(dir).Unwrap();
-        Assert.That(reopenedCold.RecoveredLsn, Is.EqualTo(1),
+        Assert.That(reopenedCold.RecoveredLsn, Is.EqualTo(2),
             "RecoveredLsn must reflect the highest LSN that actually has a WAL entry.");
 
         var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
@@ -140,8 +140,8 @@ public class LsnContinuityTests {
             PropagationMode.Confirmed);
         var lsnAfterRestart = (long)((dynamic)txRef!).LastLsn!;
 
-        Assert.That(lsnAfterRestart, Is.EqualTo(2),
-            "The first transaction after reopen must continue the sequence (RecoveredLsn 1 + 1 = 2), not restart from 0 or collide with an LSN already present in the WAL.");
+        Assert.That(lsnAfterRestart, Is.EqualTo(3),
+            "The first transaction after reopen must continue the sequence (RecoveredLsn 2 + 1 = 3), not restart from 0 or collide with an LSN already present in the WAL.");
     }
 
     [Test]
@@ -163,13 +163,13 @@ public class LsnContinuityTests {
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
                 PropagationMode.Confirmed);
-            // Club Lsn=0 (WAL-recorded), Widget Lsn=1 (Instant-only, WAL-invisible) - the session ends
+            // Club Lsn=1 (WAL-recorded), Widget Lsn=2 (Instant-only, WAL-invisible) - the session ends
             // right here, on the Instant-only transaction.
         }
 
         using var reopenedCold = ColdStore.Open(dir).Unwrap();
-        Assert.That(reopenedCold.RecoveredLsn, Is.EqualTo(0),
-            "RecoveredLsn can only see the highest WAL-recorded LSN (0) - it has no way to know Lsn 1 was already drawn for the Instant-only transaction, since Instant tables don't survive restart at all.");
+        Assert.That(reopenedCold.RecoveredLsn, Is.EqualTo(1),
+            "RecoveredLsn can only see the highest WAL-recorded LSN (1) - it has no way to know Lsn 2 was already drawn for the Instant-only transaction, since Instant tables don't survive restart at all.");
 
         var reopenedDb = Activator.CreateInstance(dbType, reopenedCold)!;
         reopenedCold.CompleteRecovery();
@@ -180,7 +180,7 @@ public class LsnContinuityTests {
             PropagationMode.Confirmed);
         var lsnAfterRestart = (long)((dynamic)txRef!).LastLsn!;
 
-        Assert.That(lsnAfterRestart, Is.EqualTo(1),
-            "Harmless reuse, not a collision: Widget's old Lsn=1 never touched the WAL, so a fresh Persistent transaction landing on Lsn=1 again introduces no ambiguity for WAL ordering/dedup.");
+        Assert.That(lsnAfterRestart, Is.EqualTo(2),
+            "Harmless reuse, not a collision: Widget's old Lsn=2 never touched the WAL, so a fresh Persistent transaction landing on Lsn=2 again introduces no ambiguity for WAL ordering/dedup.");
     }
 }

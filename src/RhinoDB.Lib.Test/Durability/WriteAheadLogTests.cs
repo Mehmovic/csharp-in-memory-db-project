@@ -243,7 +243,7 @@ public class WriteAheadLogTests {
         var opened = WriteAheadLog.Open(path).Unwrap();
         using var reopenedWal = opened.Wal;
 
-        Assert.That(opened.Entries.Select(e => e.Lsn), Is.EquivalentTo(new long[] { 1, 2 }));
+        Assert.That(opened.Entries.Select(e => e.Lsn), Is.EquivalentTo(new ulong[] { 1, 2 }));
 
         var error = await reopenedWal.AppendConfirmed(3, WalEntryKind.Operation, OneChange(3));
         Assert.That(error, Is.Null);
@@ -260,7 +260,7 @@ public class WriteAheadLogTests {
         var opened = WriteAheadLog.Open(path).Unwrap();
         using var reopenedWal = opened.Wal;
 
-        Assert.That(opened.Entries.Select(e => e.Lsn), Is.EquivalentTo(new long[] { 1 }));
+        Assert.That(opened.Entries.Select(e => e.Lsn), Is.EquivalentTo(new ulong[] { 1 }));
     }
 
     [Test]
@@ -291,8 +291,8 @@ public class WriteAheadLogTests {
 
         var pending = new Task<DbError?>[OperationCount];
         for (var i = 0; i < OperationCount; i++) {
-            var lsn = i + 1;
-            pending[i] = wal.AppendConfirmed(lsn, WalEntryKind.Operation, OneChange(lsn));
+            var lsn = (ulong)(i + 1);
+            pending[i] = wal.AppendConfirmed(lsn, WalEntryKind.Operation, OneChange((long)lsn));
         }
         var results = await Task.WhenAll(pending);
         wal.Dispose();

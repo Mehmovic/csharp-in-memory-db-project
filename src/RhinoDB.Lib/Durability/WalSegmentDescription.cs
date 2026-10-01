@@ -4,12 +4,12 @@ public readonly record struct WalSegmentDescription(
     string Path,
     uint Generation,
     int EntryCount,
-    long OldestUtcTicks,
-    long NewestUtcTicks,
+    ulong OldestUtcTicks,
+    ulong NewestUtcTicks,
     bool HasAnyUnstampedEntry) {
     public string FileName => System.IO.Path.GetFileName(Path);
 
-    public bool IsWhollyOlderThan(long cutoffUtcTicks) {
+    public bool IsWhollyOlderThan(ulong cutoffUtcTicks) {
         if (EntryCount == 0) return true;
         if (HasAnyUnstampedEntry) return false;
         return NewestUtcTicks < cutoffUtcTicks;

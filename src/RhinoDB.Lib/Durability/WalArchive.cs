@@ -42,7 +42,7 @@ static public class WalArchive {
         string coldStorePath, IReadOnlyList<DecodedWalEntry> liveTail, int liveGeneration
     ) {
         var merged = new List<(DecodedWalEntry, int)>();
-        var lastSeenLsn = 0L;
+        var lastSeenLsn = 0UL;
         var started = false;
 
         var archiveDirectory = Path.Combine(coldStorePath, ArchiveDirectoryName);
@@ -203,8 +203,8 @@ static public class WalArchive {
 
             var (generation, entries) = readResult.Unwrap();
             var anyUnstamped = false;
-            var oldest = long.MaxValue;
-            var newest = long.MinValue;
+            var oldest = ulong.MaxValue;
+            var newest = 0UL;
 
             foreach (var entry in entries) {
                 if (entry.UtcTicks == 0) { anyUnstamped = true; continue; }
@@ -212,7 +212,7 @@ static public class WalArchive {
                 if (entry.UtcTicks > newest) newest = entry.UtcTicks;
             }
 
-            var noneStamped = oldest == long.MaxValue;
+            var noneStamped = oldest == ulong.MaxValue;
             descriptions.Add(new WalSegmentDescription(
                 segmentPath,
                 generation,
@@ -229,7 +229,7 @@ static public class WalArchive {
         try { File.Delete(segmentPath); } catch { /* */ }
     }
 
-    static public Result<int> DeleteSegmentsOlderThanTimestamp(string coldStorePath, long cutoffUtcTicks) {
+    static public Result<int> DeleteSegmentsOlderThanTimestamp(string coldStorePath, ulong cutoffUtcTicks) {
         var archiveDirectory = Path.Combine(coldStorePath, ArchiveDirectoryName);
         if (!Directory.Exists(archiveDirectory)) return Result.Ok(0);
 
@@ -255,7 +255,7 @@ static public class WalArchive {
             : Result<int>.Error(DbError.WalDirectorySyncFailed());
     }
 
-    static private bool IsWhollyOlderThan(DecodedWalEntry[] entries, long cutoffUtcTicks) {
+    static private bool IsWhollyOlderThan(DecodedWalEntry[] entries, ulong cutoffUtcTicks) {
         if (entries.Length == 0) return true;
 
         foreach (var entry in entries) {
@@ -282,7 +282,7 @@ static public class WalArchive {
         return (header.Generation, scan.Entries.Where(e => e.Kind == WalEntryKind.Operation).ToArray());
     }
 
-    static private void MergeInOrder(List<(DecodedWalEntry, int)> into, DecodedWalEntry[] batch, int generation, ref long lastSeenLsn, ref bool started) {
+    static private void MergeInOrder(List<(DecodedWalEntry, int)> into, DecodedWalEntry[] batch, int generation, ref ulong lastSeenLsn, ref bool started) {
         foreach (var entry in batch) {
             if (started && entry.Lsn <= lastSeenLsn) continue;
 

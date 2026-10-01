@@ -30,7 +30,7 @@ public class MigrationTransactionTests {
     static private void StageInsert(ColdStore store, string tableName, int key, Account row) =>
         store.Stage(TableIdHash.Compute(tableName), ChangeKind.Insert, MemoryPackSerializer.Serialize(key), MemoryPackSerializer.Serialize(row));
 
-    static private async Task RunConfirmed(ColdStore store, Action stageActions, long lsn) {
+    static private async Task RunConfirmed(ColdStore store, Action stageActions, ulong lsn) {
         store.BeginScope();
         stageActions();
         await store.EndScope(commit: true, PropagationMode.Confirmed, lsn);

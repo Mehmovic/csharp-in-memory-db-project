@@ -42,7 +42,7 @@ public class GenesisReplayTests {
         return Activator.CreateInstance(t, id, rating)!;
     }
 
-    static private Result InvokeLoadFromGenesis(Type loaderType, object db, object cold, long? upToLsn = null) {
+    static private Result InvokeLoadFromGenesis(Type loaderType, object db, object cold, ulong? upToLsn = null) {
         var loader = Activator.CreateInstance(loaderType)!;
         return (Result)loaderType.GetMethod("LoadFromGenesis")!.Invoke(loader, [db, cold, upToLsn, null])!;
     }
@@ -130,15 +130,15 @@ public class GenesisReplayTests {
 
                 await (Task<Result>)GeneratorTestHost.RunTransactional(
                     db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, 80)); return Result.Ok(); },
-                    PropagationMode.Confirmed); // LSN 0 - a fresh store's nextLsn starts at -1, so the first commit is 0
+        PropagationMode.Confirmed); // LSN 1 - a fresh store's sequence seeds at 0 and the first drawn value is 1
                 await (Task<Result>)GeneratorTestHost.RunTransactional(
                     db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 2, 75)); return Result.Ok(); },
-                    PropagationMode.Confirmed); // LSN 1
+        PropagationMode.Confirmed); // LSN 2
             }
 
             using var stoppedCold = ColdStore.Open(dir).Unwrap();
             var stoppedDb = Activator.CreateInstance(dbType, stoppedCold)!;
-            var stoppedResult = InvokeLoadFromGenesis(loaderType, stoppedDb, stoppedCold, upToLsn: 0L);
+        var stoppedResult = InvokeLoadFromGenesis(loaderType, stoppedDb, stoppedCold, upToLsn: 1UL);
 
             Assert.That(stoppedResult.IsOk(), Is.True);
 
@@ -152,8 +152,8 @@ public class GenesisReplayTests {
                     return Result.Ok();
                 }, PropagationMode.Optimistic);
 
-            Assert.That(club1Found, Is.True, "LSN 0 (Club 1's insert) is within the stop point and must be applied.");
-            Assert.That(club2Found, Is.False, "LSN 1 (Club 2's insert) is past upToLsn and must not be applied.");
+        Assert.That(club1Found, Is.True, "LSN 1 (Club 1's insert) is within the stop point and must be applied.");
+        Assert.That(club2Found, Is.False, "LSN 2 (Club 2's insert) is past upToLsn and must not be applied.");
         } finally {
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }

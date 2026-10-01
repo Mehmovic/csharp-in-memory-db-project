@@ -13,16 +13,16 @@ public enum RhinoRunMode {
 public sealed class RhinoHostOptions {
     public required string ColdPath { get; init; }
     public RhinoRunMode Mode { get; private init; } = RhinoRunMode.Run;
-    public long? ReplayUpToLsn { get; private init; }
+    public ulong? ReplayUpToLsn { get; private init; }
     public int? WalKeepGenerations { get; private init; }
-    public long? WalPruneOlderThanUtcTicks { get; private init; }
+    public ulong? WalPruneOlderThanUtcTicks { get; private init; }
 
     static public Result<RhinoHostOptions> Parse(string[] args, string prefix) {
         string? coldPath = null;
         var mode = RhinoRunMode.Run;
-        long? upToLsn = null;
+        ulong? upToLsn = null;
         int? walKeepGenerations = null;
-        long? walPruneOlderThanUtcTicks = null;
+        ulong? walPruneOlderThanUtcTicks = null;
 
         var coldPathFlag = $"--{prefix}.cold-path";
         var modeFlag = $"--{prefix}.mode";
@@ -40,7 +40,7 @@ public sealed class RhinoHostOptions {
                     return Result<RhinoHostOptions>.Error(DbError.SystemFailure(
                         new ArgumentException($"Unknown {modeFlag} '{value}' - expected run, replay, migrate, wal-prune, or wal-migrate.")));
             } else if (key == upToLsnFlag) {
-                if (!long.TryParse(value, out var lsn))
+                if (!ulong.TryParse(value, out var lsn))
                     return Result<RhinoHostOptions>.Error(DbError.SystemFailure(
                         new ArgumentException($"{upToLsnFlag} must be an integer, got '{value}'.")));
                 upToLsn = lsn;
@@ -69,17 +69,17 @@ public sealed class RhinoHostOptions {
         };
     }
 
-    static public Result<long> ResolveUtcTicks(string? value, string? flagName = null) {
+    static public Result<ulong> ResolveUtcTicks(string? value, string? flagName = null) {
         var label = flagName ?? "timestamp";
         if (string.IsNullOrWhiteSpace(value))
-            return Result<long>.Error(DbError.SystemFailure(
+            return Result<ulong>.Error(DbError.SystemFailure(
                 new ArgumentException($"{label} needs a value, e.g. 2026-09-14T08:00:00 (local), 2026-09-14T08:00:00Z (UTC), or 2026-09-14T08:00:00+02:00.")));
 
         if (!DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var when))
-            return Result<long>.Error(DbError.SystemFailure(
+            return Result<ulong>.Error(DbError.SystemFailure(
                 new ArgumentException($"{label} value '{value}' is not a recognizable timestamp. Use ISO-8601, e.g. 2026-09-14T08:00:00 (local), 2026-09-14T08:00:00Z (UTC), or 2026-09-14T08:00:00+02:00.")));
 
-        return Result.Ok(when.UtcTicks);
+        return Result.Ok((ulong)when.UtcTicks);
     }
     
     static private (string Key, string? Value) SplitFlag(string arg) {
