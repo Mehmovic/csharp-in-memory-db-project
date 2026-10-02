@@ -740,6 +740,31 @@ public sealed class TableGenerator : IIncrementalGenerator {
         };
     }
 
+    static private string IndexComparerArgument(IndexKind kind, string keyType) {
+        if (kind != IndexKind.BTree || !ContainsString(keyType)) return string.Empty;
+        return IsTupleKeyType(keyType)
+            ? $"comparer: {TupleComparerCall(keyType)}"
+            : "comparer: StringComparer.Ordinal";
+    }
+
+    static private bool IsTupleKeyType(string keyType) => keyType.StartsWith("(");
+
+    static private bool ContainsString(string keyType)
+        => keyType is "string" or "System.String" || keyType.Contains("string ");
+
+    static private string TupleComparerCall(string keyType) {
+        var inner = keyType.Substring(1, keyType.IndexOf(")", StringComparison.Ordinal) - 1);
+        var typeArgs = inner.Split(',').Select(part => part.Trim().Split(' ')[0]).ToArray();
+
+        var method = typeArgs.Length switch {
+            2 => "For2",
+            3 => "For3",
+            _ => throw new Exception($"Unsupported composite index arity {typeArgs.Length} for key {keyType}")
+        };
+
+        return $"OrdinalComparers.{method}<{string.Join(", ", typeArgs)}>()";
+    }
+
     static private string ConcreteIndexType(IndexModel idx) {
         var keyType = KeyType(idx);
         return (idx.Kind, idx.Uniqueness) switch {
@@ -1871,23 +1896,23 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine();
         foreach (var table in instantTables) {
             sb.AppendLine($"    private readonly DenseArray<{table.RowTypeFullName}> {Camel(table.Accessor)}Storage = new(chunkSize: {table.ChunkSize});");
-            sb.AppendLine($"    private readonly {PrimaryIndexType(table)} {Camel(table.Accessor)}PrimaryIndex = new();");
+            sb.AppendLine($"    private readonly {PrimaryIndexType(table)} {Camel(table.Accessor)}PrimaryIndex = new({IndexComparerArgument(table.PrimaryKeyKind, table.PrimaryKeyTypeFullName)});");
             foreach (var aif in table.AutoIncrementFields)
                 sb.AppendLine($"    private readonly AutoIncrementCounter {Camel(table.Accessor)}{aif.FieldName}Counter = new();");
             foreach (var idx in table.Indexes) {
                 var fieldName = $"{Camel(table.Accessor)}{idx.AccessorName}Index";
-                sb.AppendLine($"    private readonly {ConcreteIndexType(idx)} {fieldName} = new();");
+                sb.AppendLine($"    private readonly {ConcreteIndexType(idx)} {fieldName} = new({IndexComparerArgument(idx.Kind, KeyType(idx))});");
             }
         }
         foreach (var table in persistentTables) {
             sb.AppendLine($"    private readonly DenseArray<{table.RowTypeFullName}> {Camel(table.Accessor)}Storage = new(chunkSize: {table.ChunkSize});");
-            sb.AppendLine($"    private readonly {PrimaryIndexType(table)} {Camel(table.Accessor)}PrimaryIndex = new();");
+            sb.AppendLine($"    private readonly {PrimaryIndexType(table)} {Camel(table.Accessor)}PrimaryIndex = new({IndexComparerArgument(table.PrimaryKeyKind, table.PrimaryKeyTypeFullName)});");
             sb.AppendLine($"    private readonly ColdTable<{table.PrimaryKeyTypeFullName}, {table.RowTypeFullName}> {Camel(table.Accessor)}ColdTable;");
             foreach (var aif in table.AutoIncrementFields)
                 sb.AppendLine($"    private readonly AutoIncrementCounter {Camel(table.Accessor)}{aif.FieldName}Counter = new();");
             foreach (var idx in table.Indexes) {
                 var fieldName = $"{Camel(table.Accessor)}{idx.AccessorName}Index";
-                sb.AppendLine($"    private readonly {ConcreteIndexType(idx)} {fieldName} = new();");
+                sb.AppendLine($"    private readonly {ConcreteIndexType(idx)} {fieldName} = new({IndexComparerArgument(idx.Kind, KeyType(idx))});");
             }
         }
 

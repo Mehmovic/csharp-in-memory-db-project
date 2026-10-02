@@ -1,5 +1,3 @@
-using RhinoDB.Lib.Settings;
-
 namespace RhinoDB.Lib.Indexing;
 
 public class HashIndex<TKey> where TKey : IEquatable<TKey> {
@@ -30,7 +28,7 @@ public class HashIndex<TKey> where TKey : IEquatable<TKey> {
     private StackArrayPoolContainer<int> ScanOffsets(FilterDescriptor<TKey>? filterParam = null) {
         if (hashMap.Count == 0) return StackArrayPoolContainer<int>.Empty();
 
-        using var offsetBuilder = StackArrayPoolContainerBuilder<int>.Create(Constants.OffsetBuilderInitialCapacity);
+        using var offsetBuilder = StackArrayPoolContainerBuilder<int>.Create(hashMap.Count);
 
         foreach (var kvp in hashMap) {
             if (filterParam is { } filter && filter.MustExclude(kvp.Key)) continue;

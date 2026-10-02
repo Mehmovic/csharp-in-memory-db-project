@@ -1,14 +1,13 @@
-using RhinoDB.Lib.Settings;
-
 namespace RhinoDB.Lib.Indexing;
 
 public class NonUniqueHashIndex<TKey> where TKey : IEquatable<TKey> {
     private readonly Dictionary<TKey, HashSet<int>> hashMap = new Dictionary<TKey, HashSet<int>>();
+    public int Count { get; private set; }
 
     public StackArrayPoolContainer<int> GetOffsets(TKey key) {
         if (!hashMap.TryGetValue(key, out var offsets)) return StackArrayPoolContainer<int>.Empty();
 
-        using var offsetBuilder = StackArrayPoolContainerBuilder<int>.Create(Constants.OffsetBuilderInitialCapacity);
+        using var offsetBuilder = StackArrayPoolContainerBuilder<int>.Create(offsets.Count);
         foreach (var offset in offsets) offsetBuilder.Add(offset);
         return offsetBuilder.Build().Unwrap();
     }
@@ -20,11 +19,13 @@ public class NonUniqueHashIndex<TKey> where TKey : IEquatable<TKey> {
         }
 
         offsets.Add(offset);
+        Count++;
     }
 
     public void Delete(TKey key, int offset) {
         var offsets = hashMap[key];
         offsets.Remove(offset);
+        Count--;
         if (offsets.Count == 0) hashMap.Remove(key);
     }
 
@@ -37,7 +38,7 @@ public class NonUniqueHashIndex<TKey> where TKey : IEquatable<TKey> {
     private StackArrayPoolContainer<int> ScanOffsets(FilterDescriptor<TKey>? filterParam = null) {
         if (hashMap.Count == 0) return StackArrayPoolContainer<int>.Empty();
 
-        using var offsetBuilder = StackArrayPoolContainerBuilder<int>.Create(Constants.OffsetBuilderInitialCapacity);
+        using var offsetBuilder = StackArrayPoolContainerBuilder<int>.Create(Count);
 
         foreach (var kvp in hashMap) {
             if (filterParam is { } filter && filter.MustExclude(kvp.Key)) continue;

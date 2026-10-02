@@ -85,6 +85,31 @@ static internal class GeneratorTestHost {
             .Where(entry => entry.Name.EndsWith(".g.cs"))
             .ToDictionary(entry => entry.Name, entry => entry.Text, StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// Runs TableGenerator and returns the generated .g.cs sources keyed by file name, so a
+    /// test can assert on the emitted text itself. Behavioural tests can only observe what
+    /// the generated code *does*; asserting the emitted ctor arguments is how we prove the
+    /// generator actually writes them (an ordinal comparer that is never emitted looks
+    /// identical to one that is, until a string index turns out to be culture-sensitive).
+    /// </summary>
+    static public Dictionary<string, string> RunTableGenerator(string source, string testName) {
+        var assemblyName = $"Gen_{testName}_{Guid.NewGuid():N}";
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: ["DEBUG"]);
+        var tree = CSharpSyntaxTree.ParseText(source, parseOptions);
+        var compilation = CSharpCompilation.Create(assemblyName, [tree], References,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var driver = CSharpGeneratorDriver.Create(
+            [new TableGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions);
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
+
+        return output.SyntaxTrees
+            .Select(t => (Name: Path.GetFileName(t.FilePath), Text: t.GetText().ToString()))
+            .Where(entry => entry.Name.EndsWith(".g.cs"))
+            .ToDictionary(entry => entry.Name, entry => entry.Text, StringComparer.OrdinalIgnoreCase);
+    }
     
     static private (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoad(
         string source, ImmutableArray<IIncrementalGenerator> extraGenerators, string testName, ImmutableArray<AdditionalText> additionalTexts) {
