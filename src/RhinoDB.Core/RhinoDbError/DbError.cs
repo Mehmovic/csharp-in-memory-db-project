@@ -5,6 +5,7 @@ namespace RhinoDB.Core;
 [StructLayout(LayoutKind.Auto)]
 public readonly partial struct DbError {
     public ErrorKind Kind { get; }
+    public ushort CustomCode { get; }
     private readonly Exception? systemException;
 
     private DbError(ErrorKind kind) {
@@ -21,6 +22,13 @@ public readonly partial struct DbError {
         Kind = kind;
         systemException = exception;
     }
+    
+    private DbError(ushort customCode, Exception? inner = null) {
+        Kind = ErrorKind.Custom;
+        CustomCode = customCode;
+        systemException = inner;
+    }
 
     static public DbError SystemFailure(Exception exception) => new DbError(exception);
+    static public DbError Custom(ushort code, Exception? inner = null) => new DbError(code, inner);
 }

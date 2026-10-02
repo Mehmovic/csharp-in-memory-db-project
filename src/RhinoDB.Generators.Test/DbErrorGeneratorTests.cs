@@ -68,13 +68,14 @@ public class DbErrorGeneratorTests {
     }
 
     [Test]
-    public void ErrorKind_StartsAtSystemFailureAndEndsAtCustom() {
+    public void ErrorKind_StartsAtNoneAndEndsAtCustom() {
         var members = ErrorKind(Run(Exceptions + CorePartial, "RhinoDB.Core"))
             .Split('\n', StringSplitOptions.RemoveEmptyEntries).Skip(1)
             .Select(l => l.Trim().TrimEnd(',')).ToArray();
 
         Assert.Multiple(() => {
-            Assert.That(members[0], Is.EqualTo("SystemFailure"));
+            Assert.That(members[0], Is.EqualTo("None"));
+            Assert.That(members[1], Is.EqualTo("SystemFailure"));
             Assert.That(members[^1], Is.EqualTo("Custom"));
             Assert.That(members, Does.Contain("Alpha"));
             Assert.That(members, Does.Contain("Beta"));
@@ -108,16 +109,6 @@ public class DbErrorGeneratorTests {
     [Test]
     public void ToException_HasAFallbackArmForAnUnknownKind() {
         Assert.That(Source(), Does.Contain("_ => new Exception"));
-    }
-
-    [Test]
-    public void Custom_StoresItsCodeAndTheInnerException() {
-        Assert.Multiple(() => {
-            Assert.That(Source(), Does.Contain("public ushort CustomCode { get; }"));
-            Assert.That(Source(), Does.Contain("public static DbError Custom(ushort code, Exception? inner = null)"));
-            Assert.That(Source(), Does.Contain("Kind = ErrorKind.Custom;"));
-            Assert.That(Source(), Does.Contain("systemException = inner;"));
-        });
     }
 
     static private string Source() => Run(Exceptions + CorePartial, "RhinoDB.Core")["DbError.g.cs"];
