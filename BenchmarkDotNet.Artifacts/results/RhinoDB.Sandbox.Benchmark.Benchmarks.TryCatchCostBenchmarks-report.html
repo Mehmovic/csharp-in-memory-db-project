@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>RhinoDB.Sandbox.Benchmark.Benchmarks.TryCatchCostBenchmarks-20261002-104222</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.26300.9457)
+Unknown processor
+.NET SDK 11.0.100-rc.1.26425.128
+  [Host]   : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  ShortRun : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+</code></pre>
+<pre><code>Job=ShortRun  IterationCount=3  LaunchCount=1  
+WarmupCount=3  
+</code></pre>
+
+<table>
+<thead><tr><th>Method          </th><th>Mean   </th><th>Error   </th><th>StdDev</th><th>Ratio</th><th>RatioSD</th><th>Gen0</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>Direct_NoGuard</td><td>0.1478 ns</td><td>0.7678 ns</td><td>0.0421 ns</td><td>1.049</td><td>0.35</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>Guarded_TryCatch</td><td>0.0000 ns</td><td>0.0000 ns</td><td>0.0000 ns</td><td>0.000</td><td>0.00</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>Guarded_ActuallyThrows</td><td>937.5984 ns</td><td>326.5504 ns</td><td>17.8993 ns</td><td>6,656.899</td><td>1,435.64</td><td>0.0343</td><td>216 B</td><td>NA</td>
+</tr><tr><td>Run_ReturnsResultError</td><td>3,457.7543 ns</td><td>4,887.1649 ns</td><td>267.8820 ns</td><td>24,549.870</td><td>5,539.37</td><td>-</td><td>32 B</td><td>NA</td>
+</tr><tr><td>Run_DelegateThrows</td><td>6,459.2100 ns</td><td>11,793.7208 ns</td><td>646.4536 ns</td><td>45,860.045</td><td>10,661.54</td><td>0.0458</td><td>352 B</td><td>NA</td>
+</tr></tbody></table>
+</body>
+</html>

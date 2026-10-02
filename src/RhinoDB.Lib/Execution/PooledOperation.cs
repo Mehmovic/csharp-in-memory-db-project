@@ -76,7 +76,10 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
         try {
             tx = ctx.CreateTransaction();
             txCreated = true;
-            result = operation!.Invoke(ctx, tx, args);
+
+            try { result = operation!.Invoke(ctx, tx, args); }
+            catch (Exception ex) { result = TValue.FromException(ex); }
+            
             if (result.IsOk()) {
                 try {
                     var applyResult = tx.Apply();
@@ -90,6 +93,7 @@ internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TVa
             }
         }
         catch (Exception ex) { result = TValue.FromException(ex); }
+        
         if (txCreated && !result.IsOk()) tx.Discard();
 
         try {
