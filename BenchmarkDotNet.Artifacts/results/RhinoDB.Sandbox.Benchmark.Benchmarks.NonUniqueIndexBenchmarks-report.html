@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>RhinoDB.Sandbox.Benchmark.Benchmarks.NonUniqueIndexBenchmarks-20261003-212408</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.26300.9457)
+Unknown processor
+.NET SDK 11.0.100-rc.1.26425.128
+  [Host]     : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  DefaultJob : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+</code></pre>
+<pre><code></code></pre>
+
+<table>
+<thead><tr><th>Method                          </th><th>Mean      </th><th>Error   </th><th>StdDev  </th><th>Ratio</th><th>RatioSD</th><th>Gen0</th><th>Gen1</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>BTreeLookup_LowCardinality_50PerKey</td><td>197.72 ns</td><td>2.454 ns</td><td>2.175 ns</td><td>1.00</td><td>0.02</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>BTreeLookup_WideDuplicateRun_500PerKey</td><td>1,798.21 ns</td><td>25.542 ns</td><td>22.642 ns</td><td>9.10</td><td>0.15</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>BTreeLookup_HighCardinality_1PerKey</td><td>52.86 ns</td><td>1.034 ns</td><td>1.308 ns</td><td>0.27</td><td>0.01</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>BTreeLookup_String_LowCardinality</td><td>398.08 ns</td><td>7.940 ns</td><td>10.324 ns</td><td>2.01</td><td>0.06</td><td>0.0138</td><td>-</td><td>88 B</td><td>NA</td>
+</tr><tr><td>HashLookup_LowCardinality_50PerKey</td><td>102.97 ns</td><td>1.621 ns</td><td>1.437 ns</td><td>0.52</td><td>0.01</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>HashLookup_WideDuplicateRun_500PerKey</td><td>726.54 ns</td><td>8.797 ns</td><td>7.798 ns</td><td>3.68</td><td>0.05</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>HashLookup_HighCardinality_1PerKey</td><td>28.67 ns</td><td>0.588 ns</td><td>1.254 ns</td><td>0.15</td><td>0.01</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>BTreeRange_OneKey_LowCardinality</td><td>230.83 ns</td><td>3.396 ns</td><td>3.010 ns</td><td>1.17</td><td>0.02</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>BTreeRange_100Keys_LowCardinality</td><td>13,985.91 ns</td><td>271.936 ns</td><td>313.162 ns</td><td>70.74</td><td>1.72</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>BTreeGt_LowCardinality</td><td>49,590.43 ns</td><td>829.141 ns</td><td>775.579 ns</td><td>250.84</td><td>4.65</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>BTreeScan_All_LowCardinality</td><td>90,601.17 ns</td><td>1,057.754 ns</td><td>989.424 ns</td><td>458.28</td><td>6.88</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>BTreeScan_All_WideDuplicateRun</td><td>183,380.20 ns</td><td>3,510.588 ns</td><td>3,283.806 ns</td><td>927.58</td><td>18.88</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>BTreeScan_Except_LowCardinality</td><td>102,639.90 ns</td><td>1,822.619 ns</td><td>1,615.704 ns</td><td>519.18</td><td>9.64</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>HashScan_All_LowCardinality</td><td>102,359.03 ns</td><td>1,932.312 ns</td><td>2,300.280 ns</td><td>517.76</td><td>12.64</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>HashScan_All_WideDuplicateRun</td><td>169,196.93 ns</td><td>3,608.442 ns</td><td>10,639.572 ns</td><td>855.84</td><td>54.34</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>HashScan_Except_LowCardinality</td><td>102,414.12 ns</td><td>1,987.791 ns</td><td>1,952.276 ns</td><td>518.03</td><td>11.06</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>BTreeBulkLoad_LowCardinality</td><td>2,146,674.39 ns</td><td>39,845.441 ns</td><td>39,133.551 ns</td><td>10,858.38</td><td>224.29</td><td>132.8125</td><td>74.2188</td><td>842267 B</td><td>NA</td>
+</tr><tr><td>BTreeBulkLoad_WideDuplicateRun</td><td>7,735,020.98 ns</td><td>81,224.825 ns</td><td>72,003.691 ns</td><td>39,125.54</td><td>545.85</td><td>203.1250</td><td>156.2500</td><td>1307035 B</td><td>NA</td>
+</tr><tr><td>HashBulkLoad_WideDuplicateRun</td><td>1,654,253.61 ns</td><td>41,190.909 ns</td><td>118,845.199 ns</td><td>8,367.60</td><td>604.86</td><td>884.7656</td><td>771.4844</td><td>5564712 B</td><td>NA</td>
+</tr><tr><td>BTreeDeleteOneOfMany_WideRun</td><td>10,200,574.06 ns</td><td>101,660.202 ns</td><td>95,093.016 ns</td><td>51,596.88</td><td>720.92</td><td>203.1250</td><td>156.2500</td><td>1307075 B</td><td>NA</td>
+</tr><tr><td>HashDeleteOneOfMany_WideRun</td><td>1,773,099.07 ns</td><td>59,394.627 ns</td><td>174,194.173 ns</td><td>8,968.75</td><td>882.20</td><td>882.8125</td><td>769.5313</td><td>5564744 B</td><td>NA</td>
+</tr></tbody></table>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>RhinoDB.Sandbox.Benchmark.Benchmarks.CompositeIndexBenchmarks-20261003-210936</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.26300.9457)
+Unknown processor
+.NET SDK 11.0.100-rc.1.26425.128
+  [Host]     : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  DefaultJob : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+</code></pre>
+<pre><code></code></pre>
+
+<table>
+<thead><tr><th>Method                      </th><th>Mean   </th><th>Error </th><th>StdDev </th><th>Median </th><th>Ratio</th><th>RatioSD</th><th>Gen0</th><th>Gen1</th><th>Gen2</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>Lookup_NumericTuple</td><td>19.17 ns</td><td>0.368 ns</td><td>1.026 ns</td><td>18.61 ns</td><td>1.00</td><td>0.07</td><td>-</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>Lookup_StringTuple_Ordinal</td><td>27.78 ns</td><td>0.497 ns</td><td>0.817 ns</td><td>27.66 ns</td><td>1.45</td><td>0.08</td><td>-</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>Lookup_StringTuple_DefaultComparer</td><td>53.73 ns</td><td>1.040 ns</td><td>0.973 ns</td><td>53.24 ns</td><td>2.81</td><td>0.15</td><td>-</td><td>-</td><td>-</td><td>-</td><td>NA</td>
+</tr><tr><td>Range_NumericTuple_Width100</td><td>449.52 ns</td><td>8.981 ns</td><td>25.035 ns</td><td>436.22 ns</td><td>23.51</td><td>1.75</td><td>0.0849</td><td>-</td><td>-</td><td>536 B</td><td>NA</td>
+</tr><tr><td>Range_StringTuple_Ordinal_Width100</td><td>530.40 ns</td><td>6.492 ns</td><td>6.376 ns</td><td>528.17 ns</td><td>27.75</td><td>1.41</td><td>0.1001</td><td>-</td><td>-</td><td>632 B</td><td>NA</td>
+</tr><tr><td>Range_StringTuple_Default_Width100</td><td>671.87 ns</td><td>13.462 ns</td><td>30.109 ns</td><td>658.91 ns</td><td>35.15</td><td>2.34</td><td>0.1001</td><td>-</td><td>-</td><td>632 B</td><td>NA</td>
+</tr><tr><td>Scan_NumericTuple_All</td><td>255,994.00 ns</td><td>8,979.818 ns</td><td>25,764.784 ns</td><td>249,784.25 ns</td><td>13,391.43</td><td>1,497.08</td><td>14.6484</td><td>14.6484</td><td>14.6484</td><td>524320 B</td><td>NA</td>
+</tr><tr><td>Scan_StringTuple_Ordinal_All</td><td>254,612.45 ns</td><td>7,364.027 ns</td><td>20,770.369 ns</td><td>252,768.36 ns</td><td>13,319.15</td><td>1,266.96</td><td>15.1367</td><td>15.1367</td><td>15.1367</td><td>524318 B</td><td>NA</td>
+</tr></tbody></table>
+</body>
+</html>

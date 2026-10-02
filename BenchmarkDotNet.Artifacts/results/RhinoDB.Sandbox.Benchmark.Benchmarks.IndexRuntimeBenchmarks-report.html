@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>RhinoDB.Sandbox.Benchmark.Benchmarks.IndexRuntimeBenchmarks-20261003-222156</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.26300.9457)
+Unknown processor
+.NET SDK 11.0.100-rc.1.26425.128
+  [Host]     : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  Job-PJJBIC : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+</code></pre>
+<pre><code>InvocationCount=1  UnrollFactor=1  
+</code></pre>
+
+<table>
+<thead><tr><th>Method            </th><th>Mean </th><th>Error</th><th>StdDev</th><th>Median</th><th>Ratio</th><th>RatioSD</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>BTree_Insert_Ascending</td><td>58.73 ns</td><td>2.814 ns</td><td>8.120 ns</td><td>57.850 ns</td><td>1.02</td><td>0.20</td><td>114 B</td><td>1.00</td>
+</tr><tr><td>BTree_Insert_Scattered</td><td>387.44 ns</td><td>15.121 ns</td><td>42.152 ns</td><td>367.350 ns</td><td>6.72</td><td>1.16</td><td>-</td><td>0.00</td>
+</tr><tr><td>BTree_Delete</td><td>418.26 ns</td><td>30.799 ns</td><td>87.372 ns</td><td>377.550 ns</td><td>7.25</td><td>1.80</td><td>-</td><td>0.00</td>
+</tr><tr><td>Hash_Insert_Ascending</td><td>10.93 ns</td><td>2.199 ns</td><td>6.380 ns</td><td>9.225 ns</td><td>0.19</td><td>0.11</td><td>-</td><td>0.00</td>
+</tr><tr><td>Hash_Insert_Scattered</td><td>47.47 ns</td><td>3.431 ns</td><td>9.450 ns</td><td>46.550 ns</td><td>0.82</td><td>0.20</td><td>-</td><td>0.00</td>
+</tr><tr><td>Hash_Delete</td><td>83.16 ns</td><td>13.427 ns</td><td>39.380 ns</td><td>64.850 ns</td><td>1.44</td><td>0.71</td><td>-</td><td>0.00</td>
+</tr><tr><td>NonUniqueBTree_Insert</td><td>1,505.29 ns</td><td>49.525 ns</td><td>143.680 ns</td><td>1,484.500 ns</td><td>26.10</td><td>4.29</td><td>1273 B</td><td>11.17</td>
+</tr><tr><td>NonUniqueBTree_Delete</td><td>522.82 ns</td><td>31.339 ns</td><td>91.913 ns</td><td>507.800 ns</td><td>9.07</td><td>2.01</td><td>-</td><td>0.00</td>
+</tr><tr><td>BTree_Insert_ForcedSplit</td><td>41.31 ns</td><td>2.753 ns</td><td>7.943 ns</td><td>40.725 ns</td><td>0.72</td><td>0.17</td><td>38 B</td><td>0.33</td>
+</tr></tbody></table>
+</body>
+</html>

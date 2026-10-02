@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>RhinoDB.Sandbox.Benchmark.Benchmarks.IndexScalingBenchmarks-20261003-003923</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.26300.9457)
+Unknown processor
+.NET SDK 11.0.100-rc.1.26425.128
+  [Host]   : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+  ShortRun : .NET 11.0.0 (11.0.26.42628), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+</code></pre>
+<pre><code>Job=ShortRun  IterationCount=3  LaunchCount=1  
+WarmupCount=3  
+</code></pre>
+
+<table>
+<thead><tr><th>Method                     </th><th>Mean</th><th>Error</th><th>StdDev</th><th>Gen0</th><th>Gen1</th><th>Gen2</th><th>Allocated</th>
+</tr>
+</thead><tbody><tr><td>Scale_BulkLoad_1M_BTree</td><td>133.4 ms</td><td>102.6 ms</td><td>5.62 ms</td><td>1250.0000</td><td>500.0000</td><td>-</td><td>11.9 MB</td>
+</tr><tr><td>Scale_BulkLoad_4M_BTree</td><td>1,081.6 ms</td><td>4,671.9 ms</td><td>256.08 ms</td><td>5000.0000</td><td>2000.0000</td><td>-</td><td>47.59 MB</td>
+</tr><tr><td>Scale_BulkLoad_10M_BTree</td><td>3,448.3 ms</td><td>949.5 ms</td><td>52.05 ms</td><td>14000.0000</td><td>7000.0000</td><td>1000.0000</td><td>142.98 MB</td>
+</tr><tr><td>Scale_BulkLoad_10M_NonUniqueBTree</td><td>3,211.0 ms</td><td>4,773.0 ms</td><td>261.63 ms</td><td>14000.0000</td><td>7000.0000</td><td>1000.0000</td><td>142.98 MB</td>
+</tr></tbody></table>
+</body>
+</html>

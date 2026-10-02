@@ -1710,20 +1710,51 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private void EmitBulkLoadMethods(StringBuilder sb, TableModel table) {
         var row = table.RowTypeFullName;
+
         sb.AppendLine();
-        sb.AppendLine($"    public void LoadRow({row} row) {{");
-        sb.AppendLine($"        var pk = row.{table.PrimaryKeyName};");
-        sb.AppendLine("        var offset = storage.Insert(row);");
-        sb.AppendLine("        primaryIndex.Insert(pk, offset);");
-        foreach (var idx in table.Indexes)
-            sb.AppendLine($"        {IndexFieldName(idx)}.Insert({KeyExpr("row", idx)}, offset);");
-        foreach (var aif in table.AutoIncrementFields)
-            sb.AppendLine($"        {Camel(aif.FieldName)}Counter.Seed((long)row.{aif.FieldName} + 1);");
-        sb.AppendLine("    }");
+        sb.AppendLine($"    public void BulkLoadFromCold() {{");
+        sb.AppendLine($"        var bulkRows = new System.Collections.Generic.List<{row}>();");
+        sb.AppendLine("        foreach (var pair in cold.ScanAll(coldTable)) bulkRows.Add(pair.Row);");
+        sb.AppendLine("        var bulkCount = bulkRows.Count;");
+        sb.AppendLine("        if (bulkCount == 0) return;");
+        sb.AppendLine();
+        sb.AppendLine("        storage.EnsureCapacity(bulkCount);");
+        sb.AppendLine("        var bulkOffsets = new int[bulkCount];");
+        sb.AppendLine("        for (var i = 0; i < bulkCount; i++) bulkOffsets[i] = storage.Insert(bulkRows[i]);");
         sb.AppendLine();
 
-        sb.AppendLine("    public void BulkLoadFromCold() {");
-        sb.AppendLine("        foreach (var pair in cold.ScanAll(coldTable)) LoadRow(pair.Row);");
+        if (table.PrimaryKeyKind == IndexKind.BTree) {
+            sb.AppendLine($"        var bulkPrimaryKeys = new {table.PrimaryKeyTypeFullName}[bulkCount];");
+            sb.AppendLine($"        for (var i = 0; i < bulkCount; i++) bulkPrimaryKeys[i] = bulkRows[i].{table.PrimaryKeyName};");
+            sb.AppendLine("        primaryIndex.BulkLoadFrom(bulkPrimaryKeys, bulkOffsets);");
+        } else {
+            sb.AppendLine($"        for (var i = 0; i < bulkCount; i++) primaryIndex.Insert(bulkRows[i].{table.PrimaryKeyName}, bulkOffsets[i]);");
+        }
+        sb.AppendLine();
+
+        for (var n = 0; n < table.Indexes.Length; n++) {
+            var idx = table.Indexes[n];
+            var keyExpr = KeyExpr("bulkRows[i]", idx);
+            var name = IndexFieldName(idx);
+
+            if (idx.Kind == IndexKind.BTree) {
+                sb.AppendLine($"        var bulkKeys{n} = new {KeyType(idx)}[bulkCount];");
+                sb.AppendLine($"        for (var i = 0; i < bulkCount; i++) bulkKeys{n}[i] = {keyExpr};");
+                sb.AppendLine($"        {name}.BulkLoadFrom(bulkKeys{n}, bulkOffsets);");
+            } else {
+                sb.AppendLine($"        for (var i = 0; i < bulkCount; i++) {name}.Insert({keyExpr}, bulkOffsets[i]);");
+            }
+            sb.AppendLine();
+        }
+
+        foreach (var aif in table.AutoIncrementFields) {
+            var max = $"bulkMax{Camel(aif.FieldName)}";
+            sb.AppendLine($"        var {max} = long.MinValue;");
+            sb.AppendLine($"        for (var i = 0; i < bulkCount; i++) {{ var v = (long)bulkRows[i].{aif.FieldName}; if (v > {max}) {max} = v; }}");
+            sb.AppendLine($"        if ({max} != long.MinValue) {Camel(aif.FieldName)}Counter.Seed({max} + 1);");
+            sb.AppendLine();
+        }
+
         sb.AppendLine("    }");
     }
 

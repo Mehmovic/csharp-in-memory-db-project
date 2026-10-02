@@ -47,6 +47,14 @@ public class IndexBenchmarks {
         if (!condition) throw new InvalidOperationException("index is structurally wrong: " + message);
     }
 
+    // Every result container is disposed.
+    //
+    // These methods read .Count off the container and drop it. That leaks the rented array back
+    // to nobody, so the pool can never recycle it and every call allocates a fresh one - which
+    // is how a width-1 range came to measure 280 B/op (ArrayPool<int>.Rent(64) = 256 B + header)
+    // for a query that returns a single int. The production path through QuerySet disposes
+    // correctly and does not pay this, so an undisposed benchmark measures a usage bug that the
+    // generated code does not have.
     [Benchmark(Baseline = true)]
     public int Lookup_Int() => intIndex.GetOffset(probe).Unwrap();
 
@@ -54,21 +62,21 @@ public class IndexBenchmarks {
     public int Lookup_String() => strIndex.GetOffset(strProbe).Unwrap();
 
     [Benchmark]
-    public int Range_Width1() => intIndex.GetOffsetsRange(probe, probe).Count;
+    public int Range_Width1() { using var r = intIndex.GetOffsetsRange(probe, probe); return r.Count; }
 
     [Benchmark]
-    public int Range_Width100() => intIndex.GetOffsetsRange(probe, probe + 99).Count;
+    public int Range_Width100() { using var r = intIndex.GetOffsetsRange(probe, probe + 99); return r.Count; }
 
     [Benchmark]
-    public int Range_Width10000() => intIndex.GetOffsetsRange(probe, probe + 9999).Count;
+    public int Range_Width10000() { using var r = intIndex.GetOffsetsRange(probe, probe + 9999); return r.Count; }
 
     // The generator's Iter() path: unbounded/unbounded, so the result length is known
     // before a single element is read.
     [Benchmark]
-    public int Scan_All() => intIndex.GetOffsetsIter().Count;
+    public int Scan_All() { using var r = intIndex.GetOffsetsIter(); return r.Count; }
 
     [Benchmark]
-    public int Scan_Except() => intIndex.GetOffsetsExcept(probe).Count;
+    public int Scan_Except() { using var r = intIndex.GetOffsetsExcept(probe); return r.Count; }
 
     // Bulk load: dominated by splits, so it shows chunk allocation cost directly.
     [Benchmark]

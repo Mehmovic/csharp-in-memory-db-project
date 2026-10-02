@@ -17,6 +17,9 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
         public readonly bool IsFull => Count == Keys.Length;
     }
 
+    private const int FillNumerator = 31;
+    private const int FillDenominator = 32;
+
     private readonly int chunkCapacity;
     private readonly IComparer<TKey> comparer;
     private readonly List<IndexChunk> chunks;
@@ -134,6 +137,21 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
             MergeWithNeighborIfUnderfull(c);
             return;
         }
+    }
+    
+    public void BulkLoadFrom(ReadOnlySpan<TKey> keys, ReadOnlySpan<int> offsets) {
+        if (keys.Length != offsets.Length)
+            throw new ArgumentException($"{keys.Length} keys but {offsets.Length} offsets.", nameof(offsets));
+
+        var (built, count) = SortAndBuildChunks(keys, offsets, chunkCapacity, comparer);
+
+        foreach (var existing in CollectionsMarshal.AsSpan(chunks)) {
+            ArrayPool<TKey>.Shared.Return(existing.Keys);
+            ArrayPool<int>.Shared.Return(existing.Offsets);
+        }
+        chunks.Clear();
+        foreach (var chunk in built) chunks.Add(chunk);
+        Count = count;
     }
 
     private void MergeWithNeighborIfUnderfull(int chunkIdx) {
@@ -293,15 +311,7 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
 
         chunks.Insert(chunkIdx + 1, newChunk);
     }
-
-    static private IndexChunk RentChunk(int capacity) => new IndexChunk(ArrayPool<TKey>.Shared.Rent(capacity), ArrayPool<int>.Shared.Rent(capacity));
-
-    static private void ReturnChunk(ref IndexChunk chunk) {
-        ArrayPool<TKey>.Shared.Return(chunk.Keys);
-        ArrayPool<int>.Shared.Return(chunk.Offsets);
-        chunk = default;
-    }
-
+    
     static public NonUniqueBTreeIndex<TKey> BulkLoad(
         ReadOnlySpan<TKey> keys,
         ReadOnlySpan<int> offsets,
@@ -313,49 +323,73 @@ public class NonUniqueBTreeIndex<TKey> : OrderedIndex<TKey> where TKey : ICompar
 
         var capacity = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(16, chunkSize));
         var cmp = comparer ?? Comparer<TKey>.Default;
+        var (built, count) = SortAndBuildChunks(keys, offsets, capacity, cmp);
+        return new NonUniqueBTreeIndex<TKey>(built, count, capacity, cmp);
+    }
 
-        var sortedKeys = ArrayPool<TKey>.Shared.Rent(keys.Length);
-        var sortedOffsets = ArrayPool<int>.Shared.Rent(keys.Length);
+    static private IndexChunk RentChunk(int capacity) => new IndexChunk(ArrayPool<TKey>.Shared.Rent(capacity), ArrayPool<int>.Shared.Rent(capacity));
+
+    static private void ReturnChunk(ref IndexChunk chunk) {
+        ArrayPool<TKey>.Shared.Return(chunk.Keys);
+        ArrayPool<int>.Shared.Return(chunk.Offsets);
+        chunk = default;
+    }
+
+    static private (List<IndexChunk> Built, int Count) SortAndBuildChunks(
+        ReadOnlySpan<TKey> keys,
+        ReadOnlySpan<int> offsets,
+        int capacity,
+        IComparer<TKey> cmp
+    ) {
+        var length = Math.Max(1, keys.Length);
+        var sortedKeys = ArrayPool<TKey>.Shared.Rent(length);
+        var sortedOffsets = ArrayPool<int>.Shared.Rent(length);
+        var permutation = ArrayPool<int>.Shared.Rent(length);
         try {
             keys.CopyTo(sortedKeys);
             offsets.CopyTo(sortedOffsets);
-            var permutation = ArrayPool<int>.Shared.Rent(keys.Length);
             for (var i = 0; i < keys.Length; i++) permutation[i] = i;
             var keysRef = sortedKeys;
             permutation.AsSpan(0, keys.Length).Sort((a, b) => {
-                    var byKey = cmp.Compare(keysRef[a], keysRef[b]);
-                    return byKey != 0 ? byKey : a.CompareTo(b);
-                }
-            );
+                var byKey = cmp.Compare(keysRef[a], keysRef[b]);
+                return byKey != 0 ? byKey : a.CompareTo(b);
+            });
 
-            var orderedKeys = ArrayPool<TKey>.Shared.Rent(keys.Length);
-            var orderedOffsets = ArrayPool<int>.Shared.Rent(keys.Length);
+            var orderedKeys = ArrayPool<TKey>.Shared.Rent(length);
+            var orderedOffsets = ArrayPool<int>.Shared.Rent(length);
             for (var i = 0; i < keys.Length; i++) {
                 orderedKeys[i] = sortedKeys[permutation[i]];
                 orderedOffsets[i] = sortedOffsets[permutation[i]];
             }
-            
+
             ArrayPool<TKey>.Shared.Return(sortedKeys);
             ArrayPool<int>.Shared.Return(sortedOffsets);
             sortedKeys = orderedKeys;
             sortedOffsets = orderedOffsets;
-            
-            var built = new List<IndexChunk>(Math.Max(1, (keys.Length + capacity - 1) / capacity));
-            for (var start = 0; start < keys.Length; start += capacity) {
+
+            var count = keys.Length;
+            var fillCapacity = Math.Max(1, capacity * FillNumerator / FillDenominator);
+            var chunkCount = Math.Max(1, (count + fillCapacity - 1) / fillCapacity);
+
+            var built = new List<IndexChunk>(chunkCount);
+            var perChunk = count / chunkCount;
+            var extra = count % chunkCount;
+            var start = 0;
+            for (var c = 0; c < chunkCount; c++) {
                 var chunk = RentChunk(capacity);
-                var take = Math.Min(capacity, keys.Length - start);
+                var take = perChunk + (c < extra ? 1 : 0);
                 Array.Copy(sortedKeys, start, chunk.Keys, 0, take);
                 Array.Copy(sortedOffsets, start, chunk.Offsets, 0, take);
                 chunk.Count = take;
                 built.Add(chunk);
+                start += take;
             }
 
-            if (built.Count == 0) built.Add(RentChunk(capacity));
-
-            return new NonUniqueBTreeIndex<TKey>(built, keys.Length, capacity, cmp);
+            return (built, count);
         } finally {
             ArrayPool<TKey>.Shared.Return(sortedKeys);
             ArrayPool<int>.Shared.Return(sortedOffsets);
+            ArrayPool<int>.Shared.Return(permutation);
         }
     }
 }

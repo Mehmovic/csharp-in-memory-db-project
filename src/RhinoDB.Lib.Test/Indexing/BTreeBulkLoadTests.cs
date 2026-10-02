@@ -252,4 +252,87 @@ public class BTreeBulkLoadTests {
         Array.Sort(found);
         Assert.That(found, Is.EqualTo(new[] { 51 }));
     }
+
+    // --- fill factor: the regression guard for the measured split storm ------------------
+    //
+    // BulkLoad used to pack chunks 100% full. That is not free later: with no slack, the first
+    // scattered inserts after a cold load each land in a full chunk, take the IsFull branch, and
+    // rent a fresh pair of chunk arrays - measured 2,088 B/op against 0 B/op once headroom exists.
+    //
+    // These assert the SHAPE (chunks arrive with slack) and the BEHAVIOUR (a batch of scattered
+    // inserts allocates nothing), because shape alone would not catch a future change that
+    // restores the full packing somewhere else in the build.
+    [Test]
+    public void ABulkLoadedIndexLeavesHeadroomInEveryChunk() {
+        const int rows = 100_000;
+        const int capacity = 256;
+        var keys = new int[rows];
+        for (var i = 0; i < rows; i++) keys[i] = i;
+
+        var bulk = BTreeIndex<int>.BulkLoad(keys, keys);
+
+        // Fully packed, this is ceil(rows / capacity). Underfilled it must be strictly MORE, and
+        // only a little more: a large jump would mean the fill factor is costing the read path
+        // extra chunk-list search levels, which is the failure this number has to catch in both
+        // directions. Measured guard rails: 391 chunks packed, ~404 at 31/32, ~4,465 at 7/8.
+        var packed = (rows + capacity - 1) / capacity;
+        Assert.That(bulk.ChunkCount, Is.GreaterThan(packed),
+            "BulkLoad must not pack chunks to 100% - that is what caused the split storm");
+        Assert.That(bulk.ChunkCount, Is.LessThan(packed + packed / 10),
+            "fill factor must stay close to full - a large chunk-count jump costs point lookups");
+        Assert.That(bulk.Count, Is.EqualTo(rows), "every key must survive the load");
+
+        // And the index must still be correct: a wrong index that allocates nothing proves nothing.
+        Assert.That(bulk.GetOffset(0).Unwrap(), Is.EqualTo(0));
+        Assert.That(bulk.GetOffset(rows - 1).Unwrap(), Is.EqualTo(rows - 1));
+        Assert.That(bulk.GetOffset(rows / 2).Unwrap(), Is.EqualTo(rows / 2));
+    }
+
+    [Test]
+    public void ScatteredInsertsIntoAFreshlyBulkLoadedIndexDoNotAllocate() {
+        const int rows = 100_000;
+        var keys = new int[rows];
+        for (var i = 0; i < rows; i++) keys[i] = i * 2;
+
+        var bulk = BTreeIndex<int>.BulkLoad(keys, keys);
+
+        // 2,000 odd keys, each landing strictly between two held even keys and therefore in the
+        // middle of a chunk. Spread them across the whole span so each one hits a different chunk,
+        // which is the shape that triggered the split storm when chunks were packed full.
+        var batch = new int[2_000];
+        var step = Math.Max(1, rows / batch.Length);
+        for (var i = 0; i < batch.Length; i++) batch[i] = (i * step) * 2 + 1;
+
+        // Warm the pool and JIT on a throwaway index so the measured run sees steady state.
+        var warmup = BTreeIndex<int>.BulkLoad(keys, keys);
+        foreach (var k in batch) warmup.Insert(k, k);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        foreach (var k in batch) bulk.Insert(k, k);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.That(bulk.Count, Is.EqualTo(rows + batch.Length), "every insert must land");
+        Assert.That(allocated, Is.LessThan(1_000),
+            $"scattered inserts into a bulk-loaded index allocated {allocated} B; a split storm is back");
+    }
+
+    [Test]
+    public void ABulkLoadedNonUniqueIndexLeavesHeadroomToo() {
+        const int rows = 100_000;
+        const int capacity = 256;
+        var keys = new int[rows];
+        for (var i = 0; i < rows; i++) keys[i] = i;
+
+        var bulk = NonUniqueBTreeIndex<int>.BulkLoad(keys, keys);
+
+        var packed = (rows + capacity - 1) / capacity;
+        Assert.That(bulk.ChunkCount, Is.GreaterThan(packed),
+            "non-unique BulkLoad must not pack chunks to 100% either");
+        Assert.That(bulk.ChunkCount, Is.LessThan(packed + packed / 10),
+            "fill factor must stay close to full");
+        Assert.That(bulk.Count, Is.EqualTo(rows), "every key must survive the load");
+    }
 }
