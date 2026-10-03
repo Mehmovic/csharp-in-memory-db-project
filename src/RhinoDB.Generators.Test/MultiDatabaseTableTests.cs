@@ -118,6 +118,117 @@ public class MultiDatabaseTableTests {
         Assert.That(foundInBackup, Is.False);
     }
 
+    // ---- [Table]'s database type is now optional - inferred when unambiguous ----
+
+    [Test]
+    public void SingleDatabaseInCompilation_TableOmittingDatabase_InfersIt() {
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class SoloDb : DbContext<SoloDbTransaction> { }
+
+            [Table(TableKind.Instant)]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Player(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
+            """;
+
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
+
+        Assert.That(asm.GetType("TestNs.SoloDbPlayerOps"), Is.Not.Null,
+            "one [Database] in the compilation - [Table] with no typeof(...) must infer it.");
+    }
+
+    [Test]
+    public void TwoDatabasesInCompilation_TableOmittingDatabase_ReportsRHINO028() {
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class FirstDb : DbContext<FirstDbTransaction> { }
+
+            [Database]
+            public partial class SecondDb : DbContext<SecondDbTransaction> { }
+
+            [Table(TableKind.Instant)]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Player(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO028"),
+            "two [Database] types and no explicit typeof(...) is genuinely ambiguous - must fail loudly.");
+    }
+
+    [Test]
+    public void NoDatabaseInCompilation_TableOmittingDatabase_ReportsRHINO029() {
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+
+            namespace TestNs;
+
+            [Table(TableKind.Instant)]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Player(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO029"),
+            "nothing to infer from - must fail loudly rather than guessing or silently dropping the table.");
+    }
+
+    [Test]
+    public void TwoDatabasesInCompilation_OneTableExplicitOneOmitted_TheOmittedOneStillReportsRHINO028() {
+        // Explicit typeof(...) on one [Table] attribute must not make a sibling attribute's omission
+        // on the SAME row type magically resolve - each attribute instance is judged independently.
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class FirstDb : DbContext<FirstDbTransaction> { }
+
+            [Database]
+            public partial class SecondDb : DbContext<SecondDbTransaction> { }
+
+            [Table(TableKind.Instant, typeof(FirstDb))]
+            [Table(TableKind.Instant)]
+            [MemoryPackable(GenerateType.VersionTolerant)]
+            [MessagePackObject]
+            public readonly partial record struct Player(
+                [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
+                [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO028"));
+    }
+
     [Test]
     public void SameDatabase_TwoTablesWithTheSameAccessor_ReportsRHINO010() {
         const string source = """

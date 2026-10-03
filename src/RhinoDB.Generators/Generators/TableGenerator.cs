@@ -229,6 +229,26 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
+    static private readonly DiagnosticDescriptor AmbiguousDatabaseDiagnostic = new(
+        "RHINO028",
+        "[Table] omits the database type and the project declares more than one [Database]",
+        "'{0}' is [Table]-attributed without specifying typeof(...) for its database, but this compilation "
+        + "declares {1} [Database] types ({2}) - specify which one explicitly, e.g. [Table(TableKind.X, typeof(YourDb))]",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
+    static private readonly DiagnosticDescriptor NoDatabaseFoundDiagnostic = new(
+        "RHINO029",
+        "[Table] omits the database type and no [Database] type was found",
+        "'{0}' is [Table]-attributed without specifying typeof(...) for its database, and this compilation "
+        + "declares no [Database] type to infer it from - specify one explicitly, e.g. [Table(TableKind.X, typeof(YourDb))]",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
     static private readonly DiagnosticDescriptor MalformedGeneratorConfigDiagnostic = new(
         "RHINO024",
         "rdbsettings.json is malformed",
@@ -260,6 +280,16 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
         var configProtocol = configResult.Select(static (r, _) => r.Protocol);
 
+        var databases = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                DatabaseAttributeFullName,
+                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                transform: static (ctx, _) => ToDatabaseModel(ctx)
+            );
+
+        var declaredDatabaseFullNames = databases.Collect()
+            .Select(static (dbs, _) => dbs.Select(d => d.FullName).ToImmutableArray());
+
         var tableResults = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 TableAttributeFullName,
@@ -267,7 +297,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 transform: static (ctx, _) => ctx
             )
             .Combine(configProtocol)
-            .Select(static (pair, _) => ToTableModels(pair.Left, pair.Right))
+            .Combine(declaredDatabaseFullNames)
+            .Select(static (pair, _) => ToTableModels(pair.Left.Left, pair.Left.Right, pair.Right))
             .SelectMany(static (results, _) => results);
 
         context.RegisterSourceOutput(
@@ -278,13 +309,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         );
 
         var tables = tableResults.Collect();
-
-        var databases = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                DatabaseAttributeFullName,
-                predicate: static (node, _) => node is ClassDeclarationSyntax,
-                transform: static (ctx, _) => ToDatabaseModel(ctx)
-            );
 
         var descriptor = context.AdditionalTextsProvider
             .Where(static t => Path.GetFileName(t.Path) == "Descriptor.json")
@@ -387,7 +411,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         _ => null,
     };
 
-    static private ImmutableArray<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)> ToTableModels(GeneratorAttributeSyntaxContext ctx, ClientProtocolKind clientProtocol) {
+    static private ImmutableArray<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)> ToTableModels(
+        GeneratorAttributeSyntaxContext ctx, ClientProtocolKind clientProtocol, ImmutableArray<string> declaredDatabaseFullNames) {
         var rowDiagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         var rowType = (INamedTypeSymbol)ctx.TargetSymbol;
 
@@ -600,7 +625,22 @@ public sealed class TableGenerator : IIncrementalGenerator {
             var attrDiagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
             var kind = (TableKind)(int)attribute.ConstructorArguments[0].Value!;
-            var databaseType = (INamedTypeSymbol)attribute.ConstructorArguments[1].Value!;
+            var explicitDatabaseType = attribute.ConstructorArguments[1].Value as INamedTypeSymbol;
+
+            string ownerDatabaseFullName;
+            if (explicitDatabaseType is not null) {
+                ownerDatabaseFullName = explicitDatabaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            } else if (declaredDatabaseFullNames.Length == 1) {
+                ownerDatabaseFullName = declaredDatabaseFullNames[0];
+            } else if (declaredDatabaseFullNames.Length == 0) {
+                results.Add((null, ImmutableArray.Create(Diagnostic.Create(NoDatabaseFoundDiagnostic, Loc(attribute), rowType.Name))));
+                continue;
+            } else {
+                results.Add((null, ImmutableArray.Create(Diagnostic.Create(
+                    AmbiguousDatabaseDiagnostic, Loc(attribute), rowType.Name,
+                    declaredDatabaseFullNames.Length, string.Join(", ", declaredDatabaseFullNames)))));
+                continue;
+            }
 
             var (tableAccessorProvided, tableAccessorValue) = StringNamedArg(attribute, "Accessor");
             if (tableAccessorProvided && tableAccessorValue == "")
@@ -626,7 +666,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 rowType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 rowType.ContainingNamespace.IsGlobalNamespace ? null : rowType.ContainingNamespace.ToDisplayString(),
                 kind,
-                databaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                ownerDatabaseFullName,
                 primaryKeyParam.Name,
                 primaryKeyParam.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 primaryKeyKind,
