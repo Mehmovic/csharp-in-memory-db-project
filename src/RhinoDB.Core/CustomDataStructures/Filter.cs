@@ -9,6 +9,9 @@ public readonly struct FilterDescriptor<T> where T : IEquatable<T> {
         this.key = key;
     }
 
+    public bool IsInclude => include;
+    public T Key => key;
+
     public bool MustExclude(T entryKey) {
         var match = EqualityComparer<T>.Default.Equals(entryKey, key);
         return match != include;

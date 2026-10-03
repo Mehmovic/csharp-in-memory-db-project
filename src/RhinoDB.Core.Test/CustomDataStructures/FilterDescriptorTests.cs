@@ -76,4 +76,19 @@ public class FilterDescriptorTests {
             Assert.That(filter.MustInclude(1), Is.True);
         });
     }
+
+    [Test]
+    public void IsIncludeAndKey_ExposeHowTheDescriptorWasBuilt() {
+        // Ordered indexes read these to turn an Except/Include scan into "copy the ranges around
+        // the key's run" instead of testing every entry, so they must mirror the factory used.
+        var include = FilterDescriptor.Include("Rome");
+        var exclude = FilterDescriptor.Exclude(42);
+
+        Assert.Multiple(() => {
+            Assert.That(include.IsInclude, Is.True);
+            Assert.That(include.Key, Is.EqualTo("Rome"));
+            Assert.That(exclude.IsInclude, Is.False);
+            Assert.That(exclude.Key, Is.EqualTo(42));
+        });
+    }
 }

@@ -42,8 +42,8 @@ public class IndexRuntimeBenchmarks {
     private int[] removals = null!;       // Batch keys guaranteed present, for the delete benches
 
     private HashIndex<int> hash = null!;
-    private BTreeIndex<int> btree = null!;
-    private NonUniqueBTreeIndex<int> nonUniqueBTree = null!;
+    private BTreeIndex<int, DefaultComparer<int>> btree = null!;
+    private NonUniqueBTreeIndex<int, DefaultComparer<int>> nonUniqueBTree = null!;
 
     // Non-unique holds every key twice, so a delete has two offsets to find and remove.
     private int[] nonUniqueRemovals = null!;
@@ -79,8 +79,8 @@ public class IndexRuntimeBenchmarks {
         // would be surface with no consumer.
         hash = new HashIndex<int>();
         for (var i = 0; i < Base; i++) hash.Insert(keys[i], offsets[i]);
-        btree = BTreeIndex<int>.BulkLoad(keys, offsets);
-        nonUniqueBTree = NonUniqueBTreeIndex<int>.BulkLoad(keys, offsets);
+        btree = BTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets);
+        nonUniqueBTree = NonUniqueBTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets);
         for (var i = 0; i < Base; i++) nonUniqueBTree.Insert(keys[i], offsets[i]);
 
         // Above every populated key, so these append to the final chunk and move nothing.
@@ -177,7 +177,7 @@ public class IndexRuntimeBenchmarks {
     [Benchmark(OperationsPerInvoke = Batch)]
     public void BTree_Insert_ForcedSplit() {
         // A 16-entry index holds nothing spare, so nearly every insert splits.
-        var tiny = new BTreeIndex<int>(16);
+        var tiny = new BTreeIndex<int, DefaultComparer<int>>(16);
         for (var i = 0; i < 256; i++) tiny.Insert(i, i);
         for (var i = 0; i < Batch; i++) tiny.Insert(1000 + i, 1000 + i);
     }

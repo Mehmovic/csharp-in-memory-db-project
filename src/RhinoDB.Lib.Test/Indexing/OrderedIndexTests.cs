@@ -31,23 +31,23 @@ public class OrderedIndexTests {
     static private readonly Impl[] All = [
         new() {
             Name = "BTreeIndex", AllowsDuplicateKeys = false,
-            Create = (Func<BTreeIndex<int>>)(() => new BTreeIndex<int>()),
-            Gt = (Func<BTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsGt(k))),
-            Gte = (Func<BTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsGte(k))),
-            Lt = (Func<BTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsLt(k))),
-            Lte = (Func<BTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsLte(k))),
-            Iter = (Func<BTreeIndex<int>, int[]>)((i) => Read(i.GetOffsetsIter())),
-            Range = (Func<BTreeIndex<int>, int, int, int[]>)((i, f, t) => Read(i.GetOffsetsRange(f, t))),
+            Create = (Func<BTreeIndex<int, DefaultComparer<int>>>)(() => new BTreeIndex<int, DefaultComparer<int>>()),
+            Gt = (Func<BTreeIndex<int, DefaultComparer<int>>, int, int[]>)((i, k) => Read(i.GetOffsetsGt(k))),
+            Gte = (Func<BTreeIndex<int, DefaultComparer<int>>, int, int[]>)((i, k) => Read(i.GetOffsetsGte(k))),
+            Lt = (Func<BTreeIndex<int, DefaultComparer<int>>, int, int[]>)((i, k) => Read(i.GetOffsetsLt(k))),
+            Lte = (Func<BTreeIndex<int, DefaultComparer<int>>, int, int[]>)((i, k) => Read(i.GetOffsetsLte(k))),
+            Iter = (Func<BTreeIndex<int, DefaultComparer<int>>, int[]>)((i) => Read(i.GetOffsetsIter())),
+            Range = (Func<BTreeIndex<int, DefaultComparer<int>>, int, int, int[]>)((i, f, t) => Read(i.GetOffsetsRange(f, t))),
         },
         new() {
             Name = "NonUniqueBTreeIndex", AllowsDuplicateKeys = true,
-            Create = (Func<NonUniqueBTreeIndex<int>>)(() => new NonUniqueBTreeIndex<int>()),
-            Gt = (Func<NonUniqueBTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsGt(k))),
-            Gte = (Func<NonUniqueBTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsGte(k))),
-            Lt = (Func<NonUniqueBTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsLt(k))),
-            Lte = (Func<NonUniqueBTreeIndex<int>, int, int[]>)((i, k) => Read(i.GetOffsetsLte(k))),
-            Iter = (Func<NonUniqueBTreeIndex<int>, int[]>)((i) => Read(i.GetOffsetsIter())),
-            Range = (Func<NonUniqueBTreeIndex<int>, int, int, int[]>)((i, f, t) => Read(i.GetOffsetsRange(f, t))),
+            Create = (Func<NonUniqueBTreeIndex<int, DefaultComparer<int>>>)(() => new NonUniqueBTreeIndex<int, DefaultComparer<int>>()),
+            Gt = (Func<NonUniqueBTreeIndex<int, DefaultComparer<int>>, int, int[]>)((i, k) => Read(i.GetOffsetsGt(k))),
+            Gte = (Func<NonUniqueBTreeIndex<int, DefaultComparer<int>>, int, int[]>)((i, k) => Read(i.GetOffsetsGte(k))),
+            Lt = (Func<NonUniqueBTreeIndex<int, DefaultComparer<int>>, int, int[]>)((i, k) => Read(i.GetOffsetsLt(k))),
+            Lte = (Func<NonUniqueBTreeIndex<int, DefaultComparer<int>>, int, int[]>)((i, k) => Read(i.GetOffsetsLte(k))),
+            Iter = (Func<NonUniqueBTreeIndex<int, DefaultComparer<int>>, int[]>)((i) => Read(i.GetOffsetsIter())),
+            Range = (Func<NonUniqueBTreeIndex<int, DefaultComparer<int>>, int, int, int[]>)((i, f, t) => Read(i.GetOffsetsRange(f, t))),
         }
     ];
 

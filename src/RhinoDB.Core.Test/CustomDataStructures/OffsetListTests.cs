@@ -103,6 +103,57 @@ public class OffsetListTests
         writer.Dispose(); // guarded - the array is returned to the pool exactly once
     }
 
+    // ---- AddRange: the span-copy path ordered-index scans use for whole chunks ----
+
+    [Test]
+    public void AddRange_MixedWithAdd_KeepsEveryOffsetInOrder()
+    {
+        using var builder = StackArrayPoolContainerBuilder<int>.Create(capacity: 2);
+        Assert.That(builder.Add(1).IsOk(), Is.True);
+        Assert.That(builder.AddRange([2, 3, 4]).IsOk(), Is.True);
+        Assert.That(builder.Add(5).IsOk(), Is.True);
+
+        using var writer = builder.Build().Unwrap();
+
+        Assert.That(writer.Buffer().ToArray(), Is.EqualTo(new[] { 1, 2, 3, 4, 5 }));
+    }
+
+    [Test]
+    public void AddRange_LargerThanDoubleTheCapacity_GrowsStraightToFit()
+    {
+        // Doubling once would still be too small: Grow must honour the requested
+        // minimum, or the CopyTo would overrun the rented buffer.
+        using var builder = StackArrayPoolContainerBuilder<int>.Create(capacity: 4);
+        Assert.That(builder.Add(-1).IsOk(), Is.True);
+        var big = Enumerable.Range(0, 1_000).ToArray();
+
+        Assert.That(builder.AddRange(big).IsOk(), Is.True);
+
+        using var writer = builder.Build().Unwrap();
+        Assert.That(writer.Count, Is.EqualTo(1_001));
+        Assert.That(writer.Buffer().ToArray(), Is.EqualTo(new[] { -1 }.Concat(big).ToArray()));
+    }
+
+    [Test]
+    public void AddRange_Empty_IsANoOp()
+    {
+        using var builder = StackArrayPoolContainerBuilder<int>.Create(capacity: 1);
+
+        Assert.That(builder.AddRange([]).IsOk(), Is.True);
+
+        using var writer = builder.Build().Unwrap();
+        Assert.That(writer.Count, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void AddRange_AfterBuild_Fails()
+    {
+        using var builder = StackArrayPoolContainerBuilder<int>.Create();
+        using var writer = builder.Build().Unwrap();
+
+        Assert.That(builder.AddRange([1, 2]).IsError(), Is.True);
+    }
+
     [Test]
     public void EmptyWriter_HoldsNoOffsets_AndIsDisposable()
     {

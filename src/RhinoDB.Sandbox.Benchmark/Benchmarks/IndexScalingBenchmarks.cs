@@ -36,9 +36,9 @@ public class IndexScalingBenchmarks {
     private const int Huge = 10_000_000;
 
     private HashIndex<int> uniqueHash = null!;
-    private BTreeIndex<int> uniqueBTree = null!;
+    private BTreeIndex<int, DefaultComparer<int>> uniqueBTree = null!;
     private HashIndex<string> uniqueHashString = null!;
-    private BTreeIndex<string> uniqueBTreeString = null!;
+    private BTreeIndex<string, OrdinalStringComparer> uniqueBTreeString = null!;
 
     private int[] order1M = null!;
     private int[] order4M = null!;
@@ -47,9 +47,9 @@ public class IndexScalingBenchmarks {
     [GlobalSetup]
     public void Setup() {
         uniqueHash = new HashIndex<int>();
-        uniqueBTree = new BTreeIndex<int>();
+        uniqueBTree = new BTreeIndex<int, DefaultComparer<int>>();
         uniqueHashString = new HashIndex<string>();
-        uniqueBTreeString = new BTreeIndex<string>(256, StringComparer.Ordinal);
+        uniqueBTreeString = new(256);
 
         for (var i = 0; i < Rows; i++) {
             uniqueHash.Insert(i, i);
@@ -72,7 +72,7 @@ public class IndexScalingBenchmarks {
         // A randomly built index must still be a working index, not just a fast one. Load a
         // scrambled 200k set and prove every key resolves - a split ordering bug would show up
         // here as a missing or wrong offset, which is exactly what the wall question is near.
-        var probe = new BTreeIndex<int>();
+        var probe = new BTreeIndex<int, DefaultComparer<int>>();
         foreach (var i in Shuffled(200_000, 99)) probe.Insert(i, i);
         for (var i = 0; i < 200_000; i += 997) {
             Assert(probe.GetOffset(i).Unwrap() == i, "randomly built index must resolve every key");
@@ -139,21 +139,21 @@ public class IndexScalingBenchmarks {
 
     [Benchmark]
     public int Scale_RandomLoad_1M_BTree() {
-        var index = new BTreeIndex<int>();
+        var index = new BTreeIndex<int, DefaultComparer<int>>();
         foreach (var i in order1M) index.Insert(i, i);
         return index.Count;
     }
 
     [Benchmark]
     public int Scale_RandomLoad_4M_BTree() {
-        var index = new BTreeIndex<int>();
+        var index = new BTreeIndex<int, DefaultComparer<int>>();
         foreach (var i in order4M) index.Insert(i, i);
         return index.Count;
     }
 
     [Benchmark]
     public int Scale_RandomLoad_10M_BTree() {
-        var index = new BTreeIndex<int>();
+        var index = new BTreeIndex<int, DefaultComparer<int>>();
         foreach (var i in order10M) index.Insert(i, i);
         return index.Count;
     }
@@ -175,7 +175,7 @@ public class IndexScalingBenchmarks {
     }
 
     static private int LoadBTree(int rows) {
-        var index = new BTreeIndex<int>();
+        var index = new BTreeIndex<int, DefaultComparer<int>>();
         for (var i = 0; i < rows; i++) index.Insert(i, i);
         return index.Count;
     }
@@ -201,8 +201,8 @@ public class IndexScalingBenchmarks {
     public int Scale_BulkLoad_10M_NonUniqueBTree() => BulkNonUnique(order10M);
 
     static private int BulkBTree(int[] order) =>
-        BTreeIndex<int>.BulkLoad(order, order).Count;
+        BTreeIndex<int, DefaultComparer<int>>.BulkLoad(order, order).Count;
 
     static private int BulkNonUnique(int[] order) =>
-        NonUniqueBTreeIndex<int>.BulkLoad(order, order).Count;
+        NonUniqueBTreeIndex<int, DefaultComparer<int>>.BulkLoad(order, order).Count;
 }

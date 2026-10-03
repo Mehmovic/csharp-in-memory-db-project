@@ -3,9 +3,9 @@
 namespace RhinoDB.Lib.Indexing.Test;
 
 public class BTreeIndexTests {
-    static private BTreeIndex<int> NewIndex() => new BTreeIndex<int>();
+    static private BTreeIndex<int, DefaultComparer<int>> NewIndex() => new BTreeIndex<int, DefaultComparer<int>>();
 
-    static private int[] RangeOf(BTreeIndex<int> index, int from, int to) {
+    static private int[] RangeOf(BTreeIndex<int, DefaultComparer<int>> index, int from, int to) {
         using var writer = index.GetOffsetsRange(from, to);
         return writer.Buffer().ToArray();
     }
@@ -122,7 +122,7 @@ public class BTreeIndexTests {
 
     // ---- Multi-chunk Range paths (the binary-search start) ----
 
-    static private BTreeIndex<int> NewScrambledIndex(int count) {
+    static private BTreeIndex<int, DefaultComparer<int>> NewScrambledIndex(int count) {
         // (i * 677) % 601 is a permutation of 0..600 - scrambled insertion order,
         // forcing chunk splits, without any randomness.
         var index = NewIndex();
@@ -195,7 +195,7 @@ public class BTreeIndexTests {
 
     [Test]
     public void Delete_ScatteredAcrossManyChunks_LeavingThemUnderQuarterCapacity_MergesChunksBackTogether() {
-        var index = new BTreeIndex<int>(chunkSize: 16); // chunkCapacity 16, merge threshold 4
+        var index = new BTreeIndex<int, DefaultComparer<int>>(chunkSize: 16); // chunkCapacity 16, merge threshold 4
         for (var key = 0; key < 1_000; key++) index.Insert(key, key);
         var chunksBeforeChurn = index.ChunkCount;
 
@@ -216,7 +216,7 @@ public class BTreeIndexTests {
 
     [Test]
     public void Delete_DownToASingleSurvivingChunk_LeavesExactlyOneChunk() {
-        var index = new BTreeIndex<int>(chunkSize: 16);
+        var index = new BTreeIndex<int, DefaultComparer<int>>(chunkSize: 16);
         for (var key = 0; key < 500; key++) index.Insert(key, key);
 
         for (var key = 1; key < 500; key++) index.Delete(key); // leave only key 0
@@ -228,7 +228,7 @@ public class BTreeIndexTests {
 
     [Test]
     public void Delete_EveryKey_LeavesOneEmptyChunkNotZero() {
-        var index = new BTreeIndex<int>(chunkSize: 16);
+        var index = new BTreeIndex<int, DefaultComparer<int>>(chunkSize: 16);
         for (var key = 0; key < 500; key++) index.Insert(key, key);
 
         for (var key = 0; key < 500; key++) index.Delete(key);
@@ -248,5 +248,31 @@ public class BTreeIndexTests {
         Assert.That(RangeOf(index, 4_000, 5_000), Is.EqualTo(Enumerable.Range(4_000, 1_001).ToArray()));
         Assert.That(RangeOf(index, 9_999, 9_999), Is.EqualTo(new[] { 9_999 }));
         Assert.That(RangeOf(index, 0, 9_999), Is.EqualTo(Enumerable.Range(0, 10_000).ToArray()));
+    }
+
+    // ---- Append-at-the-end split (auto-increment primary keys) ----
+
+    [Test]
+    public void Insert_Ascending_SplitsAtTheEnd_LeavingEveryChunkFull() {
+        // An ascending key always lands past the last key of the last chunk. Splitting that
+        // chunk in half would leave every chunk behind it half-empty forever; the append split
+        // starts a fresh chunk with just the new key instead, so chunks stay packed.
+        var index = new BTreeIndex<int, DefaultComparer<int>>(chunkSize: 16);
+        for (var key = 0; key < 1_600; key++) index.Insert(key, key);
+
+        Assert.That(index.ChunkCount, Is.EqualTo(100), "1,600 ascending keys into 16-entry chunks must fill exactly 100 chunks");
+        Assert.That(RangeOf(index, 0, 1_599), Is.EqualTo(Enumerable.Range(0, 1_600).ToArray()));
+    }
+
+    [Test]
+    public void Insert_IntoAFullMiddleChunk_StillSplitsInHalf() {
+        var index = new BTreeIndex<int, DefaultComparer<int>>(chunkSize: 16);
+        for (var key = 0; key < 64; key += 2) index.Insert(key, key); // two full chunks of even keys
+
+        index.Insert(5, 5); // lands inside the first (full) chunk, not at the end
+
+        Assert.That(index.ChunkCount, Is.EqualTo(3));
+        Assert.That(index.GetOffset(5).Unwrap(), Is.EqualTo(5));
+        Assert.That(RangeOf(index, 0, 63), Is.EqualTo(Enumerable.Range(0, 32).Select(i => i * 2).Append(5).Order().ToArray()));
     }
 }

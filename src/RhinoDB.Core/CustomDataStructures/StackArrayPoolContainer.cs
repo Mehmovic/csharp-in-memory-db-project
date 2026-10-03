@@ -26,6 +26,18 @@ public ref struct StackArrayPoolContainerBuilder<T> : IDisposable {
         return Result.Ok();
     }
 
+    public Result AddRange(ReadOnlySpan<T> items) {
+        if (IsDisposed()) return Result.Error(DbError.ArrayPoolDisposed());
+        if (items.IsEmpty) return Result.Ok();
+
+        if (count + items.Length > buffer.Length) {
+            Grow(count + items.Length);
+        }
+        items.CopyTo(buffer[count..]);
+        count += items.Length;
+        return Result.Ok();
+    }
+
     public StackResult<ReadOnlySpan<T>> BufferResult() {
         return IsDisposed()
             ? StackResult.Error(DbError.ArrayPoolDisposed())
@@ -52,9 +64,9 @@ public ref struct StackArrayPoolContainerBuilder<T> : IDisposable {
 
     private bool IsDisposed() => array == null;
 
-    private void Grow() {
+    private void Grow(int minimumLength = 0) {
         var length = int.Max(1, array.Length);
-        var newArray = ArrayPool<T>.Shared.Rent(length * 2);
+        var newArray = ArrayPool<T>.Shared.Rent(int.Max(length * 2, minimumLength));
 
         if (array.Length > 0) {
             buffer[..count].CopyTo(newArray);

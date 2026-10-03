@@ -28,7 +28,7 @@ public class BTreeBulkLoadTests {
         return order;
     }
 
-    static private void AssertSameIndex(BTreeIndex<int> expected, BTreeIndex<int> actual, int rows) {
+    static private void AssertSameIndex(BTreeIndex<int, DefaultComparer<int>> expected, BTreeIndex<int, DefaultComparer<int>> actual, int rows) {
         Assert.That(actual.Count, Is.EqualTo(expected.Count), "Count must match");
         for (var i = 0; i < rows; i++) {
             Assert.That(actual.GetOffset(i).Unwrap(), Is.EqualTo(expected.GetOffset(i).Unwrap()),
@@ -50,10 +50,10 @@ public class BTreeBulkLoadTests {
         var offsets = new int[Rows];
         for (var i = 0; i < Rows; i++) { keys[i] = order[i]; offsets[i] = order[i] * 3; }
 
-        var inserted = new BTreeIndex<int>();
+        var inserted = new BTreeIndex<int, DefaultComparer<int>>();
         for (var i = 0; i < Rows; i++) inserted.Insert(keys[i], offsets[i]);
 
-        AssertSameIndex(inserted, BTreeIndex<int>.BulkLoad(keys, offsets), Rows);
+        AssertSameIndex(inserted, BTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets), Rows);
     }
 
     [Test]
@@ -70,7 +70,7 @@ public class BTreeBulkLoadTests {
         // key k was written with offset = its position in the permutation, not k itself
         var expectedOffset = new int[Rows];
         for (var i = 0; i < Rows; i++) expectedOffset[order[i]] = i;
-        var bulk = BTreeIndex<int>.BulkLoad(keys, offsets);
+        var bulk = BTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets);
         Assert.That(bulk.Count, Is.EqualTo(Rows));
         for (var i = 0; i < Rows; i++) Assert.That(bulk.GetOffset(i).Unwrap(), Is.EqualTo(expectedOffset[i]));
     }
@@ -85,10 +85,10 @@ public class BTreeBulkLoadTests {
         var order = Shuffled(Rows, 21);
         for (var i = 0; i < Rows; i++) { keys[i] = order[i]; offsets[i] = order[i] + 1; }
 
-        var inserted = new BTreeIndex<int>(16);
+        var inserted = new BTreeIndex<int, DefaultComparer<int>>(16);
         for (var i = 0; i < Rows; i++) inserted.Insert(keys[i], offsets[i]);
 
-        var bulk = BTreeIndex<int>.BulkLoad(keys, offsets, 16);
+        var bulk = BTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets, 16);
         AssertSameIndex(inserted, bulk, Rows);
     }
 
@@ -99,7 +99,7 @@ public class BTreeBulkLoadTests {
         var keys = new[] { 5, 9, 5, 1, 9 };
         var offsets = new[] { 100, 200, 300, 400, 500 };
 
-        var bulk = BTreeIndex<int>.BulkLoad(keys, offsets);
+        var bulk = BTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets);
         Assert.That(bulk.Count, Is.EqualTo(3), "three distinct keys");
         Assert.That(bulk.GetOffset(5).Unwrap(), Is.EqualTo(300), "last write for 5 wins");
         Assert.That(bulk.GetOffset(9).Unwrap(), Is.EqualTo(500), "last write for 9 wins");
@@ -108,7 +108,7 @@ public class BTreeBulkLoadTests {
 
     [Test]
     public void AnEmptyBulkLoadProducesAUsableEmptyIndex() {
-        var bulk = BTreeIndex<int>.BulkLoad([], []);
+        var bulk = BTreeIndex<int, DefaultComparer<int>>.BulkLoad([], []);
         Assert.That(bulk.Count, Is.EqualTo(0));
         Assert.That(bulk.GetOffset(1).IsError, "an empty index resolves nothing");
         using var scan = bulk.GetOffsetsIter();
@@ -121,7 +121,7 @@ public class BTreeBulkLoadTests {
         // makes it usable for a cold-storage load followed by live traffic.
         var keys = new[] { 1, 3, 5, 7 };
         var offsets = new[] { 10, 30, 50, 70 };
-        var bulk = BTreeIndex<int>.BulkLoad(keys, offsets);
+        var bulk = BTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets);
 
         bulk.Insert(9, 90);
         Assert.That(bulk.GetOffset(9).Unwrap(), Is.EqualTo(90));
@@ -148,9 +148,9 @@ public class BTreeBulkLoadTests {
         var offsets = new int[Rows];
         for (var i = 0; i < Rows; i++) { keys[i] = order[i]; offsets[i] = order[i]; }
 
-        var inserted = new BTreeIndex<int>();
+        var inserted = new BTreeIndex<int, DefaultComparer<int>>();
         for (var i = 0; i < Rows; i++) inserted.Insert(keys[i], offsets[i]);
-        var bulk = BTreeIndex<int>.BulkLoad(keys, offsets);
+        var bulk = BTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets);
 
         using var expectedRange = inserted.GetOffsetsRange(500, 800);
         using var actualRange = bulk.GetOffsetsRange(500, 800);
@@ -168,7 +168,7 @@ public class BTreeBulkLoadTests {
     public void MismatchedKeyAndOffsetCountsAreRejectedRatherThanHalfBuilt() {
         // A silent truncation here would build an index that is quietly missing rows, which is
         // far worse than a loud failure at load time.
-        Assert.Throws<ArgumentException>(() => BTreeIndex<int>.BulkLoad([1, 2, 3], [10, 20]));
+        Assert.Throws<ArgumentException>(() => BTreeIndex<int, DefaultComparer<int>>.BulkLoad([1, 2, 3], [10, 20]));
     }
 
     [Test]
@@ -178,7 +178,7 @@ public class BTreeBulkLoadTests {
         var keys = new[] { 2, 1, 2, 3, 2 };
         var offsets = new[] { 20, 10, 21, 30, 22 };
 
-        var bulk = NonUniqueBTreeIndex<int>.BulkLoad(keys, offsets);
+        var bulk = NonUniqueBTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets);
         Assert.That(bulk.Count, Is.EqualTo(5), "every entry is kept");
         using var resolved = bulk.GetOffsets(2);
         Assert.That(resolved.Count, Is.EqualTo(3), "key 2 keeps all three of its offsets");
@@ -196,10 +196,10 @@ public class BTreeBulkLoadTests {
         var offsets = new int[Runs];
         for (var i = 0; i < Runs; i++) { keys[i] = 42; offsets[i] = i; }
 
-        var inserted = new NonUniqueBTreeIndex<int>();
+        var inserted = new NonUniqueBTreeIndex<int, DefaultComparer<int>>();
         for (var i = 0; i < Runs; i++) inserted.Insert(keys[i], offsets[i]);
 
-        var bulk = NonUniqueBTreeIndex<int>.BulkLoad(keys, offsets);
+        var bulk = NonUniqueBTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets);
         using var expected = inserted.GetOffsets(42);
         using var actual = bulk.GetOffsets(42);
         Assert.That(actual.Count, Is.EqualTo(expected.Count), "run size must match");
@@ -218,9 +218,9 @@ public class BTreeBulkLoadTests {
         var offsets = new int[Rows];
         for (var i = 0; i < Rows; i++) { keys[i] = order[i] % 500; offsets[i] = order[i]; }
 
-        var inserted = new NonUniqueBTreeIndex<int>();
+        var inserted = new NonUniqueBTreeIndex<int, DefaultComparer<int>>();
         for (var i = 0; i < Rows; i++) inserted.Insert(keys[i], offsets[i]);
-        var bulk = NonUniqueBTreeIndex<int>.BulkLoad(keys, offsets);
+        var bulk = NonUniqueBTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets);
 
         using var expectedScan = inserted.GetOffsetsIter();
         using var actualScan = bulk.GetOffsetsIter();
@@ -240,7 +240,7 @@ public class BTreeBulkLoadTests {
 
     [Test]
     public void ABulkLoadedNonUniqueIndexStillAcceptsInsertsAndDeletesAfterwards() {
-        var bulk = NonUniqueBTreeIndex<int>.BulkLoad([1, 3, 5], [10, 30, 50]);
+        var bulk = NonUniqueBTreeIndex<int, DefaultComparer<int>>.BulkLoad([1, 3, 5], [10, 30, 50]);
 
         bulk.Insert(5, 51);
         using var all = bulk.GetOffsetsIter();
@@ -269,7 +269,7 @@ public class BTreeBulkLoadTests {
         var keys = new int[rows];
         for (var i = 0; i < rows; i++) keys[i] = i;
 
-        var bulk = BTreeIndex<int>.BulkLoad(keys, keys);
+        var bulk = BTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, keys);
 
         // Fully packed, this is ceil(rows / capacity). Underfilled it must be strictly MORE, and
         // only a little more: a large jump would mean the fill factor is costing the read path
@@ -294,7 +294,7 @@ public class BTreeBulkLoadTests {
         var keys = new int[rows];
         for (var i = 0; i < rows; i++) keys[i] = i * 2;
 
-        var bulk = BTreeIndex<int>.BulkLoad(keys, keys);
+        var bulk = BTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, keys);
 
         // 2,000 odd keys, each landing strictly between two held even keys and therefore in the
         // middle of a chunk. Spread them across the whole span so each one hits a different chunk,
@@ -304,7 +304,7 @@ public class BTreeBulkLoadTests {
         for (var i = 0; i < batch.Length; i++) batch[i] = (i * step) * 2 + 1;
 
         // Warm the pool and JIT on a throwaway index so the measured run sees steady state.
-        var warmup = BTreeIndex<int>.BulkLoad(keys, keys);
+        var warmup = BTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, keys);
         foreach (var k in batch) warmup.Insert(k, k);
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -326,7 +326,7 @@ public class BTreeBulkLoadTests {
         var keys = new int[rows];
         for (var i = 0; i < rows; i++) keys[i] = i;
 
-        var bulk = NonUniqueBTreeIndex<int>.BulkLoad(keys, keys);
+        var bulk = NonUniqueBTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, keys);
 
         var packed = (rows + capacity - 1) / capacity;
         Assert.That(bulk.ChunkCount, Is.GreaterThan(packed),

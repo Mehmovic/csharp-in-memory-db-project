@@ -38,10 +38,10 @@ public class NonUniqueIndexBenchmarks {
     private const int LowProbeKey = LowKeys / 2;
     private const int WideProbeKey = WideKeys / 2;
 
-    private NonUniqueBTreeIndex<int> lowBTree = null!;
-    private NonUniqueBTreeIndex<int> wideBTree = null!;
-    private NonUniqueBTreeIndex<int> highBTree = null!;
-    private NonUniqueBTreeIndex<string> stringBTree = null!;
+    private NonUniqueBTreeIndex<int, DefaultComparer<int>> lowBTree = null!;
+    private NonUniqueBTreeIndex<int, DefaultComparer<int>> wideBTree = null!;
+    private NonUniqueBTreeIndex<int, DefaultComparer<int>> highBTree = null!;
+    private NonUniqueBTreeIndex<string, OrdinalStringComparer> stringBTree = null!;
 
     private NonUniqueHashIndex<int> lowHash = null!;
     private NonUniqueHashIndex<int> wideHash = null!;
@@ -49,10 +49,10 @@ public class NonUniqueIndexBenchmarks {
 
     [GlobalSetup]
     public void Setup() {
-        lowBTree = new NonUniqueBTreeIndex<int>(ChunkSize);
-        wideBTree = new NonUniqueBTreeIndex<int>(ChunkSize);
-        highBTree = new NonUniqueBTreeIndex<int>(ChunkSize);
-        stringBTree = new NonUniqueBTreeIndex<string>(ChunkSize, StringComparer.Ordinal);
+        lowBTree = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(ChunkSize);
+        wideBTree = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(ChunkSize);
+        highBTree = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(ChunkSize);
+        stringBTree = new(ChunkSize);
 
         lowHash = new NonUniqueHashIndex<int>();
         wideHash = new NonUniqueHashIndex<int>();
@@ -170,7 +170,7 @@ public class NonUniqueIndexBenchmarks {
 
     [Benchmark]
     public int BTreeBulkLoad_LowCardinality() {
-        var index = new NonUniqueBTreeIndex<int>(ChunkSize);
+        var index = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(ChunkSize);
         for (var k = 0; k < LowKeys; k++)
             for (var o = 0; o < LowPerKey; o++)
                 index.Insert(k, k * LowPerKey + o);
@@ -179,7 +179,7 @@ public class NonUniqueIndexBenchmarks {
 
     [Benchmark]
     public int BTreeBulkLoad_WideDuplicateRun() {
-        var index = new NonUniqueBTreeIndex<int>(ChunkSize);
+        var index = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(ChunkSize);
         for (var k = 0; k < WideKeys; k++)
             for (var o = 0; o < WidePerKey; o++)
                 index.Insert(k, k * WidePerKey + o);
@@ -200,7 +200,7 @@ public class NonUniqueIndexBenchmarks {
 
     [Benchmark]
     public int BTreeDeleteOneOfMany_WideRun() {
-        var index = new NonUniqueBTreeIndex<int>(ChunkSize);
+        var index = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(ChunkSize);
         for (var k = 0; k < WideKeys; k++)
             for (var o = 0; o < WidePerKey; o++)
                 index.Insert(k, k * WidePerKey + o);

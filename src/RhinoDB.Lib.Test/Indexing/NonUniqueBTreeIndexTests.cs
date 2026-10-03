@@ -1,14 +1,14 @@
 namespace RhinoDB.Lib.Indexing.Test;
 
 public class NonUniqueBTreeIndexTests {
-    static private NonUniqueBTreeIndex<int> NewIndex() => new NonUniqueBTreeIndex<int>();
+    static private NonUniqueBTreeIndex<int, DefaultComparer<int>> NewIndex() => new NonUniqueBTreeIndex<int, DefaultComparer<int>>();
 
-    static private int[] RangeOf(NonUniqueBTreeIndex<int> index, int from, int to) {
+    static private int[] RangeOf(NonUniqueBTreeIndex<int, DefaultComparer<int>> index, int from, int to) {
         using var writer = index.GetOffsetsRange(from, to);
         return writer.Buffer().ToArray();
     }
 
-    static private int[] OffsetsOf(NonUniqueBTreeIndex<int> index, int key) {
+    static private int[] OffsetsOf(NonUniqueBTreeIndex<int, DefaultComparer<int>> index, int key) {
         using var list = index.GetOffsets(key);
         return list.Buffer().ToArray();
     }
@@ -135,7 +135,7 @@ public class NonUniqueBTreeIndexTests {
 
     [Test]
     public void Delete_ScatteredAcrossManyChunks_LeavingThemUnderQuarterCapacity_MergesChunksBackTogether() {
-        var index = new NonUniqueBTreeIndex<int>(chunkSize: 16); // chunkCapacity 16, merge threshold 4
+        var index = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(chunkSize: 16); // chunkCapacity 16, merge threshold 4
         for (var key = 0; key < 1_000; key++) index.Insert(key, key);
         var chunksBeforeChurn = index.ChunkCount;
 
@@ -154,7 +154,7 @@ public class NonUniqueBTreeIndexTests {
 
     [Test]
     public void Delete_DownToASingleSurvivingChunk_LeavesExactlyOneChunk() {
-        var index = new NonUniqueBTreeIndex<int>(chunkSize: 16);
+        var index = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(chunkSize: 16);
         for (var key = 0; key < 500; key++) index.Insert(key, key);
 
         for (var key = 1; key < 500; key++) index.Delete(key, key); // leave only key 0
@@ -166,7 +166,7 @@ public class NonUniqueBTreeIndexTests {
 
     [Test]
     public void Delete_EveryKey_LeavesOneEmptyChunkNotZero() {
-        var index = new NonUniqueBTreeIndex<int>(chunkSize: 16);
+        var index = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(chunkSize: 16);
         for (var key = 0; key < 500; key++) index.Insert(key, key);
 
         for (var key = 0; key < 500; key++) index.Delete(key, key);
@@ -177,7 +177,7 @@ public class NonUniqueBTreeIndexTests {
 
     [Test]
     public void Delete_ScatteredAcrossManyChunksOfDuplicateKeys_MergesChunksBackTogether() {
-        var index = new NonUniqueBTreeIndex<int>(chunkSize: 16);
+        var index = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(chunkSize: 16);
         // One key, 1000 duplicate offsets - spans many chunks on its own.
         for (var i = 0; i < 1_000; i++) index.Insert(7, i);
         var chunksBeforeChurn = index.ChunkCount;
@@ -192,7 +192,7 @@ public class NonUniqueBTreeIndexTests {
 
     // ---- Multi-chunk Range paths (the binary-search start) ----
 
-    static private NonUniqueBTreeIndex<int> NewScrambledIndex(int count) {
+    static private NonUniqueBTreeIndex<int, DefaultComparer<int>> NewScrambledIndex(int count) {
         // (i * 677) % 601 is a permutation of 0..600 - scrambled insertion order,
         // forcing chunk splits, without any randomness.
         var index = NewIndex();
@@ -328,5 +328,58 @@ public class NonUniqueBTreeIndexTests {
         Assert.That(RangeOf(index, 400, 499), Is.EquivalentTo(Enumerable.Range(4_000, 1_000).ToArray()));
         Assert.That(OffsetsOf(index, 999), Is.EquivalentTo(Enumerable.Range(9_990, 10).ToArray()));
         Assert.That(RangeOf(index, 0, 999), Has.Length.EqualTo(10_000));
+    }
+
+    // ---- Duplicates are ordered by (key, offset), not by insertion order ----
+
+    [Test]
+    public void GetOffsets_ReturnsDuplicatesInAscendingOffsetOrder_WhateverTheInsertOrder() {
+        var index = NewIndex();
+        index.Insert(7, 30);
+        index.Insert(7, 10);
+        index.Insert(7, 20);
+
+        Assert.That(OffsetsOf(index, 7), Is.EqualTo(new[] { 10, 20, 30 }));
+    }
+
+    [Test]
+    public void Range_OrdersByKeyThenOffset_AcrossChunks() {
+        var index = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(chunkSize: 16);
+        // Descending offsets per key, keys interleaved: insertion order is the reverse of the
+        // required (key, offset) order everywhere.
+        for (var offset = 99; offset >= 0; offset--) {
+            index.Insert(1, offset);
+            index.Insert(0, offset + 1_000);
+        }
+
+        var expected = Enumerable.Range(1_000, 100).Concat(Enumerable.Range(0, 100)).ToArray();
+        Assert.That(RangeOf(index, 0, 1), Is.EqualTo(expected));
+    }
+
+    [Test]
+    public void Delete_FindsTheExactPairInsideALongRun_WithoutDisturbingNeighbours() {
+        var index = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(chunkSize: 16);
+        for (var i = 0; i < 500; i++) index.Insert(7, (i * 37) % 500); // scrambled, all distinct
+
+        index.Delete(7, 250);
+        index.Delete(7, 0);
+        index.Delete(7, 499);
+
+        var expected = Enumerable.Range(1, 498).Where(o => o != 250).ToArray();
+        Assert.That(OffsetsOf(index, 7), Is.EqualTo(expected));
+        Assert.That(index.Count, Is.EqualTo(497));
+    }
+
+    [Test]
+    public void BulkLoad_OrdersDuplicatesByOffset_LikeInsertDoes() {
+        var keys = new[] { 3, 1, 3, 1, 3 };
+        var offsets = new[] { 50, 40, 10, 20, 30 };
+
+        var bulk = NonUniqueBTreeIndex<int, DefaultComparer<int>>.BulkLoad(keys, offsets);
+        var inserted = NewIndex();
+        for (var i = 0; i < keys.Length; i++) inserted.Insert(keys[i], offsets[i]);
+
+        Assert.That(RangeOf(bulk, 0, 10), Is.EqualTo(new[] { 20, 40, 10, 30, 50 }));
+        Assert.That(RangeOf(bulk, 0, 10), Is.EqualTo(RangeOf(inserted, 0, 10)));
     }
 }

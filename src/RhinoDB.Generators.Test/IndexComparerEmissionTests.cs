@@ -2,13 +2,13 @@ using NUnit.Framework;
 
 namespace RhinoDB.Generators.Test;
 
-// Proves the generator EMITS an ordinal comparer for BTree index keys that contain a
-// string, and emits nothing for keys that do not.
+// Proves the generator EMITS an ordinal struct comparer as the TCmp type argument of every
+// BTree index whose key contains a string, and DefaultComparer<T> for keys that do not.
 //
 // This closes a gap that behavioural tests cannot: a string index built with the default
 // comparer still works - it is merely 7x slower and orders rows by the host's culture, so
 // two servers can scan the same data in different orders. Every runtime test passes either
-// way, which is exactly why the emitted ctor argument has to be asserted directly.
+// way, which is exactly why the emitted comparer type argument has to be asserted directly.
 [TestFixture]
 public class IndexComparerEmissionTests {
     const string Source = """
@@ -47,38 +47,45 @@ public class IndexComparerEmissionTests {
     }
 
     [Test]
-    public void ASingleStringPrimaryKey_IsBuiltWithStringComparerOrdinal() {
-        Assert.That(Emit(), Does.Contain("teamPrimaryIndex = new(comparer: StringComparer.Ordinal)"),
+    public void ASingleStringPrimaryKey_IsBuiltWithTheOrdinalStringComparer() {
+        Assert.That(Emit(), Does.Contain("BTreeIndex<string, OrdinalStringComparer> teamPrimaryIndex = new()"),
             "A string primary key is the most important ordinal case, and the index is named after the table.");
     }
 
     [Test]
-    public void ASingleStringSecondaryBTreeIndex_IsBuiltWithStringComparerOrdinal() {
-        Assert.That(Emit(), Does.Contain("new(comparer: StringComparer.Ordinal)"),
+    public void ASingleStringSecondaryBTreeIndex_IsBuiltWithTheOrdinalStringComparer() {
+        Assert.That(Emit(), Does.Contain("BTreeIndex<string, OrdinalStringComparer> playerByNameIndex"),
             "A string-keyed secondary BTree index must also be ordinal.");
     }
 
     [Test]
+    public void ANonStringBTreeKey_IsBuiltWithTheDefaultStructComparer() {
+        Assert.That(Emit(), Does.Contain("DefaultComparer<int>"),
+            "Non-string keys still need a struct comparer type argument so compares are inlined.");
+    }
+
+    [Test]
     public void AHashIndexOnAStringKey_GetsNoComparerArgument() {
-        // HashIndex takes no comparer parameter - passing one would not compile, so this
-        // asserts the generator correctly withholds it rather than over-applying.
+        // HashIndex takes no comparer - it must stay a single-type-argument HashIndex.
         var emitted = Emit();
         Assert.That(emitted, Does.Contain("ByClubHashIndex = new()"));
+        Assert.That(emitted, Does.Contain("HashIndex<int> playerByClubHashIndex"));
     }
 
     [Test]
     public void ACompositeKeyWithAStringPart_GetsAnOrdinalTupleComparer() {
         var emitted = Emit();
-        Assert.That(emitted, Does.Contain("OrdinalComparers.For2<int, string>()"),
+        Assert.That(emitted, Does.Contain("TupleComparer<int, string, DefaultComparer<int>, OrdinalStringComparer>"),
             "A composite (int, string) key must use the ordinal tuple comparer.");
     }
 
     [Test]
     public void NoIndexIsEverBuiltWithTheCultureAwareDefault() {
-        // The regression this guards: a tuple key silently falling back to
-        // Comparer<string>.Default, which is culture-sensitive and culture-dependent.
+        // The regression this guards: a string, or a tuple containing one, silently falling
+        // back to Comparer<string>.Default, which is culture-sensitive and culture-dependent.
         var emitted = Emit();
-        Assert.That(emitted, Does.Not.Contain("ByClubThenNameIndex = new()"),
+        Assert.That(emitted, Does.Not.Contain("DefaultComparer<string>"));
+        Assert.That(emitted, Does.Not.Contain("DefaultComparer<(int ClubId2, string Region)>"),
             "A composite key containing a string must NOT be left on the default comparer.");
     }
 }

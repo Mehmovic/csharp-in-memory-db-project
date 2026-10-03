@@ -554,3 +554,20 @@ registered `[Migration(FromRevision=N)]` chain forward to the tip. Every registe
 its own case (RHINO019/020 already guarantee the chain from the earliest registered hop to the tip is
 gapless, so every legitimate `fromRevision` this is ever called with has a matching case) -
 `fromRevision >= tip` means the bytes are already shaped like the live row, no transform needed.
+
+## `ComparerType` / `ElementComparerType` / `TupleElementTypes`
+
+(2026-10-03) BTree indexes take their comparer as a struct type argument
+(`BTreeIndex<TKey, TCmp>`) instead of a constructor `IComparer<TKey>`, so the
+generator emits the comparer TYPE: `OrdinalStringComparer` for `string`,
+`DefaultComparer<T>` for anything else, and
+`TupleComparer<T1, T2[, T3], C1, C2[, C3]>` with a per-element comparer for
+2- and 3-field composite keys (all of them now, not only ones containing a
+string - per-element struct compares beat `ValueTuple`'s own `CompareTo`,
+which resolves `Comparer<T>.Default` per element at runtime). Composite keys
+of any other arity fall back to `DefaultComparer<(...)>`, except when they
+contain a string, which still throws (same limit as before).
+
+`TupleElementTypes` splits on top-level commas only and strips the trailing
+element name, so generic element types (`Dictionary<int, string>`) do not
+break the parse the way the old `Split(',')` did.

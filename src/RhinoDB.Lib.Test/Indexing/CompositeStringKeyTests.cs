@@ -121,9 +121,9 @@ public class NonUniqueHashIndex_CompositeStringKeyTests {
 }
 
 public class BTreeIndex_CompositeStringKeyTests {
-    static private BTreeIndex<(int ClubId, string Name)> NewIndex(int chunkSize = 256) => new(chunkSize);
+    static private BTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>> NewIndex(int chunkSize = 256) => new(chunkSize);
 
-    static private int[] RangeOf(BTreeIndex<(int ClubId, string Name)> index, (int, string) from, (int, string) to) {
+    static private int[] RangeOf(BTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>> index, (int, string) from, (int, string) to) {
         using var list = index.GetOffsetsRange(from, to);
         return list.BufferResult().Unwrap().ToArray();
     }
@@ -237,9 +237,9 @@ public class BTreeIndex_CompositeStringKeyTests {
 }
 
 public class NonUniqueBTreeIndex_CompositeStringKeyTests {
-    static private NonUniqueBTreeIndex<(int ClubId, string Name)> NewIndex(int chunkSize = 256) => new(chunkSize);
+    static private NonUniqueBTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>> NewIndex(int chunkSize = 256) => new(chunkSize);
 
-    static private int[] OffsetsOf(NonUniqueBTreeIndex<(int ClubId, string Name)> index, (int ClubId, string Name) key) {
+    static private int[] OffsetsOf(NonUniqueBTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>> index, (int ClubId, string Name) key) {
         using var list = index.GetOffsets(key);
         return list.BufferResult().Unwrap().ToArray();
     }

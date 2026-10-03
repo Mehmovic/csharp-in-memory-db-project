@@ -16,15 +16,24 @@ public class IndexBenchmarks {
     private const int Rows = 100_000;
     private const int BulkRows = 1_000_000;
 
-    private BTreeIndex<int> intIndex = null!;
-    private BTreeIndex<string> strIndex = null!;
+    private BTreeIndex<int, DefaultComparer<int>> intIndex = null!;
+    private BTreeIndex<string, OrdinalStringComparer> strIndex = null!;
     private int probe;
     private string strProbe = null!;
 
+    // A fixed probe measures one lucky path: Rows / 2 used to be the exact middle chunk of the
+    // old directory search, so it resolved on the first probe and hid the cost every other key
+    // pays. The random probes walk a pre-shuffled key list instead, so each call lands in a
+    // different chunk the way real lookups do (and pays the cache misses real lookups pay).
+    private const int RandomProbeCount = 4_096;
+    private int[] randomProbes = null!;
+    private string[] randomStrProbes = null!;
+    private int nextProbe;
+
     [GlobalSetup]
     public void Setup() {
-        intIndex = new BTreeIndex<int>();
-        strIndex = new BTreeIndex<string>(256, StringComparer.Ordinal);
+        intIndex = new BTreeIndex<int, DefaultComparer<int>>();
+        strIndex = new(256);
         for (var i = 0; i < Rows; i++) {
             intIndex.Insert(i, i);
             strIndex.Insert(Key(i), i);
@@ -34,6 +43,14 @@ public class IndexBenchmarks {
         // rather than a couple of probes.
         probe = Rows / 2;
         strProbe = Key(probe);
+
+        var rng = new Random(12_345);
+        randomProbes = new int[RandomProbeCount];
+        randomStrProbes = new string[RandomProbeCount];
+        for (var i = 0; i < RandomProbeCount; i++) {
+            randomProbes[i] = rng.Next(Rows);
+            randomStrProbes[i] = Key(randomProbes[i]);
+        }
 
         AssertRange(intIndex.GetOffset(probe).IsOk(), "int point lookup must resolve");
         AssertRange(strIndex.GetOffset(strProbe).IsOk(), "string point lookup must resolve");
@@ -62,6 +79,12 @@ public class IndexBenchmarks {
     public int Lookup_String() => strIndex.GetOffset(strProbe).Unwrap();
 
     [Benchmark]
+    public int Lookup_Int_Random() => intIndex.GetOffset(randomProbes[nextProbe++ & (RandomProbeCount - 1)]).Unwrap();
+
+    [Benchmark]
+    public int Lookup_String_Random() => strIndex.GetOffset(randomStrProbes[nextProbe++ & (RandomProbeCount - 1)]).Unwrap();
+
+    [Benchmark]
     public int Range_Width1() { using var r = intIndex.GetOffsetsRange(probe, probe); return r.Count; }
 
     [Benchmark]
@@ -81,14 +104,14 @@ public class IndexBenchmarks {
     // Bulk load: dominated by splits, so it shows chunk allocation cost directly.
     [Benchmark]
     public int BulkLoad_1M() {
-        var index = new BTreeIndex<int>();
+        var index = new BTreeIndex<int, DefaultComparer<int>>();
         for (var i = 0; i < BulkRows; i++) index.Insert(i, i);
         return index.Count;
     }
 
     [Benchmark]
     public int DeleteHalf_ThenInsertHalf() {
-        var index = new BTreeIndex<int>();
+        var index = new BTreeIndex<int, DefaultComparer<int>>();
         for (var i = 0; i < Rows; i++) index.Insert(i, i);
         for (var i = 0; i < Rows; i += 2) index.Delete(i);
         for (var i = 0; i < Rows; i++) index.Insert(i, i);

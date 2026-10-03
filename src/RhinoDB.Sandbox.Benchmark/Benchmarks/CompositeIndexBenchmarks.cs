@@ -10,8 +10,8 @@ namespace RhinoDB.Sandbox.Benchmark.Benchmarks;
 //
 //   * (int, long)      - purely numeric. Each component compares with a devirtualised
 //                        constrained call, so the tuple adds little over a plain int key.
-//   * (int, string)    - one string component. Handed StringComparer.Ordinal (via
-//                        OrdinalComparers) this is a memcmp; left on the default comparer
+//   * (int, string)    - one string component. On the TupleComparer<..., OrdinalStringComparer>
+//                        struct comparer this is an inlined memcmp; left on the default comparer
 //                        the same comparison is an ICU call AND the resulting total order
 //                        depends on the host's culture.
 //   * (int, string) on the DEFAULT comparer is kept here as the measured "before" for
@@ -23,9 +23,9 @@ namespace RhinoDB.Sandbox.Benchmark.Benchmarks;
 public class CompositeIndexBenchmarks {
     private const int Rows = 100_000;
 
-    private BTreeIndex<(int ClubId, long Season)> numeric = null!;
-    private BTreeIndex<(int ClubId, string Name)> strOrdinal = null!;
-    private BTreeIndex<(int ClubId, string Name)> strDefault = null!;
+    private BTreeIndex<(int ClubId, long Season), TupleComparer<int, long, DefaultComparer<int>, DefaultComparer<long>>> numeric = null!;
+    private BTreeIndex<(int ClubId, string Name), TupleComparer<int, string, DefaultComparer<int>, OrdinalStringComparer>> strOrdinal = null!;
+    private BTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>> strDefault = null!;
 
     private (int, long) numericProbe;
     private (int, string) strProbe;
@@ -33,9 +33,9 @@ public class CompositeIndexBenchmarks {
 
     [GlobalSetup]
     public void Setup() {
-        numeric = new BTreeIndex<(int, long)>();
-        strOrdinal = new BTreeIndex<(int, string)>(256, OrdinalComparers.For2<int, string>());
-        strDefault = new BTreeIndex<(int, string)>();
+        numeric = new(256);
+        strOrdinal = new(256);
+        strDefault = new BTreeIndex<(int, string), DefaultComparer<(int, string)>>();
 
         for (var i = 0; i < Rows; i++) {
             numeric.Insert((i, (long)i * 1000), i);
