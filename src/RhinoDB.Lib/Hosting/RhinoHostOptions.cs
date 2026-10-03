@@ -1,4 +1,7 @@
 using System.Globalization;
+using System.Reflection;
+
+using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Lib.Hosting;
 
@@ -16,57 +19,68 @@ public sealed class RhinoHostOptions {
     public ulong? ReplayUpToLsn { get; private init; }
     public int? WalKeepGenerations { get; private init; }
     public ulong? WalPruneOlderThanUtcTicks { get; private init; }
+    public int HttpPort { get; private init; } = 7777;
+    public bool HttpEnabled { get; private init; }
 
-    static public Result<RhinoHostOptions> Parse(string[] args, string prefix) {
-        string? coldPath = null;
-        var mode = RhinoRunMode.Run;
-        ulong? upToLsn = null;
-        int? walKeepGenerations = null;
-        ulong? walPruneOlderThanUtcTicks = null;
-
-        var coldPathFlag = $"--{prefix}.cold-path";
-        var modeFlag = $"--{prefix}.mode";
-        var upToLsnFlag = $"--{prefix}.replay-upto-lsn";
-        var walKeepGenerationsFlag = $"--{prefix}.wal-keep-generations";
-        var walPruneOlderThanFlag = $"--{prefix}.wal-prune-older-than";
-
-        foreach (var arg in args) {
-            var (key, value) = SplitFlag(arg);
-
-            if (key == coldPathFlag) {
-                coldPath = value;
-            } else if (key == modeFlag) {
-                if (!TryParseMode(value, out mode))
-                    return Result<RhinoHostOptions>.Error(DbError.SystemFailure(
-                        new ArgumentException($"Unknown {modeFlag} '{value}' - expected run, replay, migrate, wal-prune, or wal-migrate.")));
-            } else if (key == upToLsnFlag) {
-                if (!ulong.TryParse(value, out var lsn))
-                    return Result<RhinoHostOptions>.Error(DbError.SystemFailure(
-                        new ArgumentException($"{upToLsnFlag} must be an integer, got '{value}'.")));
-                upToLsn = lsn;
-            } else if (key == walKeepGenerationsFlag) {
-                if (!int.TryParse(value, out var generation))
-                    return Result<RhinoHostOptions>.Error(DbError.SystemFailure(
-                        new ArgumentException($"{walKeepGenerationsFlag} must be an integer, got '{value}'.")));
-                walKeepGenerations = generation;
-            } else if (key == walPruneOlderThanFlag) {
-                var resolved = ResolveUtcTicks(value, walPruneOlderThanFlag);
-                if (resolved.IsError()) return resolved.Void();
-                walPruneOlderThanUtcTicks = resolved.Unwrap();
-            }
+    static public Result<RhinoHostOptions> Load(string configDirectory) {
+        RhinoDbConfig config;
+        try {
+            config = GeneratorConfigLoader.LoadFull(configDirectory);
+        } catch (GeneratorConfigException ex) {
+            return Result<RhinoHostOptions>.Error(DbError.SystemFailure(ex));
         }
 
-        if (coldPath is null)
-            return Result<RhinoHostOptions>.Error(DbError.SystemFailure(new ArgumentException($"{coldPathFlag} is required.")));
+        return FromConfig(config.Host);
+    }
 
-        if (walKeepGenerations is not null && walPruneOlderThanUtcTicks is not null)
+    static public Result<RhinoHostOptions> FromConfig(HostConfig host) {
+        if (!TryParseMode(host.Mode, out var mode))
             return Result<RhinoHostOptions>.Error(DbError.SystemFailure(new ArgumentException(
-                $"Give either {walKeepGenerationsFlag} or {walPruneOlderThanFlag}, not both - two retention policies at once is ambiguous.")));
+                $"Unknown Host.Mode '{host.Mode}' - expected run, replay, migrate, wal-prune, or wal-migrate.")));
+
+        if (host.WalKeepGenerations is not null && host.WalPruneOlderThan is not null)
+            return Result<RhinoHostOptions>.Error(DbError.SystemFailure(new ArgumentException(
+                "Give either Host.WalKeepGenerations or Host.WalPruneOlderThan, not both - two retention policies at once is ambiguous.")));
+
+        ulong? walPruneOlderThanUtcTicks = null;
+        if (host.WalPruneOlderThan is { } pruneText) {
+            var resolved = ResolveUtcTicks(pruneText, "Host.WalPruneOlderThan");
+            if (resolved.IsError()) return resolved.Void();
+            walPruneOlderThanUtcTicks = resolved.Unwrap();
+        }
+
+        var coldPath = string.IsNullOrWhiteSpace(host.ColdPath) ? DefaultColdPath() : host.ColdPath;
+
+        var accessResult = EnsureColdPathAccessible(coldPath);
+        if (accessResult.IsError()) return Result<RhinoHostOptions>.Error(accessResult.GetError());
 
         return new RhinoHostOptions {
-            ColdPath = coldPath, Mode = mode, ReplayUpToLsn = upToLsn,
-            WalKeepGenerations = walKeepGenerations, WalPruneOlderThanUtcTicks = walPruneOlderThanUtcTicks
+            ColdPath = coldPath,
+            Mode = mode,
+            ReplayUpToLsn = host.ReplayUpToLsn,
+            WalKeepGenerations = host.WalKeepGenerations,
+            WalPruneOlderThanUtcTicks = walPruneOlderThanUtcTicks,
+            HttpPort = host.HttpPort,
+            HttpEnabled = host.HttpEnabled ?? (mode == RhinoRunMode.Run),
         };
+    }
+
+    static internal string DefaultColdPath() {
+        var projectName = Assembly.GetEntryAssembly()?.GetName().Name ?? "RhinoDB";
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RhinoDB", projectName);
+    }
+
+    static internal Result EnsureColdPathAccessible(string coldPath) {
+        try {
+            Directory.CreateDirectory(coldPath);
+            var probePath = Path.Combine(coldPath, $".rhinodb-access-check-{Guid.NewGuid():N}");
+            File.WriteAllText(probePath, "");
+            File.Delete(probePath);
+            return Result.Ok();
+        } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) {
+            return Result.Error(DbError.SystemFailure(new InvalidOperationException(
+                $"ColdPath '{coldPath}' is not accessible: {ex.Message}", ex)));
+        }
     }
 
     static public Result<ulong> ResolveUtcTicks(string? value, string? flagName = null) {
@@ -80,11 +94,6 @@ public sealed class RhinoHostOptions {
                 new ArgumentException($"{label} value '{value}' is not a recognizable timestamp. Use ISO-8601, e.g. 2026-09-14T08:00:00 (local), 2026-09-14T08:00:00Z (UTC), or 2026-09-14T08:00:00+02:00.")));
 
         return Result.Ok((ulong)when.UtcTicks);
-    }
-    
-    static private (string Key, string? Value) SplitFlag(string arg) {
-        var eq = arg.IndexOf('=');
-        return eq < 0 ? (arg, null) : (arg[..eq], arg[(eq + 1)..]);
     }
 
     static private bool TryParseMode(string? value, out RhinoRunMode mode) {

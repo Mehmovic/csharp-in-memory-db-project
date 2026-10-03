@@ -14,9 +14,10 @@ diagram above is the *dependency* order the numbering was originally chosen
 to match; the actual *build* order is now: Stages 1-5 (done) → **Stage 7 +
 Stage 8 together** (HTTP/WebSocket hosting, with the full subscribe-and-diff
 client model, not a stub) → a tiny proof-of-concept game → **Stage 6, scoped
-down** (IDC for in-process and same-machine peers only — cross-machine IDC
+down** (IDC for same-machine peers only, via local IPC — cross-machine IDC
 and the eventual UDP/RUDP transport layer both explicitly deferred to the
-Backlog). This is not a numbering error to fix: Stage 8 never actually
+Backlog; the in-process option once also listed here was dropped 2026-10-04,
+see Stage 6 below). This is not a numbering error to fix: Stage 8 never actually
 depended on Stage 6 — it only ever needed `Change<TKey,TRow>` (real since
 Stage 5) and its own transport (Stage 7's HTTP/WebSocket host), never IDC's
 actor-to-actor transport. The old text saying otherwise was an artifact of
@@ -700,22 +701,30 @@ this project's original "library, not a service" decision always implied
 would eventually need to exist (see
 [Architecture — Hosting](02-architecture.md#hosting): "console app first,"
 and [Architecture — Deployment](02-architecture.md#deployment): "you build
-and run your own instance"). A builder registers one or more databases
-(`AddDatabase<TDb,TTx>(name, options => { ... })`, `DatabaseOptions<TDb,TTx>`
+and run your own instance"). A builder registers a database
+(`AddDatabase<TDb,TTx>(options => { ... })`, `DatabaseOptions<TDb,TTx>`
 supplying `CreateDb`/`LoadAsync`/`LoadFromGenesis` — the last two
 mode-conditionally required, not always both, since e.g. a database that
 only ever runs normally shouldn't have to also configure a replay delegate
-it will never call) against one shared CLI `args[]` array, each database's
-flags namespaced by its registered name (`--{name}.cold-path`,
-`--{name}.mode`, `--{name}.replay-upto-lsn`) so one process can host several
-actor-model databases side by side, matching the execution model's existing
-"single-writer per database, several databases can share a process"
-design. `BuildAsync()` fails fast on the first registration that fails to
-open/recover/replay, rather than coming up with one database silently
-broken while another runs. `Migrate` mode is a recognized, parseable value
-already — forward-compatible with `Docs/06-schema-migration.md`'s eventual
-runtime migration protocol — but refuses loudly rather than silently
-no-opping, since nothing implements migration yet.
+it will never call). `BuildAsync()` fails fast on a registration that fails to
+open/recover/replay, rather than coming up silently broken. `Migrate` mode is
+a recognized, parseable value already — forward-compatible with
+`Docs/06-schema-migration.md`'s eventual runtime migration protocol — but
+refuses loudly rather than silently no-opping, since nothing implements
+migration yet.
+
+**Revised 2026-10-04, superseding the paragraph above's original shape**: a
+process now hosts exactly one database — `AddDatabase` may only be called
+once (throws otherwise), and the per-database CLI flag namespacing
+(`--{name}.cold-path`, `--{name}.mode`, etc., "so one process can host
+several actor-model databases side by side") is gone along with the
+"several databases can share a process" execution-model framing it was built
+to serve. Settings now come entirely from `rdbsettings.json`'s `Host` section
+(`RhinoHostOptions.Load`/`FromConfig`) — no command-line flags, no per-name
+prefix, no registered-name concept anywhere in `RhinoHostBuilder` at all.
+Two databases that need to run together now do so as two separate processes
+communicating over IDC (see Stage 6 below), never as two registrations
+sharing one `RhinoHost`.
 
 2026-09-19: **Phase 4, the ring buffer** — per-table (not per-database, see
 `Docs/05-wal-design.md`'s 2026-09-19 amendment), covering both `Instant` and
@@ -760,14 +769,31 @@ is "IDC" now. `PropagationMode` (`Optimistic`/`Confirmed`, a per-`Run`-call
 durability choice) is unrelated and keeps its name.
 
 **Scoped down 2026-09-13, and moved after Stage 7+8 in build order** (see the
-build-order note at the top of this doc): first slice covers only
-`InProcessIdcTransport` and a same-machine local-IPC transport (named pipe or
-Unix domain socket) — `NetworkIdcTransport` (cross-machine) and a future
-UDP/RUDP transport layer are both explicitly deferred to the Backlog, not
-part of this stage's definition of done. `VersionedMemoryPack` is deferred
-alongside cross-machine IDC for the same reason — version skew across
-processes restarted together from one deploy is a much weaker requirement
-than skew across a network boundary during a rolling upgrade.
+build-order note at the top of this doc): first slice covers only a
+same-machine local-IPC transport (named pipe, Unix domain socket, or shared
+memory) — `NetworkIdcTransport` (cross-machine) and a future UDP/RUDP
+transport layer are both explicitly deferred to the Backlog, not part of this
+stage's definition of done. `VersionedMemoryPack` is deferred alongside
+cross-machine IDC for the same reason — version skew across processes
+restarted together from one deploy is a much weaker requirement than skew
+across a network boundary during a rolling upgrade.
+
+**Revised 2026-10-04, superseding "first slice" above on one point**: there is
+no in-process option anymore, by definition — a process now hosts exactly one
+database (see the `RhinoHostBuilder` entry above), so every IDC peer is
+necessarily a separate process. `InProcessIdcTransport`
+(`Channel<T>`-between-two-`DbContext`s, sketched in
+[Architecture — Location-transparent transport](02-architecture.md#location-transparent-transport))
+is dropped, not deferred — the one-process-many-databases model it depended
+on no longer exists. The first slice is local-IPC only; `NetworkIdcTransport`
+still follows later as originally scoped.
+
+**Noted 2026-10-04, design-only — not yet implemented**: `LocalIpcIdcTransport`
+and `NetworkIdcTransport` should present an identical call shape (the same
+`IIdcTransport` interface already requires this, see Architecture) so that a
+call site is fully agnostic to which one is actually in play — whether two
+peers talk over local IPC or over the network is a property of how the actors
+have been *configured/deployed*, never something the calling code branches on.
 
 The generic, non-boxing `Change<TKey,TRow>` shape and per-table typed `Ops`
 buffers this stage was always meant to use — **not** the `object`/`Action`-typed
@@ -812,17 +838,17 @@ implementation since the shape affects the declarative surface):
   that path keeps a hand-declared, attributed DTO processed by the real
   MessagePack-CSharp generator. `VersionedMemoryPack` is a later increment
   either way (more intricate tagged encoding to replicate correctly).
-- **Location-transparent transport.** IDC must not know or care whether a peer
-  database lives in the same process, a different process on the same
-  machine, or a different machine — one `IIdcTransport` interface
+- **Location-transparent transport.** **Revised 2026-10-04**: a process now
+  hosts exactly one database, so a peer is always a separate process — same
+  machine or a different one, never the same process. IDC must not know or
+  care which of those two it's talking to — one `IIdcTransport` interface
   (`SendAsync`/`Receive` over an opaque envelope: kind, serialized key,
-  serialized row, sequence number) with three implementations
-  (in-process `Channel<T>`, local IPC — named pipe/Unix domain socket, and
-  network — TCP/QUIC/gRPC), swappable without touching sender/receiver logic.
-  Deferred, profile-gated optimization: the in-process transport *may* skip
-  serialization and hand the receiver an already-constructed value directly,
-  since same-process is the one case where paying for bytes at all is a
-  choice, not a requirement — not built until proven to matter.
+  serialized row, sequence number) with two implementations (local IPC —
+  named pipe, Unix domain socket, or shared memory; and network —
+  TCP/QUIC/gRPC), swappable without touching sender/receiver logic. (The
+  in-process `Channel<T>` option and its deferred zero-serialization
+  optimization, both sketched here before 2026-10-04, are dropped along with
+  the one-process-many-databases model they depended on.)
 - **Declarative surface** (attributes only — see
   [Architecture — Inter-Database Communication](02-architecture.md#inter-database-communication-idc)
   for the full pseudocode):
@@ -922,8 +948,9 @@ don't get built before they're needed:
   applied to `OrderedIndex.Range()`'s allocation until `Table<TRow>`/transactions/
   locking exist and profiling actually shows it matters.
 - **Cross-machine IDC (`NetworkIdcTransport`) and `VersionedMemoryPack`** —
-  Stage 6 as first built (2026-09-13 scope decision) only covers in-process and
-  same-machine peers. Extending `IIdcTransport` with a network implementation
+  Stage 6 as first built (2026-09-13 scope decision, revised 2026-10-04 to
+  drop the in-process option) only covers same-machine peers over local IPC.
+  Extending `IIdcTransport` with a network implementation
   (TCP/QUIC/gRPC) and adding version-tolerant encoding for the rolling-upgrade
   case both wait until an actual multi-machine deployment need exists — see
   [Architecture — Inter-Database Communication](02-architecture.md#inter-database-communication-idc).

@@ -3,16 +3,16 @@ using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Execution;
 using RhinoDB.Lib.Tables;
+using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Lib.Hosting.Test;
 
 // RhinoHostBuilder is the thin, generic wiring layer a scaffolded Program.cs calls into - real
 // file I/O against real temp directories (matching this project's established convention for
 // ColdStore-touching tests), but TDb is a plain DbContext-derived test double since the builder is
-// deliberately delegate-driven rather than coupled to a generated {Db}/{Db}Loader type. Each
-// registered database gets its own flag namespace (RhinoHostOptions.Parse's prefix) so one shared
-// args[] can configure several actor-model databases in one process - that's the scenario these
-// tests exist to prove, alongside fail-fast build and mode-conditional delegate requirements.
+// deliberately delegate-driven rather than coupled to a generated {Db}/{Db}Loader type. A process
+// hosts exactly one database now (AddDatabase may only be called once) - settings come from a real
+// rdbsettings.json written per test via RhinoHostConfigTestHelper, never command-line flags.
 public class RhinoHostBuilderTests {
     private string dirA = "";
     private string dirB = "";
@@ -33,13 +33,18 @@ public class RhinoHostBuilderTests {
 
     private sealed class FakeDb(ColdStore cold) : DbContext(cold);
 
+    static private RhinoHostBuilder CreateBuilder(string dir, HostConfig? host = null) {
+        RhinoHostConfigTestHelper.WriteConfig(dir, host ?? new HostConfig { ColdPath = dir });
+        return RhinoHostBuilder.Create(dir);
+    }
+
     [Test]
     public async Task BuildAsync_InRunMode_CallsLoadAsync_NotLoadFromGenesis() {
         var loadAsyncCalled = false;
         var loadFromGenesisCalled = false;
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
                 options.LoadFromGenesis = (_, _, _) => { loadFromGenesisCalled = true; return Result.Ok(); };
@@ -49,13 +54,13 @@ public class RhinoHostBuilderTests {
         Assert.That(hostResult.IsOk(), Is.True);
         Assert.That(loadAsyncCalled, Is.True);
         Assert.That(loadFromGenesisCalled, Is.False);
-        hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
+        hostResult.Unwrap().GetDatabase<FakeDb>().Cold!.Dispose();
     }
 
     [Test]
     public async Task BuildAsync_InRunMode_DoesNotRequireLoadFromGenesisToBeConfigured() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => Task.CompletedTask;
                 // LoadFromGenesis deliberately left unconfigured.
@@ -63,7 +68,7 @@ public class RhinoHostBuilderTests {
             .BuildAsync();
 
         Assert.That(hostResult.IsOk(), Is.True, "Run mode never calls LoadFromGenesis, so it must not be required.");
-        hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
+        hostResult.Unwrap().GetDatabase<FakeDb>().Cold!.Dispose();
     }
 
     [Test]
@@ -71,8 +76,8 @@ public class RhinoHostBuilderTests {
         var loadAsyncCalled = false;
         ulong? seenUpToLsn = null;
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=replay", "--game.replay-upto-lsn=7"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA, new HostConfig { ColdPath = dirA, Mode = "replay", ReplayUpToLsn = 7 })
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
                 options.LoadFromGenesis = (_, _, upToLsn) => { seenUpToLsn = upToLsn; return Result.Ok(); };
@@ -82,13 +87,13 @@ public class RhinoHostBuilderTests {
         Assert.That(hostResult.IsOk(), Is.True);
         Assert.That(loadAsyncCalled, Is.False);
         Assert.That(seenUpToLsn, Is.EqualTo(7L));
-        hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
+        hostResult.Unwrap().GetDatabase<FakeDb>().Cold!.Dispose();
     }
 
     [Test]
     public async Task BuildAsync_InReplayMode_DoesNotRequireLoadAsyncToBeConfigured() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=replay"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA, new HostConfig { ColdPath = dirA, Mode = "replay" })
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadFromGenesis = (_, _, _) => Result.Ok();
                 // LoadAsync deliberately left unconfigured.
@@ -96,7 +101,7 @@ public class RhinoHostBuilderTests {
             .BuildAsync();
 
         Assert.That(hostResult.IsOk(), Is.True, "Replay mode never calls LoadAsync, so it must not be required.");
-        hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
+        hostResult.Unwrap().GetDatabase<FakeDb>().Cold!.Dispose();
     }
 
     [Test]
@@ -104,8 +109,8 @@ public class RhinoHostBuilderTests {
         var loadAsyncCalled = false;
         var loadFromGenesisCalled = false;
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=migrate"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA, new HostConfig { ColdPath = dirA, Mode = "migrate" })
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
                 options.LoadFromGenesis = (_, _, _) => { loadFromGenesisCalled = true; return Result.Ok(); };
@@ -124,8 +129,8 @@ public class RhinoHostBuilderTests {
         var loadAsyncCalled = false;
         var loadFromGenesisCalled = false;
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=migrate"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA, new HostConfig { ColdPath = dirA, Mode = "migrate" })
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
                 options.LoadFromGenesis = (_, _, _) => { loadFromGenesisCalled = true; return Result.Ok(); };
@@ -137,13 +142,13 @@ public class RhinoHostBuilderTests {
         Assert.That(runMigrationCalled, Is.True);
         Assert.That(loadAsyncCalled, Is.False);
         Assert.That(loadFromGenesisCalled, Is.False);
-        hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
+        hostResult.Unwrap().GetDatabase<FakeDb>().Cold!.Dispose();
     }
 
     [Test]
     public async Task BuildAsync_InMigrateMode_WhenRunMigrationItselfFails_PropagatesTheError() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=migrate"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA, new HostConfig { ColdPath = dirA, Mode = "migrate" })
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.RunMigration = _ => Result.Error(DbError.SystemFailure(new InvalidOperationException("boom")));
             })
@@ -159,8 +164,8 @@ public class RhinoHostBuilderTests {
         var runMigrationCalled = false;
         var loadAsyncCalled = false;
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
                 options.GBinary = 0;
@@ -172,15 +177,15 @@ public class RhinoHostBuilderTests {
         Assert.That(hostResult.IsOk(), Is.True);
         Assert.That(runMigrationCalled, Is.False, "G_db (0, a fresh database) already matches G_binary - no migration needed.");
         Assert.That(loadAsyncCalled, Is.True);
-        hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
+        hostResult.Unwrap().GetDatabase<FakeDb>().Cold!.Dispose();
     }
 
     [Test]
     public async Task BuildAsync_InRunMode_WhenBinaryIsNewerThanCurrentGeneration_CallsRunMigrationBeforeLoadAsync() {
         var callOrder = new List<string>();
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => { callOrder.Add("LoadAsync"); return Task.CompletedTask; };
                 options.GBinary = 1;
@@ -191,7 +196,7 @@ public class RhinoHostBuilderTests {
 
         Assert.That(hostResult.IsOk(), Is.True);
         Assert.That(callOrder, Is.EqualTo(new[] { "RunMigration", "LoadAsync" }), "self-healing: migrate first, then load, in one Run-mode bring-up.");
-        hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
+        hostResult.Unwrap().GetDatabase<FakeDb>().Cold!.Dispose();
     }
 
     [Test]
@@ -199,8 +204,8 @@ public class RhinoHostBuilderTests {
         var runMigrationCalled = false;
         var loadAsyncCalled = false;
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
                 options.GBinary = 0;
@@ -225,8 +230,8 @@ public class RhinoHostBuilderTests {
         var runMigrationCalled = false;
         var loadAsyncCalled = false;
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
                 options.GBinary = 3;
@@ -242,8 +247,8 @@ public class RhinoHostBuilderTests {
 
     [Test]
     public async Task BuildAsync_WithoutCreateDbConfigured_FailsRegardlessOfMode() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.LoadAsync = _ => Task.CompletedTask;
             })
             .BuildAsync();
@@ -252,55 +257,48 @@ public class RhinoHostBuilderTests {
     }
 
     [Test]
-    public async Task BuildAsync_WithTwoDatabases_ParsesEachOnesFlagsFromTheSharedArgsIndependently() {
-        var hostResult = await RhinoHostBuilder.Create([
-                $"--players.cold-path={dirA}", "--players.mode=run",
-                $"--matches.cold-path={dirB}", "--matches.mode=replay", "--matches.replay-upto-lsn=3",
-            ])
-            .AddDatabase<FakeDb, DefaultTransaction>("players", options => {
-                options.CreateDb = cold => new FakeDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
-            })
-            .AddDatabase<FakeDb, DefaultTransaction>("matches", options => {
-                options.CreateDb = cold => new FakeDb(cold);
-                options.LoadFromGenesis = (_, _, _) => Result.Ok();
-            })
-            .BuildAsync();
+    public async Task BuildAsync_WithoutAddDatabaseEverCalled_Fails() {
+        var hostResult = await CreateBuilder(dirA).BuildAsync();
 
-        Assert.That(hostResult.IsOk(), Is.True);
-        var host = hostResult.Unwrap();
-        Assert.That(host.GetDatabase<FakeDb>("players"), Is.Not.SameAs(host.GetDatabase<FakeDb>("matches")));
-        host.GetDatabase<FakeDb>("players").Cold!.Dispose();
-        host.GetDatabase<FakeDb>("matches").Cold!.Dispose();
+        Assert.That(hostResult.IsError(), Is.True);
+    }
+
+    // ---- one process, one database ----
+
+    [Test]
+    public void AddDatabase_CalledTwice_Throws() {
+        var builder = CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => { options.CreateDb = cold => new FakeDb(cold); });
+
+        Assert.Throws<InvalidOperationException>(() =>
+            builder.AddDatabase<FakeDb, DefaultTransaction>(options => { options.CreateDb = cold => new FakeDb(cold); }));
     }
 
     [Test]
-    public async Task BuildAsync_WhenASecondDatabaseFailsToConfigure_FailsTheWholeBuild() {
-        var hostResult = await RhinoHostBuilder.Create([$"--first.cold-path={dirA}", $"--second.cold-path={dirB}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("first", options => {
+    public async Task GetDatabase_WithTheWrongType_ThrowsInvalidCastException() {
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
-            })
-            .AddDatabase<FakeDb, DefaultTransaction>("second", options => {
-                // CreateDb deliberately left unconfigured - this registration must fail.
                 options.LoadAsync = _ => Task.CompletedTask;
             })
             .BuildAsync();
 
-        Assert.That(hostResult.IsError(), Is.True, "One broken database must fail the whole build, not come up partially.");
+        var host = hostResult.Unwrap();
+        Assert.Throws<InvalidCastException>(() => host.GetDatabase<string>());
+        host.GetDatabase<FakeDb>().Cold!.Dispose();
     }
 
     // ---- RhinoRunMode.WalPrune ----
 
     [Test]
     public async Task BuildAsync_InPruneModeWithoutTargetGenerationConfigured_Fails() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-prune"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA, new HostConfig { ColdPath = dirA, Mode = "wal-prune" })
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
             })
             .BuildAsync();
 
-        Assert.That(hostResult.IsError(), Is.True, "Prune mode needs --game.wal-keep-generations - fail loudly, not silently no-op.");
+        Assert.That(hostResult.IsError(), Is.True, "Prune mode needs Host.WalKeepGenerations - fail loudly, not silently no-op.");
     }
 
     [Test]
@@ -309,14 +307,14 @@ public class RhinoHostBuilderTests {
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [new DecodedWalEntry(1, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, [1], [9])])], generation: 0);
         WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [new DecodedWalEntry(2, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, [2], [9])])], generation: 2);
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-prune", "--game.wal-keep-generations=2"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA, new HostConfig { ColdPath = dirA, Mode = "wal-prune", WalKeepGenerations = 2 })
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
             })
             .BuildAsync();
 
         Assert.That(hostResult.IsOk(), Is.True);
-        var db = hostResult.Unwrap().GetDatabase<FakeDb>("game");
+        var db = hostResult.Unwrap().GetDatabase<FakeDb>();
         Assert.That(db.Cold!.ReadRetainedFromGeneration().Unwrap(), Is.EqualTo(2));
         Assert.That(WalArchive.ReadOldestRetainedGeneration(dirA).Unwrap().Get(), Is.EqualTo(2),
             "generation 0's segment must be gone; generation 2's must survive untouched.");
@@ -328,8 +326,8 @@ public class RhinoHostBuilderTests {
         using (var seedCold = ColdStore.Open(dirA).Unwrap())
             Assert.That(seedCold.WriteRetainedFromGeneration(5).IsOk(), Is.True);
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-prune", "--game.wal-keep-generations=3"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA, new HostConfig { ColdPath = dirA, Mode = "wal-prune", WalKeepGenerations = 3 })
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
             })
             .BuildAsync();
@@ -341,8 +339,8 @@ public class RhinoHostBuilderTests {
 
     [Test]
     public async Task BuildAsync_InMigrateWalArchiveModeWithoutItConfigured_Fails() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-migrate"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA, new HostConfig { ColdPath = dirA, Mode = "wal-migrate" })
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
             })
             .BuildAsync();
@@ -356,8 +354,8 @@ public class RhinoHostBuilderTests {
         var runMigrationCalled = false;
         var loadAsyncCalled = false;
 
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-migrate"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA, new HostConfig { ColdPath = dirA, Mode = "wal-migrate" })
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => { loadAsyncCalled = true; return Task.CompletedTask; };
                 options.RunMigration = _ => { runMigrationCalled = true; return Result.Ok(); };
@@ -369,13 +367,13 @@ public class RhinoHostBuilderTests {
         Assert.That(migrateWalArchiveCalled, Is.True);
         Assert.That(runMigrationCalled, Is.False);
         Assert.That(loadAsyncCalled, Is.False);
-        hostResult.Unwrap().GetDatabase<FakeDb>("game").Cold!.Dispose();
+        hostResult.Unwrap().GetDatabase<FakeDb>().Cold!.Dispose();
     }
 
     [Test]
     public async Task BuildAsync_InMigrateWalArchiveMode_WhenItFails_PropagatesTheError() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}", "--game.mode=wal-migrate"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA, new HostConfig { ColdPath = dirA, Mode = "wal-migrate" })
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.MigrateWalArchive = _ => Result.Error(DbError.SystemFailure(new InvalidOperationException("boom")));
             })
@@ -384,38 +382,12 @@ public class RhinoHostBuilderTests {
         Assert.That(hostResult.IsError(), Is.True);
     }
 
-    [Test]
-    public void AddDatabase_WithADuplicateName_Throws() {
-        var builder = RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => { options.CreateDb = cold => new FakeDb(cold); });
-
-        Assert.Throws<ArgumentException>(() =>
-            builder.AddDatabase<FakeDb, DefaultTransaction>("game", options => { options.CreateDb = cold => new FakeDb(cold); }));
-    }
-
-    [Test]
-    public async Task GetDatabase_WithAnUnregisteredName_Throws() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
-                options.CreateDb = cold => new FakeDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
-            })
-            .BuildAsync();
-
-        var host = hostResult.Unwrap();
-        Assert.Throws<KeyNotFoundException>(() => host.GetDatabase<FakeDb>("nonexistent"));
-        host.GetDatabase<FakeDb>("game").Cold!.Dispose();
-    }
-
     // ---- the archive collector allocates NOTHING when retention is off ----
 
     [Test]
     public async Task BuildAsync_WithRetentionOff_CreatesNoCollectorAndNoTimer() {
-        // rdbsettings.json in the test output has no Server.ArchiveRetention, and no per-database
-        // override is set - so retention is off and must cost nothing: no collector object, and
-        // since the collector owns the Timer, no Timer either.
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => Task.CompletedTask;
             })
@@ -425,13 +397,13 @@ public class RhinoHostBuilderTests {
         using var host = hostResult.Unwrap();
         Assert.That(host.ArchiveCollectorCount, Is.EqualTo(0),
             "a disabled feature should not leave a live object behind - the collector holds a Timer.");
-        host.GetDatabase<FakeDb>("game").Cold!.Dispose();
+        host.GetDatabase<FakeDb>().Cold!.Dispose();
     }
 
     [Test]
     public async Task BuildAsync_WithRetentionOn_CreatesExactlyOneCollector() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => Task.CompletedTask;
                 options.ArchiveRetention = new ArchiveRetentionPolicy(TimeSpan.FromHours(4), TimeSpan.FromDays(30));
@@ -441,36 +413,13 @@ public class RhinoHostBuilderTests {
         Assert.That(hostResult.IsOk(), Is.True);
         using var host = hostResult.Unwrap();
         Assert.That(host.ArchiveCollectorCount, Is.EqualTo(1));
-        host.GetDatabase<FakeDb>("game").Cold!.Dispose();
-    }
-
-    [Test]
-    public async Task BuildAsync_TwoDatabases_OneWithRetention_CreatsExactlyOneCollector() {
-        // The per-database override must not turn collection ON for the other database.
-        var hostResult = await RhinoHostBuilder.Create([$"--a.cold-path={dirA}", $"--b.cold-path={dirB}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("a", options => {
-                options.CreateDb = cold => new FakeDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
-                options.ArchiveRetention = new ArchiveRetentionPolicy(TimeSpan.FromHours(1), TimeSpan.FromDays(7));
-            })
-            .AddDatabase<FakeDb, DefaultTransaction>("b", options => {
-                options.CreateDb = cold => new FakeDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
-            })
-            .BuildAsync();
-
-        Assert.That(hostResult.IsOk(), Is.True);
-        using var host = hostResult.Unwrap();
-        Assert.That(host.ArchiveCollectorCount, Is.EqualTo(1),
-            "an override on one database must not enable collection for its neighbour.");
-        host.GetDatabase<FakeDb>("a").Cold!.Dispose();
-        host.GetDatabase<FakeDb>("b").Cold!.Dispose();
+        host.GetDatabase<FakeDb>().Cold!.Dispose();
     }
 
     [Test]
     public async Task RhinoHost_Dispose_WithACollectorRunning_IsSafeToCallTwice() {
-        var hostResult = await RhinoHostBuilder.Create([$"--game.cold-path={dirA}"])
-            .AddDatabase<FakeDb, DefaultTransaction>("game", options => {
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
                 options.LoadAsync = _ => Task.CompletedTask;
                 options.ArchiveRetention = new ArchiveRetentionPolicy(TimeSpan.FromHours(4), TimeSpan.FromDays(30));
@@ -480,6 +429,26 @@ public class RhinoHostBuilderTests {
         var host = hostResult.Unwrap();
         Assert.DoesNotThrow(host.Dispose);
         Assert.DoesNotThrow(host.Dispose, "Dispose must be idempotent - a host may be torn down twice.");
-        host.GetDatabase<FakeDb>("game").Cold!.Dispose();
+        host.GetDatabase<FakeDb>().Cold!.Dispose();
+    }
+
+    // ---- no RhinoDB.Lib.Server reference = no network host, even though Run mode defaults http-enabled to true ----
+
+    [Test]
+    public async Task BuildAsync_InRunMode_WithoutRhinoDbLibServerReferenced_StartsNoNetworkHost() {
+        // This project (RhinoDB.Lib.Test) deliberately does not reference RhinoDB.Lib.Server, so its
+        // [ModuleInitializer] never runs and RhinoNetworkHostProvider.Factory stays null - proving
+        // "referencing the package is what turns the default server on," not Run mode alone.
+        var hostResult = await CreateBuilder(dirA)
+            .AddDatabase<FakeDb, DefaultTransaction>(options => {
+                options.CreateDb = cold => new FakeDb(cold);
+                options.LoadAsync = _ => Task.CompletedTask;
+            })
+            .BuildAsync();
+
+        Assert.That(hostResult.IsOk(), Is.True);
+        using var host = hostResult.Unwrap();
+        Assert.That(host.NetworkPort, Is.Null);
+        host.GetDatabase<FakeDb>().Cold!.Dispose();
     }
 }

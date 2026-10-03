@@ -1,6 +1,7 @@
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
 using RhinoDB.Lib.Hosting;
+using RhinoDB.Lib.Hosting.Test;
 using RhinoDB.Lib.Tables;
 using RhinoDB.SchemaContracts;
 
@@ -349,17 +350,18 @@ public class ArchiveRetentionTests {
             var off = ArchiveRetentionPolicy.FromConfig(new ArchiveRetentionConfig { Enabled = false, Interval = "00:00:00.040", KeepFor = "00:00:00.010" });
             var on = new ArchiveRetentionPolicy(TimeSpan.FromMilliseconds(40), TimeSpan.FromMilliseconds(10));
 
-            var builder = RhinoHostBuilder.Create([$"--game.cold-path={dir}"]);
+            RhinoHostConfigTestHelper.WriteConfig(dir, new HostConfig { ColdPath = dir });
+            var builder = RhinoHostBuilder.Create(dir);
             var runs = 0;
-            builder.OnRetentionRun += (_, _) => Interlocked.Increment(ref runs);
-            builder.AddDatabase<NoRetentionDb, DefaultTransaction>("game", options => {
+            builder.OnRetentionRun += _ => Interlocked.Increment(ref runs);
+            builder.AddDatabase<NoRetentionDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new NoRetentionDb(cold);
                 options.LoadAsync = _ => Task.CompletedTask;
                 options.ArchiveRetention = off;      // the disabled policy, from real config semantics
             });
 
             using var host = (await builder.BuildAsync()).Unwrap();
-            host.GetDatabase<NoRetentionDb>("game").Cold!.Dispose();
+            host.GetDatabase<NoRetentionDb>().Cold!.Dispose();
 
             Assert.That(host.ArchiveCollectorCount, Is.EqualTo(0), "a disabled policy builds no collector.");
             await Task.Delay(300);
@@ -370,16 +372,16 @@ public class ArchiveRetentionTests {
             // Control: the same wiring with retention ON does fire, so the assertion above is
             // about the disabled policy and not about the harness never firing.
             var controlRuns = 0;
-            var controlBuilder = RhinoHostBuilder.Create([$"--game.cold-path={dir}"]);
-            controlBuilder.OnRetentionRun += (_, _) => Interlocked.Increment(ref controlRuns);
-            controlBuilder.AddDatabase<NoRetentionDb, DefaultTransaction>("game", options => {
+            var controlBuilder = RhinoHostBuilder.Create(dir);
+            controlBuilder.OnRetentionRun += _ => Interlocked.Increment(ref controlRuns);
+            controlBuilder.AddDatabase<NoRetentionDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new NoRetentionDb(cold);
                 options.LoadAsync = _ => Task.CompletedTask;
                 options.ArchiveRetention = on;
             });
 
             using var controlHost = (await controlBuilder.BuildAsync()).Unwrap();
-            controlHost.GetDatabase<NoRetentionDb>("game").Cold!.Dispose();
+            controlHost.GetDatabase<NoRetentionDb>().Cold!.Dispose();
             await Task.Delay(300);
 
             Assert.That(Volatile.Read(ref controlRuns), Is.GreaterThan(0),

@@ -5,28 +5,27 @@ using RhinoDB.Lib.Execution;
 namespace RhinoDB.Lib.Hosting;
 
 public sealed class RhinoHostBuilder {
-    private readonly string[] args;
-    private readonly List<IDatabaseRegistration> registrations = [];
-    private readonly HashSet<string> names = [];
+    private readonly string configDirectory;
+    private IDatabaseRegistration? registration;
     private readonly Dictionary<Type, object> tableCompatAdapters = [];
-    private List<IDisposable>? collectors;
-    public event Action<string, ArchiveRetentionRunReport>? OnRetentionRun;
+    public event Action<ArchiveRetentionRunReport>? OnRetentionRun;
 
-    private RhinoHostBuilder(string[] args) {
-        this.args = args;
+    private RhinoHostBuilder(string configDirectory) {
+        this.configDirectory = configDirectory;
     }
 
-    static public RhinoHostBuilder Create(string[] args) => new RhinoHostBuilder(args);
+    static public RhinoHostBuilder Create(string? configDirectory = null) =>
+        new RhinoHostBuilder(configDirectory ?? AppContext.BaseDirectory);
 
-    public RhinoHostBuilder AddDatabase<TDb, TTx>(string name, Action<DatabaseOptions<TDb, TTx>> configure)
+    public RhinoHostBuilder AddDatabase<TDb, TTx>(Action<DatabaseOptions<TDb, TTx>> configure)
         where TDb : DbContext<TTx>
         where TTx : ITransaction {
-        if (!names.Add(name))
-            throw new ArgumentException($"A database named '{name}' is already registered.", nameof(name));
+        if (registration is not null)
+            throw new InvalidOperationException("AddDatabase was already called - a RhinoHostBuilder hosts exactly one database.");
 
         var options = new DatabaseOptions<TDb, TTx>();
         configure(options);
-        registrations.Add(new DatabaseRegistration<TDb, TTx>(name, options));
+        registration = new DatabaseRegistration<TDb, TTx>(options);
         return this;
     }
 
@@ -38,40 +37,60 @@ public sealed class RhinoHostBuilder {
     }
 
     public async Task<Result<RhinoHost>> BuildAsync() {
-        var databases = new Dictionary<string, object>();
+        if (registration is not { } reg)
+            return Result<RhinoHost>.Error(DbError.SystemFailure(
+                new InvalidOperationException("BuildAsync was called without AddDatabase ever being called.")));
 
-        foreach (var registration in registrations) {
-            var result = await registration.RunAsync(args);
-            if (result.IsError()) return result.Void();
+        var result = await reg.RunAsync(configDirectory);
+        if (result.IsError()) return result.Void();
+        var builtDb = result.Unwrap();
 
-            databases[registration.Name] = result.Unwrap();
-            var policy = registration.ArchiveRetentionOverride ?? registration.ConfiguredRetention();
-            if (policy is not null) {
-                var name = registration.Name;
-                collectors ??= [];
-                collectors.Add(registration.StartArchiveCollector(
-                    result.Unwrap(), policy, report => OnRetentionRun?.Invoke(name, report))!);
+        IDisposable? collector = null;
+        var policy = reg.ArchiveRetentionOverride ?? reg.ConfiguredRetention();
+        if (policy is not null)
+            collector = reg.StartArchiveCollector(builtDb, policy, report => OnRetentionRun?.Invoke(report));
+
+        var host = new RhinoHost(builtDb, tableCompatAdapters, collector);
+
+        TryLoadNetworkHostProvider();
+        if (reg.HttpEnabled && RhinoNetworkHostProvider.Factory is { } factory) {
+            var networkResult = await factory.StartAsync(host, reg.HttpPort, CancellationToken.None);
+            if (networkResult.IsError()) {
+                host.Dispose();
+                return networkResult.Void();
             }
+            host.AttachNetworkHost(networkResult.Unwrap());
         }
 
-        return new RhinoHost(databases, tableCompatAdapters, collectors ?? []);
+        return host;
+    }
+
+    static private void TryLoadNetworkHostProvider() {
+        if (RhinoNetworkHostProvider.Factory is not null) return;
+        try {
+            var assembly = System.Reflection.Assembly.Load("RhinoDB.Lib.Server");
+            System.Runtime.CompilerServices.RuntimeHelpers.RunModuleConstructor(assembly.ManifestModule.ModuleHandle);
+        } catch (FileNotFoundException) { /* not referenced - no network host */ }
     }
 
     private interface IDatabaseRegistration {
-        string Name { get; }
-        Task<Result<object>> RunAsync(string[] args);
+        Task<Result<object>> RunAsync(string configDirectory);
         ArchiveRetentionPolicy? ArchiveRetentionOverride { get; }
         ArchiveRetentionPolicy? ConfiguredRetention();
         IDisposable? StartArchiveCollector(object builtDbParam, ArchiveRetentionPolicy policy, Action<ArchiveRetentionRunReport> onRun);
+        bool HttpEnabled { get; }
+        int HttpPort { get; }
     }
 
-    private sealed class DatabaseRegistration<TDb, TTx>(string name, DatabaseOptions<TDb, TTx> options)
+    private sealed class DatabaseRegistration<TDb, TTx>(DatabaseOptions<TDb, TTx> options)
         : IDatabaseRegistration
         where TDb : DbContext<TTx>
         where TTx : ITransaction {
-        public string Name { get; } = name;
         private TDb? builtDb;
+        private RhinoHostOptions? parsedOptions;
         public ArchiveRetentionPolicy? ArchiveRetentionOverride { get; } = options.ArchiveRetention;
+        public bool HttpEnabled => parsedOptions?.HttpEnabled ?? false;
+        public int HttpPort => parsedOptions?.HttpPort ?? 0;
 
         public ArchiveRetentionPolicy? ConfiguredRetention() => builtDb?.ConfiguredArchiveRetention;
 
@@ -79,13 +98,14 @@ public sealed class RhinoHostBuilder {
             return new ArchiveRetentionCollector<TTx>((DbContext<TTx>)builtDbParam, policy, onRun);
         }
 
-        public async Task<Result<object>> RunAsync(string[] args) {
+        public async Task<Result<object>> RunAsync(string configDirectory) {
             if (options.CreateDb is not { } createDb)
                 return Result<object>.Error(MissingConfig(nameof(options.CreateDb), because: "every mode needs it"));
 
-            var parsedResult = RhinoHostOptions.Parse(args, Name);
+            var parsedResult = RhinoHostOptions.Load(configDirectory);
             if (parsedResult.IsError()) return parsedResult.Void();
             var parsed = parsedResult.Unwrap();
+            parsedOptions = parsed;
 
             switch (parsed.Mode) {
                 case RhinoRunMode.Run when options.LoadAsync is null:
@@ -110,12 +130,12 @@ public sealed class RhinoHostBuilder {
         }
 
         private DbError MissingConfig(string member, string because) =>
-            DbError.SystemFailure(new InvalidOperationException($"AddDatabase(\"{Name}\"): {member} was not configured - {because}."));
+            DbError.SystemFailure(new InvalidOperationException($"AddDatabase: {member} was not configured - {because}."));
 
         private DbError MissingPruneConfig() =>
             DbError.SystemFailure(
                 new InvalidOperationException(
-                    $"AddDatabase(\"{Name}\"): RhinoRunMode.WalPrune needs either --{Name}.wal-keep-generations (keep the last N generations) or --{Name}.wal-prune-older-than=<ISO-8601> (keep everything newer than a moment in time)."
+                    "AddDatabase: RhinoRunMode.WalPrune needs either Host.WalKeepGenerations (keep the last N generations) or Host.WalPruneOlderThan=<ISO-8601> (keep everything newer than a moment in time) set in rdbsettings.json."
                 )
             );
     }
@@ -212,37 +232,38 @@ public sealed class RhinoHostBuilder {
     }
 
 public sealed class RhinoHost : IDisposable {
-    private readonly IReadOnlyDictionary<string, object> databases;
+    private readonly object database;
     private readonly IReadOnlyDictionary<Type, object> tableCompatAdapters;
-    private readonly IReadOnlyList<IDisposable> collectors;
+    private readonly IDisposable? collector;
+    private IRhinoNetworkHost? networkHost;
     private bool disposed;
 
-    internal RhinoHost(
-        IReadOnlyDictionary<string, object> databases,
-        IReadOnlyDictionary<Type, object> tableCompatAdapters,
-        IReadOnlyList<IDisposable> collectors) {
-        this.databases = databases;
+    internal RhinoHost(object database, IReadOnlyDictionary<Type, object> tableCompatAdapters, IDisposable? collector) {
+        this.database = database;
         this.tableCompatAdapters = tableCompatAdapters;
-        this.collectors = collectors;
+        this.collector = collector;
     }
 
-    public TDb GetDatabase<TDb>(string name) where TDb : notnull =>
-        databases.TryGetValue(name, out var db)
-            ? (TDb)db
-            : throw new KeyNotFoundException($"No database registered under '{name}'.");
+    public TDb GetDatabase<TDb>() where TDb : notnull => (TDb)database;
 
     public TableCompatOptions<TRow>? GetTableCompatAdapter<TRow>() =>
         tableCompatAdapters.TryGetValue(typeof(TRow), out var options)
             ? (TableCompatOptions<TRow>)options
             : null;
 
-    public int ArchiveCollectorCount => collectors?.Count ?? 0;
+    public int ArchiveCollectorCount => collector is null ? 0 : 1;
+
+    public int? NetworkPort => networkHost?.Port;
+
+    internal void AttachNetworkHost(IRhinoNetworkHost host) => networkHost = host;
 
     public void Dispose() {
         if (disposed) return;
         disposed = true;
-        if (collectors is null) return;
-        foreach (var collector in collectors) {
+        if (networkHost is not null) {
+            try { networkHost.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* best-effort - shutdown must not throw */ }
+        }
+        if (collector is not null) {
             try { collector.Dispose(); } catch { /* best-effort - shutdown must not throw */ }
         }
     }

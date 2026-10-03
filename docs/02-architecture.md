@@ -992,10 +992,14 @@ encoding is more intricate to replicate correctly than plain MemoryPack's.
 
 ### Location-transparent transport
 
-IDC must not know or care whether a peer database lives in the same process, a
-different process on the same machine, or a different machine entirely — one
-`IIdcTransport` interface, three implementations, swappable without touching
-sender/receiver logic:
+**Revised 2026-10-04, superseding the in-process option below**: a process now
+hosts exactly one database (`RhinoHostBuilder.AddDatabase` may only be called
+once — see Hosting). Multiple databases never again share a CLR/process
+boundary, so there is no same-process peer for IDC to reach — every peer is
+necessarily a different process (same machine or a different one). IDC must
+not know or care which of those two it's talking to — one `IIdcTransport`
+interface, two implementations, swappable without touching sender/receiver
+logic:
 
 ```csharp
 public interface IIdcTransport {
@@ -1005,20 +1009,14 @@ public interface IIdcTransport {
 public readonly record struct ChangeEnvelope(ChangeKind Kind, byte[] Key, byte[]? Row, long Sequence);
 ```
 
-- `InProcessIdcTransport` — same process, a `Channel<T>` directly between two
-  `DbContext`s.
-- `LocalIpcIdcTransport` — same machine, separate process — named pipe or Unix
-  domain socket.
+- `LocalIpcIdcTransport` — same machine, separate process — named pipe, Unix
+  domain socket, or shared memory.
 - `NetworkIdcTransport` — different machine — TCP/QUIC/gRPC.
 
-Deferred, profile-gated optimization: `InProcessIdcTransport` *may* skip
-serialization entirely and hand the receiver an already-constructed value
-directly, since same-process is the one case where paying for bytes at all is
-a choice, not a requirement (a raw byte-level memcpy across independently
-declared types was considered and rejected — layout isn't guaranteed identical
-just because two types' fields look the same; a value-copy handoff is the
-safe version of the same idea). Not built until profiling shows serialization
-overhead actually matters in the in-process case.
+(The `InProcessIdcTransport`/`Channel<T>`-between-two-`DbContext`s design and
+its deferred same-process zero-serialization optimization, both sketched here
+before 2026-10-04, are dropped along with the one-process-many-databases model
+they depended on — not merely deprioritized.)
 
 ### Declarative surface
 

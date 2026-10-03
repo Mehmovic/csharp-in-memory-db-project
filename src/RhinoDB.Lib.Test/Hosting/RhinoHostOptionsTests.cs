@@ -1,66 +1,209 @@
 using System.Globalization;
 
 using RhinoDB.Core;
+using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Lib.Hosting.Test;
 
 public class RhinoHostOptionsTests {
-    [Test]
-    public void Parse_WithoutTheColdPathFlag_Fails() {
-        var result = RhinoHostOptions.Parse([], "game");
+    private string dir = "";
 
-        Assert.That(result.IsError(), Is.True);
+    [SetUp]
+    public void SetUp() {
+        dir = Path.Combine(Path.GetTempPath(), "rhinodb-rhinohostoptions-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+    }
+
+    [TearDown]
+    public void TearDown() {
+        try { Directory.Delete(dir, recursive: true); } catch { /* best-effort cleanup */ }
     }
 
     [Test]
-    public void Parse_WithOnlyColdPath_DefaultsToRunModeAndNoUpToLsn() {
-        var result = RhinoHostOptions.Parse(["--game.cold-path=/some/dir"], "game").Unwrap();
+    public void FromConfig_WithOnlyColdPathSet_DefaultsToRunModeAndNoUpToLsn() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir }).Unwrap();
 
-        Assert.That(result.ColdPath, Is.EqualTo("/some/dir"));
+        Assert.That(result.ColdPath, Is.EqualTo(dir));
         Assert.That(result.Mode, Is.EqualTo(RhinoRunMode.Run));
         Assert.That(result.ReplayUpToLsn, Is.Null);
     }
 
     [Test]
-    public void Parse_WithModeAndUpToLsn_ParsesBoth() {
-        var result = RhinoHostOptions.Parse(["--game.cold-path=/some/dir", "--game.mode=replay", "--game.replay-upto-lsn=42"], "game").Unwrap();
+    public void FromConfig_WithModeAndUpToLsn_ParsesBoth() {
+        var result = RhinoHostOptions.FromConfig(
+            new HostConfig { ColdPath = dir, Mode = "replay", ReplayUpToLsn = 42 }).Unwrap();
 
         Assert.That(result.Mode, Is.EqualTo(RhinoRunMode.Replay));
         Assert.That(result.ReplayUpToLsn, Is.EqualTo(42L));
     }
 
     [Test]
-    public void Parse_WithAnUnknownMode_Fails() {
-        var result = RhinoHostOptions.Parse(["--game.cold-path=/some/dir", "--game.mode=bogus"], "game");
+    public void FromConfig_WithAnUnknownMode_Fails() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir, Mode = "bogus" });
 
         Assert.That(result.IsError(), Is.True);
     }
 
     [Test]
-    public void Parse_WithANonIntegerUpToLsn_Fails() {
-        var result = RhinoHostOptions.Parse(["--game.cold-path=/some/dir", "--game.replay-upto-lsn=notanumber"], "game");
+    public void FromConfig_WithBothWalKeepGenerationsAndWalPruneOlderThan_Fails() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig {
+            ColdPath = dir, WalKeepGenerations = 3, WalPruneOlderThan = "2026-09-14T08:00:00Z",
+        });
+
+        Assert.That(result.IsError(), Is.True, "two retention policies at once is ambiguous.");
+    }
+
+    [Test]
+    public void FromConfig_WithAnUnparseableWalPruneOlderThan_Fails() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir, WalPruneOlderThan = "notatimestamp" });
 
         Assert.That(result.IsError(), Is.True);
     }
 
-    [Test]
-    public void Parse_IgnoresFlagsBelongingToAnotherPrefix() {
-        var result = RhinoHostOptions.Parse(
-            ["--other.cold-path=/wrong/dir", "--other.mode=replay", "--game.cold-path=/right/dir"], "game").Unwrap();
+    // ---- ColdPath: absent means compute the default, never require it ----
 
-        Assert.That(result.ColdPath, Is.EqualTo("/right/dir"));
-        Assert.That(result.Mode, Is.EqualTo(RhinoRunMode.Run), "A different prefix's --mode must not leak into this one's options.");
+    [Test]
+    public void DefaultColdPath_IsUnderAppDataRhinoDbNamedAfterTheEntryAssembly() {
+        var expectedRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RhinoDB");
+
+        var defaultPath = RhinoHostOptions.DefaultColdPath();
+
+        Assert.That(defaultPath, Does.StartWith(expectedRoot));
     }
 
     [Test]
-    public void Parse_IgnoresAFlagThatDoesNotMatchAnyKnownFlagName() {
-        // e.g. the hosting application's own unrelated flag, like --port.
-        var result = RhinoHostOptions.Parse(["--game.cold-path=/some/dir", "--port=8080"], "game").Unwrap();
+    public void FromConfig_WithNoColdPathConfigured_UsesTheComputedDefault() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig());
 
-        Assert.That(result.ColdPath, Is.EqualTo("/some/dir"));
+        // Real I/O against the real computed default - accept whatever this machine resolves to
+        // (CreateDirectory/write-probe must succeed under a normal developer/CI account), and clean
+        // up afterward so running this test doesn't leave litter under the real AppData folder.
+        try {
+            Assert.That(result.IsOk(), Is.True);
+            Assert.That(result.Unwrap().ColdPath, Is.EqualTo(RhinoHostOptions.DefaultColdPath()));
+        } finally {
+            try { Directory.Delete(RhinoHostOptions.DefaultColdPath(), recursive: true); } catch { /* best-effort cleanup */ }
+        }
     }
 
-    // ---- prune-older-than: an operator's wall clock is read as LOCAL, not assumed UTC ----
+    // ---- ColdPath accessibility: checked before running, fails loudly if unreachable ----
+
+    [Test]
+    public void EnsureColdPathAccessible_AWritableDirectory_Succeeds() {
+        Assert.That(RhinoHostOptions.EnsureColdPathAccessible(dir).IsOk(), Is.True);
+    }
+
+    [Test]
+    public void EnsureColdPathAccessible_CreatesTheDirectoryWhenMissing() {
+        var missing = Path.Combine(dir, "not-created-yet");
+
+        var result = RhinoHostOptions.EnsureColdPathAccessible(missing);
+
+        Assert.That(result.IsOk(), Is.True);
+        Assert.That(Directory.Exists(missing), Is.True);
+    }
+
+    [Test]
+    public void EnsureColdPathAccessible_APathUnderAnExistingFile_FailsWithAResultErrorNotAnUnhandledException() {
+        // A file where a directory is expected - CreateDirectory throws IOException for this, not
+        // UnauthorizedAccessException, so this also pins which exception types are actually caught.
+        var blockingFile = Path.Combine(dir, "blocking-file");
+        File.WriteAllText(blockingFile, "");
+        var unreachable = Path.Combine(blockingFile, "cold");
+
+        var result = RhinoHostOptions.EnsureColdPathAccessible(unreachable);
+
+        Assert.That(result.IsError(), Is.True);
+        Assert.That(result.GetError().Kind, Is.EqualTo(ErrorKind.SystemFailure));
+    }
+
+    // ---- http-port / http-enabled ----
+
+    [Test]
+    public void FromConfig_InRunMode_DefaultsHttpEnabledToTrueAndPortTo7777() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir }).Unwrap();
+
+        Assert.That(result.HttpEnabled, Is.True, "running the database starts the server by default.");
+        Assert.That(result.HttpPort, Is.EqualTo(7777));
+    }
+
+    [Test]
+    public void FromConfig_InReplayMode_DefaultsHttpEnabledToFalse() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir, Mode = "replay" }).Unwrap();
+
+        Assert.That(result.HttpEnabled, Is.False, "maintenance/tooling invocations are not \"running the database\".");
+    }
+
+    [Test]
+    public void FromConfig_InMigrateMode_DefaultsHttpEnabledToFalse() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir, Mode = "migrate" }).Unwrap();
+
+        Assert.That(result.HttpEnabled, Is.False);
+    }
+
+    [Test]
+    public void FromConfig_InWalPruneMode_DefaultsHttpEnabledToFalse() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir, Mode = "wal-prune" }).Unwrap();
+
+        Assert.That(result.HttpEnabled, Is.False);
+    }
+
+    [Test]
+    public void FromConfig_InWalMigrateMode_DefaultsHttpEnabledToFalse() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir, Mode = "wal-migrate" }).Unwrap();
+
+        Assert.That(result.HttpEnabled, Is.False);
+    }
+
+    [Test]
+    public void FromConfig_WithHttpEnabledExplicitlyTrue_OverridesAModeThatWouldOtherwiseDefaultToFalse() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir, Mode = "replay", HttpEnabled = true }).Unwrap();
+
+        Assert.That(result.HttpEnabled, Is.True, "an explicit override must win over the mode-based default.");
+    }
+
+    [Test]
+    public void FromConfig_WithHttpEnabledExplicitlyFalse_OverridesRunModesDefaultOfTrue() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir, HttpEnabled = false }).Unwrap();
+
+        Assert.That(result.HttpEnabled, Is.False);
+    }
+
+    [Test]
+    public void FromConfig_WithAnExplicitHttpPort_Parses() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir, HttpPort = 9000 }).Unwrap();
+
+        Assert.That(result.HttpPort, Is.EqualTo(9000));
+    }
+
+    // ---- Load: reads the real rdbsettings.json file ----
+
+    [Test]
+    public void Load_ReadsTheHostSectionFromARealFile() {
+        RhinoHostConfigTestHelper.WriteConfig(dir, new HostConfig { ColdPath = dir, HttpPort = 9001 });
+
+        var result = RhinoHostOptions.Load(dir).Unwrap();
+
+        Assert.That(result.ColdPath, Is.EqualTo(dir));
+        Assert.That(result.HttpPort, Is.EqualTo(9001));
+    }
+
+    [Test]
+    public void Load_WithNoFilePresent_WritesADefaultAndStillResolves() {
+        // GeneratorConfigLoader.LoadFull already auto-creates a default file when one is missing -
+        // RhinoHostOptions.Load must still resolve cleanly against that default (no ColdPath
+        // configured -> the computed default), not fail just because nothing was ever written.
+        try {
+            var result = RhinoHostOptions.Load(dir);
+
+            Assert.That(result.IsOk(), Is.True);
+            Assert.That(File.Exists(Path.Combine(dir, GeneratorConfigLoader.ConfigFileName)), Is.True);
+        } finally {
+            try { Directory.Delete(RhinoHostOptions.DefaultColdPath(), recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    // ---- ResolveUtcTicks: unrelated to the Host section, still used directly by RhinoDB.Tools.Wal ----
 
     [Test]
     public void ResolveUtcTicks_AnUnqualifiedTimestamp_IsReadAsLocalTimeNotAsUtc() {
@@ -120,12 +263,12 @@ public class RhinoHostOptionsTests {
     }
 
     [Test]
-    public void Parse_PruneOlderThanWithoutAnOffset_StoresTheLocallyResolvedUtcTicks() {
+    public void FromConfig_PruneOlderThanWithoutAnOffset_StoresTheLocallyResolvedUtcTicks() {
         var wallClock = new DateTime(2026, 9, 14, 8, 0, 0, DateTimeKind.Unspecified);
         var expected = new DateTimeOffset(wallClock, TimeZoneInfo.Local.GetUtcOffset(wallClock)).UtcTicks;
         var text = wallClock.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
 
-        var parsed = RhinoHostOptions.Parse(["--game.cold-path=db", $"--game.wal-prune-older-than={text}"], "game").Unwrap();
+        var parsed = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir, WalPruneOlderThan = text }).Unwrap();
 
         Assert.That(parsed.WalPruneOlderThanUtcTicks, Is.EqualTo(expected));
     }
