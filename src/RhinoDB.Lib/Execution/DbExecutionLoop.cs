@@ -12,6 +12,7 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
 
     private readonly DbContext<TTx> context;
     private Task? runLoopTask;
+    private volatile bool draining;
 
     public DbExecutionLoop(DbContext<TTx> context, bool startPaused = false) {
         this.context = context;
@@ -23,19 +24,34 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
         runLoopTask = Task.Factory.StartNew(RunLoop, TaskCreationOptions.LongRunning);
     }
 
-    public ValueTask<Result> Enqueue(Func<DbContext<TTx>, TTx, Result> operation, PropagationMode mode) =>
-        PooledOperation<TTx, Result, Func<DbContext<TTx>, TTx, Result>>.Enqueue(
+    public void BeginDraining() {
+        draining = true;
+        channel.Writer.TryComplete();
+    }
+
+    public Task DrainAsync() => runLoopTask ?? Task.CompletedTask;
+
+    public ValueTask<Result> Enqueue(Func<DbContext<TTx>, TTx, Result> operation, PropagationMode mode) {
+        if (draining) return ValueTask.FromResult(Result.Error(DbError.DatabaseClosing()));
+        return PooledOperation<TTx, Result, Func<DbContext<TTx>, TTx, Result>>.Enqueue(
             channel, context, static (ctx, tx, op) => op(ctx, tx), operation, mode);
+    }
 
-    public ValueTask<Result<T>> Enqueue<T>(Func<DbContext<TTx>, TTx, Result<T>> operation, PropagationMode mode) =>
-        PooledOperation<TTx, Result<T>, Func<DbContext<TTx>, TTx, Result<T>>>.Enqueue(
+    public ValueTask<Result<T>> Enqueue<T>(Func<DbContext<TTx>, TTx, Result<T>> operation, PropagationMode mode) {
+        if (draining) return ValueTask.FromResult(Result<T>.Error(DbError.DatabaseClosing()));
+        return PooledOperation<TTx, Result<T>, Func<DbContext<TTx>, TTx, Result<T>>>.Enqueue(
             channel, context, static (ctx, tx, op) => op(ctx, tx), operation, mode);
+    }
 
-    public ValueTask<Result> Enqueue<TArgs>(Func<DbContext<TTx>, TTx, TArgs, Result> operation, TArgs args, PropagationMode mode) =>
-        PooledOperation<TTx, Result, TArgs>.Enqueue(channel, context, operation, args, mode);
+    public ValueTask<Result> Enqueue<TArgs>(Func<DbContext<TTx>, TTx, TArgs, Result> operation, TArgs args, PropagationMode mode) {
+        if (draining) return ValueTask.FromResult(Result.Error(DbError.DatabaseClosing()));
+        return PooledOperation<TTx, Result, TArgs>.Enqueue(channel, context, operation, args, mode);
+    }
 
-    public ValueTask<Result<T>> Enqueue<T, TArgs>(Func<DbContext<TTx>, TTx, TArgs, Result<T>> operation, TArgs args, PropagationMode mode) =>
-        PooledOperation<TTx, Result<T>, TArgs>.Enqueue(channel, context, operation, args, mode);
+    public ValueTask<Result<T>> Enqueue<T, TArgs>(Func<DbContext<TTx>, TTx, TArgs, Result<T>> operation, TArgs args, PropagationMode mode) {
+        if (draining) return ValueTask.FromResult(Result<T>.Error(DbError.DatabaseClosing()));
+        return PooledOperation<TTx, Result<T>, TArgs>.Enqueue(channel, context, operation, args, mode);
+    }
 
     private async Task RunLoop() {
         await foreach (var item in channel.Reader.ReadAllAsync()) {

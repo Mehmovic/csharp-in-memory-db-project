@@ -1063,6 +1063,30 @@ direct HTTP/WebSocket host (mature libraries used as-is, not reinvented) rather
 than a full framework, to avoid paying for controller/DI/middleware overhead that
 this project has no use for.
 
+### Root/Child database hosting (added 2026-10-04)
+
+A process still hosts exactly one **Root** database (`AddDatabase`, unchanged — see
+Location-transparent transport above). The Root may additionally register and
+dynamically manage **Child** databases via `RhinoHostBuilder.AddChildDatabase
+<TChildDb,TTx,TKey>(...)` — e.g. one child per active game session, created when a
+match starts and destroyed (data and all) when it ends. This is **ownership, not
+peer messaging** — children are created, addressed, and destroyed entirely by
+their Root, never independently deployed or addressed by a peer, so it does not
+reopen or relate to the one-process-one-database IDC decision above. Closer to
+Orleans' silo/grain model than to IDC.
+
+A child is architecturally nothing more than another `DbContext`-derived
+instance with its own independent execution loop and `ColdStore`, created
+on-demand (`RhinoHost.GetOrActivateChildAsync<TChildDb,TTx,TKey>(key)` —
+Orleans-style first-touch activation, never eager at Root startup) and keyed by
+a caller-chosen `TKey`. Disposal (`RhinoHost.DisposeChildAsync<...>(key, ct)`)
+drains in-flight work, closes the `ColdStore`, then deletes the child's
+directory tree — never concurrently. Root-to-child forwarding is a plain
+in-process call (the caller gets the activated `TChildDb` back and calls its own
+`Run`/`RunConfirmed` directly) — never routed through `IIdcTransport`, which is
+for peer-to-peer IDC between symmetric, independently-deployed databases, a
+different relationship entirely.
+
 ## Deployment
 
 RhinoDB is a library you embed, not a service you connect to — you build and run

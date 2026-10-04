@@ -19,6 +19,7 @@ public sealed class RhinoHostBuilder {
     private readonly Dictionary<Type, object> tableCompatAdapters = [];
     private readonly Dictionary<uint, RpcCommandHandler> rpcCommands = [];
     private readonly Dictionary<(string Method, string Route), RestCommandHandler> restCommands = [];
+    private readonly Dictionary<Type, IChildDatabaseRegistry> childRegistrations = [];
     public event Action<ArchiveRetentionRunReport>? OnRetentionRun;
 
     private RhinoHostBuilder(string configDirectory) {
@@ -57,6 +58,17 @@ public sealed class RhinoHostBuilder {
             : this;
     }
 
+    public RhinoHostBuilder AddChildDatabase<TChildDb, TTx, TKey>(Action<ChildDatabaseOptions<TChildDb, TTx, TKey>> configure)
+        where TChildDb : DbContext<TTx>
+        where TTx : ITransaction
+        where TKey : notnull {
+        var options = new ChildDatabaseOptions<TChildDb, TTx, TKey>();
+        configure(options);
+        return !childRegistrations.TryAdd(typeof(TChildDb), new ChildDatabaseRegistry<TChildDb, TTx, TKey>(options))
+            ? throw new ArgumentException($"AddChildDatabase<{typeof(TChildDb).Name}> was already called - each child database type can only be registered once.", nameof(TChildDb))
+            : this;
+    }
+
     public async Task<Result<RhinoHost>> BuildAsync() {
         if (registration is not { } reg)
             return Result<RhinoHost>.Error(DbError.SystemFailure(
@@ -66,12 +78,15 @@ public sealed class RhinoHostBuilder {
         if (result.IsError()) return result.Void();
         var builtDb = result.Unwrap();
 
+        foreach (var childRegistration in childRegistrations.Values)
+            childRegistration.AttachRootColdPath(reg.ColdPath);
+
         IDisposable? collector = null;
         var policy = reg.ArchiveRetentionOverride ?? reg.ConfiguredRetention();
         if (policy is not null)
             collector = reg.StartArchiveCollector(builtDb, policy, report => OnRetentionRun?.Invoke(report));
 
-        var host = new RhinoHost(builtDb, tableCompatAdapters, rpcCommands, restCommands, collector);
+        var host = new RhinoHost(builtDb, tableCompatAdapters, rpcCommands, restCommands, childRegistrations, collector);
 
         TryLoadNetworkHostProvider();
         if (reg.HttpEnabled && RhinoNetworkHostProvider.Factory is { } factory) {
@@ -101,6 +116,7 @@ public sealed class RhinoHostBuilder {
         IDisposable? StartArchiveCollector(object builtDbParam, ArchiveRetentionPolicy policy, Action<ArchiveRetentionRunReport> onRun);
         bool HttpEnabled { get; }
         int HttpPort { get; }
+        string ColdPath { get; }
     }
 
     private sealed class DatabaseRegistration<TDb, TTx>(DatabaseOptions<TDb, TTx> options)
@@ -112,6 +128,7 @@ public sealed class RhinoHostBuilder {
         public ArchiveRetentionPolicy? ArchiveRetentionOverride { get; } = options.ArchiveRetention;
         public bool HttpEnabled => parsedOptions?.HttpEnabled ?? false;
         public int HttpPort => parsedOptions?.HttpPort ?? 0;
+        public string ColdPath => parsedOptions?.ColdPath ?? throw new InvalidOperationException("ColdPath was read before RunAsync resolved it.");
 
         public ArchiveRetentionPolicy? ConfiguredRetention() => builtDb?.ConfiguredArchiveRetention;
 
@@ -266,6 +283,7 @@ public sealed class RhinoHost : IDisposable {
     private readonly IReadOnlyDictionary<Type, object> tableCompatAdapters;
     private readonly IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands;
     private readonly IReadOnlyDictionary<(string Method, string Route), RestCommandHandler> restCommands;
+    private readonly IReadOnlyDictionary<Type, IChildDatabaseRegistry> childRegistrations;
     private readonly IDisposable? collector;
     private IRhinoNetworkHost? networkHost;
     private bool disposed;
@@ -273,11 +291,13 @@ public sealed class RhinoHost : IDisposable {
     internal RhinoHost(
         object database, IReadOnlyDictionary<Type, object> tableCompatAdapters,
         IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands,
-        IReadOnlyDictionary<(string Method, string Route), RestCommandHandler> restCommands, IDisposable? collector) {
+        IReadOnlyDictionary<(string Method, string Route), RestCommandHandler> restCommands,
+        IReadOnlyDictionary<Type, IChildDatabaseRegistry> childRegistrations, IDisposable? collector) {
         this.database = database;
         this.tableCompatAdapters = tableCompatAdapters;
         this.rpcCommands = rpcCommands;
         this.restCommands = restCommands;
+        this.childRegistrations = childRegistrations;
         this.collector = collector;
     }
 
@@ -301,6 +321,22 @@ public sealed class RhinoHost : IDisposable {
         return await handler(this, request, ct);
     }
 
+    public Task<Result<TChildDb>> GetOrActivateChildAsync<TChildDb, TTx, TKey>(TKey key, CancellationToken ct = default)
+        where TChildDb : DbContext<TTx> where TTx : ITransaction where TKey : notnull {
+        if (!childRegistrations.TryGetValue(typeof(TChildDb), out var registry))
+            return Task.FromResult(Result<TChildDb>.Error(DbError.SystemFailure(new InvalidOperationException(
+                $"No child database of type '{typeof(TChildDb).Name}' was registered via AddChildDatabase."))));
+        return ((ChildDatabaseRegistry<TChildDb, TTx, TKey>)registry).GetOrActivateAsync(key, ct);
+    }
+
+    public Task<Result> DisposeChildAsync<TChildDb, TTx, TKey>(TKey key, CancellationToken drainCt = default)
+        where TChildDb : DbContext<TTx> where TTx : ITransaction where TKey : notnull {
+        if (!childRegistrations.TryGetValue(typeof(TChildDb), out var registry))
+            return Task.FromResult(Result.Error(DbError.SystemFailure(new InvalidOperationException(
+                $"No child database of type '{typeof(TChildDb).Name}' was registered via AddChildDatabase."))));
+        return ((ChildDatabaseRegistry<TChildDb, TTx, TKey>)registry).DisposeAsync(key, drainCt);
+    }
+
     public Task<Result> DispatchClientConnectAsync(Session session) => ((IRhinoClientLifecycle)database).OnClientConnectAsync(session);
 
     public Task<Result> DispatchClientDisconnectAsync(Session session) => ((IRhinoClientLifecycle)database).OnClientDisconnectAsync(session);
@@ -317,6 +353,7 @@ public sealed class RhinoHost : IDisposable {
         if (networkHost is not null) {
             try { networkHost.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* best-effort - shutdown must not throw */ }
         }
+        foreach (var registry in childRegistrations.Values) registry.CloseAllBestEffort();
         if (collector is not null) {
             try { collector.Dispose(); } catch { /* best-effort - shutdown must not throw */ }
         }
