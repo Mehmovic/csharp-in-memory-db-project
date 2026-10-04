@@ -65,25 +65,47 @@ The lowest common denominator of WebSocket / WebTransport / RUDP:
   per-priority, not buffer forever.
 - **Identity crosses the seam; HTTP mechanics don't.** Every transport must
   establish "this session belongs to principal X" — HTTP does it via
-  cookie/bearer, UDP later via a handshake token. So `Session.PrincipalId` is
-  part of the abstraction; *how* it was established is transport-local.
+  cookie/bearer, UDP later via a handshake token. So `Session.Identity.Principal`
+  is part of the abstraction; *how* it was established is transport-local.
 
-Sketch (deliberately rough — shape only, not a frozen API):
+Sketch (deliberately rough — shape only, not a frozen API) — **this specific
+shape is now real code, as of the `Identity`/`Session` split settled
+2026-10-04**: see `src/RhinoDB.Lib/Realtime/Session.cs` and
+`src/RhinoDB.Lib.Server/Realtime/{IRealtimeTransport,WsTransport}.cs`.
+`PrincipalId` pulled out of `Session` into its own `Identity` type
+(`Session.Id` renamed `Session.ConnectionId`, backed by a `ConnectionId`
+struct, not `SessionId` — "session" was ambiguous between "the connection"
+and "who's on it") specifically because one `Identity`/`Principal` can
+legitimately be live behind many concurrent `Session`s (multiple devices/tabs,
+each its own connection) — `Identity` never owns a connection back-reference,
+only the reverse:
 
 ```csharp
 public interface IRealtimeTransport {
     event SessionAccepted? OnSessionAccepted;          // transport raises after auth completes
-    ValueTask SendAsync(SessionId session, Frame frame,
+    ValueTask SendAsync(ConnectionId connectionId, Frame frame,
         Delivery delivery, CancellationToken ct);
 }
 
 public readonly record struct Frame(ushort Type, ReadOnlyMemory<byte> Payload);
 
-public sealed class Session {
-    public SessionId Id { get; }
+// Who is calling - independent of connection count.
+public sealed class Identity {
     public PrincipalId Principal { get; }   // crosses the seam; establishment is transport-local
 }
+
+// One live connection - always implies an Identity, never the reverse.
+public sealed class Session {
+    public ConnectionId ConnectionId { get; }
+    public Identity Identity { get; }
+}
 ```
+
+This same `Identity`/`Session` pair is also what backs `RhinoCtx` (the
+unified context `[Procedure]`s and lifecycle hooks both take) — `RhinoCtx.
+Identity` is always present, `RhinoCtx.Session` is `null` whenever there's no
+live connection behind the call (`OnInit`/`OnStart`, a future stateless-HTTP-
+dispatched `[Procedure]`).
 
 ### Identity is shared with REST — one principal, two hosts
 

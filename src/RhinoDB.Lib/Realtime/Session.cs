@@ -1,8 +1,8 @@
 namespace RhinoDB.Lib.Realtime;
 
-public readonly record struct SessionId(Guid Value) {
-    static public SessionId NewId() => new SessionId(Guid.NewGuid());
-    static public readonly SessionId System = new SessionId(Guid.Empty);
+public readonly record struct ConnectionId(Guid Value) {
+    static public ConnectionId NewId() => new ConnectionId(Guid.NewGuid());
+    static public readonly ConnectionId System = new ConnectionId(Guid.Empty);
 }
 
 public readonly record struct PrincipalId(string Value) {
@@ -10,8 +10,14 @@ public readonly record struct PrincipalId(string Value) {
     static public readonly PrincipalId System = new PrincipalId("system");
 }
 
-public sealed class Session(SessionId id, PrincipalId principal) {
-    public SessionId Id { get; } = id;
+public sealed class Identity(PrincipalId principal) {
     public PrincipalId Principal { get; } = principal;
-    static public readonly Session System = new Session(SessionId.System, PrincipalId.System);
+    static public readonly Identity System = new Identity(PrincipalId.System);
+    static public readonly Identity Anonymous = new Identity(PrincipalId.Anonymous);
+}
+
+public sealed class Session(ConnectionId connectionId, Identity identity) {
+    public ConnectionId ConnectionId { get; } = connectionId;
+    public Identity Identity { get; } = identity;
+    static public readonly Session System = new Session(ConnectionId.System, Identity.System);
 }

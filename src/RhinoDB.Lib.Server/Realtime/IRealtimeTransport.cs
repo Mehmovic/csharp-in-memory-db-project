@@ -6,5 +6,5 @@ public delegate void SessionAccepted(Session session);
 
 public interface IRealtimeTransport {
     event SessionAccepted? OnSessionAccepted;
-    ValueTask SendAsync(SessionId session, Frame frame, Delivery delivery, CancellationToken ct);
+    ValueTask SendAsync(ConnectionId connectionId, Frame frame, Delivery delivery, CancellationToken ct);
 }

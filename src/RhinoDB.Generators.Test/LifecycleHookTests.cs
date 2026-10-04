@@ -1,16 +1,20 @@
 using System.Reflection;
 
 using RhinoDB.Core;
+using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Realtime;
 
 namespace RhinoDB.Generators.Test;
 
 // [OnInit]/[OnStart]/[OnClientConnect]/[OnClientDisconnect] are discovered project-wide (like
-// [GenerateDbError]), never required to be nested inside the [Database] class they target -
-// RhinoContext<TDb>'s own generic argument says which database a hook is for. All four are
-// protected internal overrides on DbContext, so tests invoke them via reflection (BindingFlags.
-// NonPublic), matching this harness's established "call the real generated method, don't
-// string-compare the generated source" convention.
+// [Table]/[ChildDatabase<TRoot,TKey>]), never required to be nested inside the [Database] class
+// they target. RhinoCtx is non-generic, so which database a hook is for comes from the
+// attribute form used, not from the method's own parameter type: the omitted, non-generic form
+// ([OnInit]) broadcasts to every declared Root [Database] (never to a Child - same rule [Table]'s
+// own omitted form follows); the generic form ([OnInit<TDb>]) pins it to one explicit database,
+// Root or Child. All four are protected internal overrides on DbContext, so tests invoke them via
+// reflection (BindingFlags.NonPublic), matching this harness's established "call the real generated
+// method, don't string-compare the generated source" convention.
 public class LifecycleHookTests {
     static private Task<Result> InvokeHook(object db, string methodName, object?[]? args = null) {
         var method = db.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance)!;
@@ -18,7 +22,7 @@ public class LifecycleHookTests {
     }
 
     [Test]
-    public async Task OnStart_DeclaredAnywhereInTheCompilation_IsCalledOnTheRightDatabase() {
+    public async Task OmittedOnStart_WithOneDeclaredDatabase_BroadcastsToIt() {
         const string source = """
             using RhinoDB.Core;
             using System.Threading.Tasks;
@@ -32,7 +36,7 @@ public class LifecycleHookTests {
 
             public static class SomewhereElseEntirely {
                 [OnStart]
-                public static Task<Result> Start(RhinoContext<GameDb> ctx) {
+                public static Task<Result> Start(RhinoCtx ctx) {
                     GameDb.StartWasCalled = true;
                     return Task.FromResult(Result.Ok());
                 }
@@ -53,7 +57,7 @@ public class LifecycleHookTests {
     }
 
     [Test]
-    public async Task OnInit_DeclaredAnywhereInTheCompilation_IsCalledOnTheRightDatabase() {
+    public async Task OmittedOnInit_WithOneDeclaredDatabase_BroadcastsToIt() {
         const string source = """
             using RhinoDB.Core;
             using System.Threading.Tasks;
@@ -67,7 +71,7 @@ public class LifecycleHookTests {
 
             public static class Seed {
                 [OnInit]
-                public static Task<Result> Init(RhinoContext<GameDb> ctx) => Task.FromResult(Result.Ok());
+                public static Task<Result> Init(RhinoCtx ctx) => Task.FromResult(Result.Ok());
             }
             """;
 
@@ -77,6 +81,26 @@ public class LifecycleHookTests {
         var result = await InvokeHook(db, "OnInitAsync");
 
         Assert.That(result.IsOk(), Is.True);
+    }
+
+    [Test]
+    public void OmittedOnInit_WithNoDatabaseDeclared_ReportsRHINO038() {
+        const string source = """
+            using RhinoDB.Core;
+            using System.Threading.Tasks;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            public static class Seed {
+                [OnInit]
+                public static Task<Result> Init(RhinoCtx ctx) => Task.FromResult(Result.Ok());
+            }
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO038"));
     }
 
     [Test]
@@ -113,8 +137,8 @@ public class LifecycleHookTests {
             public partial class GameDb : DbContext<GameDbTransaction> { }
 
             public class NotStatic {
-                [OnStart]
-                public Task<Result> Start(RhinoContext<GameDb> ctx) => Task.FromResult(Result.Ok());
+                [OnStart<GameDb>]
+                public Task<Result> Start(RhinoCtx ctx) => Task.FromResult(Result.Ok());
             }
             """;
 
@@ -134,8 +158,8 @@ public class LifecycleHookTests {
             public partial class GameDb : DbContext<GameDbTransaction> { }
 
             public static class Seed {
-                [OnInit]
-                public static void Init(RhinoContext<GameDb> ctx) { }
+                [OnInit<GameDb>]
+                public static void Init(RhinoCtx ctx) { }
             }
             """;
 
@@ -157,13 +181,13 @@ public class LifecycleHookTests {
             public partial class GameDb : DbContext<GameDbTransaction> { }
 
             public static class HooksA {
-                [OnStart]
-                public static Task<Result> StartA(RhinoContext<GameDb> ctx) => Task.FromResult(Result.Ok());
+                [OnStart<GameDb>]
+                public static Task<Result> StartA(RhinoCtx ctx) => Task.FromResult(Result.Ok());
             }
 
             public static class HooksB {
-                [OnStart]
-                public static Task<Result> StartB(RhinoContext<GameDb> ctx) => Task.FromResult(Result.Ok());
+                [OnStart<GameDb>]
+                public static Task<Result> StartB(RhinoCtx ctx) => Task.FromResult(Result.Ok());
             }
             """;
 
@@ -172,7 +196,7 @@ public class LifecycleHookTests {
     }
 
     [Test]
-    public async Task OnInitAndOnStart_OnDifferentDatabases_EachOnlyAffectsItsOwnTarget() {
+    public async Task ExplicitOnStart_OnDifferentDatabases_EachOnlyAffectsItsOwnTarget() {
         const string source = """
             using RhinoDB.Core;
             using System.Threading.Tasks;
@@ -188,8 +212,8 @@ public class LifecycleHookTests {
             public partial class SecondDb : DbContext<SecondDbTransaction> { }
 
             public static class Hooks {
-                [OnStart]
-                public static Task<Result> StartFirst(RhinoContext<FirstDb> ctx) {
+                [OnStart<FirstDb>]
+                public static Task<Result> StartFirst(RhinoCtx ctx) {
                     FirstDb.Started = true;
                     return Task.FromResult(Result.Ok());
                 }
@@ -209,6 +233,42 @@ public class LifecycleHookTests {
     }
 
     [Test]
+    public void ExplicitOnInit_TargetingAChildDatabase_ReportsRHINO039() {
+        // Hooks belong to the Root only - a Child database is purely for runtime creation, detached
+        // from hooks/procedures/transformers alike. [OnInit<ChildDb>] must be a compile error, not
+        // silently wired, no matter how plausible the Child looks as a target.
+        const string source = """
+            using MemoryPack;
+            using MessagePack;
+            using RhinoDB.Core;
+            using System.Threading.Tasks;
+            using RhinoDB.Core.Tables;
+            using RhinoDB.Lib.Execution;
+
+            namespace TestNs;
+
+            [Database]
+            public partial class RootDb : DbContext<RootDbTransaction> { }
+
+            [ChildDatabase<RootDb, string>]
+            public partial class ChildDb : DbContext<ChildDbTransaction> { }
+
+            [Table<ChildDb>(TableKind.Persistent)]
+            [MemoryPackable]
+            [MessagePackObject]
+            public readonly partial record struct SessionRow([PrimaryKey] [property: Key(0)] int Id);
+
+            public static class Hooks {
+                [OnInit<ChildDb>]
+                public static Task<Result> Init(RhinoCtx ctx) => Task.FromResult(Result.Ok());
+            }
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
+        Assert.That(ex!.Message, Does.Contain("RHINO039"));
+    }
+
+    [Test]
     public async Task OnClientConnect_DeclaredAnywhereInTheCompilation_ReceivesTheSession() {
         const string source = """
             using RhinoDB.Core;
@@ -224,8 +284,8 @@ public class LifecycleHookTests {
 
             public static class ConnectionHooks {
                 [OnClientConnect]
-                public static Task<Result> Connect(RhinoContext<GameDb> ctx) {
-                    GameDb.LastConnectedPrincipal = ctx.Session.Principal;
+                public static Task<Result> Connect(RhinoCtx ctx) {
+                    GameDb.LastConnectedPrincipal = ctx.Identity.Principal;
                     return Task.FromResult(Result.Ok());
                 }
             }
@@ -235,7 +295,7 @@ public class LifecycleHookTests {
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var db = Activator.CreateInstance(asm.GetType("TestNs.GameDb")!)!;
-        var session = new Session(SessionId.NewId(), new PrincipalId("alice"));
+        var session = new Session(ConnectionId.NewId(), new Identity(new PrincipalId("alice")));
 
         var result = await InvokeHook(db, "OnClientConnectAsync", [session]);
 
@@ -259,7 +319,7 @@ public class LifecycleHookTests {
 
             public static class ConnectionHooks {
                 [OnClientDisconnect]
-                public static Task<Result> Disconnect(RhinoContext<GameDb> ctx) {
+                public static Task<Result> Disconnect(RhinoCtx ctx) {
                     GameDb.DisconnectWasCalled = true;
                     return Task.FromResult(Result.Ok());
                 }
@@ -270,7 +330,7 @@ public class LifecycleHookTests {
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var db = Activator.CreateInstance(asm.GetType("TestNs.GameDb")!)!;
-        var session = new Session(SessionId.NewId(), PrincipalId.Anonymous);
+        var session = new Session(ConnectionId.NewId(), Identity.Anonymous);
 
         var result = await InvokeHook(db, "OnClientDisconnectAsync", [session]);
 
@@ -292,7 +352,7 @@ public class LifecycleHookTests {
 
         var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
         var db = Activator.CreateInstance(asm.GetType("TestNs.GameDb")!)!;
-        var session = new Session(SessionId.NewId(), PrincipalId.Anonymous);
+        var session = new Session(ConnectionId.NewId(), Identity.Anonymous);
 
         var result = await InvokeHook(db, "OnClientConnectAsync", [session]);
 
@@ -313,8 +373,8 @@ public class LifecycleHookTests {
             public partial class GameDb : DbContext<GameDbTransaction> { }
 
             public class NotStatic {
-                [OnClientConnect]
-                public Task<Result> Connect(RhinoContext<GameDb> ctx) => Task.FromResult(Result.Ok());
+                [OnClientConnect<GameDb>]
+                public Task<Result> Connect(RhinoCtx ctx) => Task.FromResult(Result.Ok());
             }
             """;
 
@@ -334,8 +394,8 @@ public class LifecycleHookTests {
             public partial class GameDb : DbContext<GameDbTransaction> { }
 
             public static class Hooks {
-                [OnClientDisconnect]
-                public static void Disconnect(RhinoContext<GameDb> ctx) { }
+                [OnClientDisconnect<GameDb>]
+                public static void Disconnect(RhinoCtx ctx) { }
             }
             """;
 
@@ -357,13 +417,13 @@ public class LifecycleHookTests {
             public partial class GameDb : DbContext<GameDbTransaction> { }
 
             public static class HooksA {
-                [OnClientConnect]
-                public static Task<Result> ConnectA(RhinoContext<GameDb> ctx) => Task.FromResult(Result.Ok());
+                [OnClientConnect<GameDb>]
+                public static Task<Result> ConnectA(RhinoCtx ctx) => Task.FromResult(Result.Ok());
             }
 
             public static class HooksB {
-                [OnClientConnect]
-                public static Task<Result> ConnectB(RhinoContext<GameDb> ctx) => Task.FromResult(Result.Ok());
+                [OnClientConnect<GameDb>]
+                public static Task<Result> ConnectB(RhinoCtx ctx) => Task.FromResult(Result.Ok());
             }
             """;
 

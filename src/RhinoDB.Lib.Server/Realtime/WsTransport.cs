@@ -9,13 +9,13 @@ using RhinoDB.Lib.Realtime;
 namespace RhinoDB.Lib.Server.Realtime;
 
 public sealed class WsTransport(RhinoHost host) : IRealtimeTransport {
-    private readonly ConcurrentDictionary<SessionId, WebSocket> connections = new ConcurrentDictionary<SessionId, WebSocket>();
+    private readonly ConcurrentDictionary<ConnectionId, WebSocket> connections = new ConcurrentDictionary<ConnectionId, WebSocket>();
 
     public event SessionAccepted? OnSessionAccepted;
 
     public async Task AcceptConnectionAsync(WebSocket socket, CancellationToken ct) {
         // No real auth exists yet - every connection is anonymous (Part G, deliberately out of scope).
-        var session = new Session(SessionId.NewId(), PrincipalId.Anonymous);
+        var session = new Session(ConnectionId.NewId(), Identity.Anonymous);
 
         var connectResult = await host.DispatchClientConnectAsync(session);
         if (connectResult.IsError()) {
@@ -26,13 +26,13 @@ public sealed class WsTransport(RhinoHost host) : IRealtimeTransport {
             return;
         }
 
-        connections[session.Id] = socket;
+        connections[session.ConnectionId] = socket;
         OnSessionAccepted?.Invoke(session);
 
         try {
             await ReadLoopAsync(session, socket, ct);
         } finally {
-            connections.TryRemove(session.Id, out _);
+            connections.TryRemove(session.ConnectionId, out _);
             await host.DispatchClientDisconnectAsync(session);
         }
     }
@@ -64,15 +64,15 @@ public sealed class WsTransport(RhinoHost host) : IRealtimeTransport {
                 ? (ErrorKind.None, dispatchResult.Unwrap())
                 : (dispatchResult.GetError().Kind, ReadOnlyMemory<byte>.Empty);
             var resultPayload = RpcFrameCodec.EncodeResult(request.RequestId, kind, body);
-            await SendAsync(session.Id, new Frame(FrameType.RpcResult, resultPayload), Delivery.ReliableOrdered, ct);
+            await SendAsync(session.ConnectionId, new Frame(FrameType.RpcResult, resultPayload), Delivery.ReliableOrdered, ct);
             return;
         }
 
-        await SendAsync(session.Id, new Frame(FrameType.Ack, frame.Payload), Delivery.ReliableOrdered, ct);
+        await SendAsync(session.ConnectionId, new Frame(FrameType.Ack, frame.Payload), Delivery.ReliableOrdered, ct);
     }
 
-    public async ValueTask SendAsync(SessionId session, Frame frame, Delivery delivery, CancellationToken ct) {
-        if (!connections.TryGetValue(session, out var socket) || socket.State != WebSocketState.Open) return;
+    public async ValueTask SendAsync(ConnectionId connectionId, Frame frame, Delivery delivery, CancellationToken ct) {
+        if (!connections.TryGetValue(connectionId, out var socket) || socket.State != WebSocketState.Open) return;
         await socket.SendAsync(EncodeFrame(frame), WebSocketMessageType.Binary, endOfMessage: true, ct);
     }
 

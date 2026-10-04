@@ -29,10 +29,30 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
+    static private readonly DiagnosticDescriptor NoDatabaseFoundForHookDiagnostic = new DiagnosticDescriptor(
+        "RHINO038",
+        "[Hook] omits the database and no [Database] type was found",
+        "'{0}' is [{1}]-attributed without specifying an explicit database, and this compilation "
+        + "declares no [Database] type to infer it from - specify one explicitly, e.g. [{1}<YourDb>]",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
+    static private readonly DiagnosticDescriptor HookTargetNotARootDiagnostic = new DiagnosticDescriptor(
+        "RHINO039",
+        "Hook's explicit target must be a Root [Database]",
+        "'{0}' targets '{1}', which {2} - hooks only ever fire on the Root database; a Child database "
+        + "must be reached explicitly via ctx.BeginTx from a [Procedure], never through a hook",
+        "RhinoDB.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
     static private DiagnosticDescriptor InvalidSignatureDiagnostic(string id, string hookName) => new DiagnosticDescriptor(
         id,
         $"[{hookName}] method has an invalid signature",
-        $"'{{0}}' is [{hookName}]-attributed but must be a static method shaped like " + "'static Task<Result> Method(RhinoContext<TDb> ctx)' for some database type TDb",
+        $"'{{0}}' is [{hookName}]-attributed but must be a static method shaped like 'static Task<Result> Method(RhinoCtx ctx)'",
         "RhinoDB.Generators",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
@@ -43,6 +63,14 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
         LifecycleHookKind.OnStart => "RhinoDB.Core.Tables.OnStartAttribute",
         LifecycleHookKind.OnClientConnect => "RhinoDB.Core.Tables.OnClientConnectAttribute",
         LifecycleHookKind.OnClientDisconnect => "RhinoDB.Core.Tables.OnClientDisconnectAttribute",
+        _ => throw new System.ArgumentOutOfRangeException(nameof(kind))
+    };
+
+    static private string GenericAttributeFullNameFor(LifecycleHookKind kind) => kind switch {
+        LifecycleHookKind.OnInit => "RhinoDB.Core.Tables.OnInitAttribute`1",
+        LifecycleHookKind.OnStart => "RhinoDB.Core.Tables.OnStartAttribute`1",
+        LifecycleHookKind.OnClientConnect => "RhinoDB.Core.Tables.OnClientConnectAttribute`1",
+        LifecycleHookKind.OnClientDisconnect => "RhinoDB.Core.Tables.OnClientDisconnectAttribute`1",
         _ => throw new System.ArgumentOutOfRangeException(nameof(kind))
     };
 
@@ -66,17 +94,30 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
         kind is LifecycleHookKind.OnClientConnect or LifecycleHookKind.OnClientDisconnect;
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
-        var databases = context.SyntaxProvider
+        var rootDatabases = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 DatabaseDiscovery.DatabaseAttributeFullName,
                 predicate: static (node, _) => node is ClassDeclarationSyntax,
                 transform: static (ctx, _) => DatabaseDiscovery.ToDatabaseModel(ctx))
             .Collect();
 
-        var onInitHooks = HookProvider(context, LifecycleHookKind.OnInit);
-        var onStartHooks = HookProvider(context, LifecycleHookKind.OnStart);
-        var onClientConnectHooks = HookProvider(context, LifecycleHookKind.OnClientConnect);
-        var onClientDisconnectHooks = HookProvider(context, LifecycleHookKind.OnClientDisconnect);
+        var declaredRootFullNames = rootDatabases.Select(static (dbs, _) => dbs.Select(d => d.FullName).ToImmutableArray());
+
+        var declaredChildFullNames = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                DatabaseDiscovery.ChildDatabaseAttributeFullName,
+                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                transform: static (ctx, _) => DatabaseDiscovery.ToDatabaseModel(ctx))
+            .Collect()
+            .Select(static (dbs, _) => dbs.Select(d => d.FullName).ToImmutableArray());
+
+        // Hooks only ever emit onto the Root - never a Child, per direct user instruction.
+        var emitTargets = rootDatabases;
+
+        var onInitHooks = HookProviderForKind(context, LifecycleHookKind.OnInit, declaredRootFullNames, declaredChildFullNames);
+        var onStartHooks = HookProviderForKind(context, LifecycleHookKind.OnStart, declaredRootFullNames, declaredChildFullNames);
+        var onClientConnectHooks = HookProviderForKind(context, LifecycleHookKind.OnClientConnect, declaredRootFullNames, declaredChildFullNames);
+        var onClientDisconnectHooks = HookProviderForKind(context, LifecycleHookKind.OnClientDisconnect, declaredRootFullNames, declaredChildFullNames);
 
         var allHooks = onInitHooks
             .Combine(onStartHooks)
@@ -87,46 +128,110 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
                 .AddRange(nested.Left.Right)
                 .AddRange(nested.Right));
 
-        var combined = databases.Combine(allHooks);
+        var combined = emitTargets.Combine(allHooks);
 
         context.RegisterSourceOutput(combined, static (spc, pair) => Emit(spc, pair.Left, pair.Right));
     }
 
-    static private IncrementalValueProvider<ImmutableArray<HookModel>> HookProvider(
-        IncrementalGeneratorInitializationContext context, LifecycleHookKind kind) =>
-        context.SyntaxProvider
+    static private IncrementalValueProvider<ImmutableArray<HookModel>> HookProviderForKind(
+        IncrementalGeneratorInitializationContext context, LifecycleHookKind kind,
+        IncrementalValueProvider<ImmutableArray<string>> declaredRootFullNames,
+        IncrementalValueProvider<ImmutableArray<string>> declaredChildFullNames) {
+        var explicitHooks = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                GenericAttributeFullNameFor(kind),
+                predicate: static (node, _) => node is MethodDeclarationSyntax,
+                transform: (ctx, _) => ToExplicitCandidate(ctx, kind))
+            .Collect()
+            .Combine(declaredRootFullNames)
+            .Combine(declaredChildFullNames)
+            .Select(static (pair, _) => ValidateExplicit(pair.Left.Left, pair.Left.Right, pair.Right));
+
+        var omittedHooks = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 AttributeFullNameFor(kind),
                 predicate: static (node, _) => node is MethodDeclarationSyntax,
-                transform: (ctx, _) => ToHookModel(ctx, kind))
-            .Collect();
+                transform: (ctx, _) => ToOmittedCandidate(ctx, kind))
+            .Collect()
+            .Combine(declaredRootFullNames)
+            .Select(static (pair, _) => ExpandOmitted(pair.Left, pair.Right));
 
-    static private HookModel ToHookModel(GeneratorAttributeSyntaxContext ctx, LifecycleHookKind kind) {
+        return explicitHooks.Combine(omittedHooks).Select(static (pair, _) => pair.Left.AddRange(pair.Right));
+    }
+
+    static private bool HasValidSignature(IMethodSymbol method) =>
+        method.IsStatic
+        && method.Parameters.Length == 1
+        && method.Parameters[0].Type is INamedTypeSymbol { Name: "RhinoCtx", IsGenericType: false } contextType
+        && contextType.ContainingNamespace.ToDisplayString() == "RhinoDB.Lib.Execution"
+        && method.ReturnType is INamedTypeSymbol { Name: "Task", TypeArguments.Length: 1 } taskType
+        && taskType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks"
+        && taskType.TypeArguments[0] is INamedTypeSymbol { Name: "Result" } resultType
+        && resultType.ContainingNamespace.ToDisplayString() == "RhinoDB.Core";
+
+    static private string MethodReferenceFor(IMethodSymbol method) =>
+        method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + method.Name;
+
+    static private ExplicitHookCandidate ToExplicitCandidate(GeneratorAttributeSyntaxContext ctx, LifecycleHookKind kind) {
         var method = (IMethodSymbol)ctx.TargetSymbol;
-
-        var returnsTaskOfResult =
-            method.ReturnType is INamedTypeSymbol { Name: "Task", TypeArguments.Length: 1 } taskType
-            && taskType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks"
-            && taskType.TypeArguments[0] is INamedTypeSymbol { Name: "Result" } resultType
-            && resultType.ContainingNamespace.ToDisplayString() == "RhinoDB.Core";
-
-        var hasValidContextParam =
-            method.IsStatic
-            && method.Parameters.Length == 1
-            && method.Parameters[0].Type is INamedTypeSymbol { Name: "RhinoContext", TypeArguments.Length: 1 } contextType
-            && contextType.ContainingNamespace.ToDisplayString() == "RhinoDB.Lib.Execution";
-
-        if (!returnsTaskOfResult || !hasValidContextParam) {
+        if (!HasValidSignature(method)) {
             var location = method.Locations.FirstOrDefault() ?? Location.None;
-            return new HookModel(kind, method.ToDisplayString(), null,
+            return new ExplicitHookCandidate(kind, method.ToDisplayString(), null,
                 Diagnostic.Create(InvalidSignatureDiagnosticFor(kind), location, method.ToDisplayString()));
         }
 
-        var contextTypeSymbol = (INamedTypeSymbol)method.Parameters[0].Type;
-        var databaseFullName = contextTypeSymbol.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-        var methodReference = method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + method.Name;
+        var attributeClass = (INamedTypeSymbol)ctx.Attributes[0].AttributeClass!;
+        var databaseFullName = attributeClass.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        return new ExplicitHookCandidate(kind, MethodReferenceFor(method), databaseFullName, null);
+    }
 
-        return new HookModel(kind, methodReference, databaseFullName, null);
+    static private ImmutableArray<HookModel> ValidateExplicit(
+        ImmutableArray<ExplicitHookCandidate> candidates, ImmutableArray<string> declaredRootFullNames, ImmutableArray<string> declaredChildFullNames) {
+        var results = ImmutableArray.CreateBuilder<HookModel>();
+        foreach (var candidate in candidates) {
+            if (candidate.Diagnostic is not null) {
+                results.Add(new HookModel(candidate.Kind, candidate.MethodReference, null, candidate.Diagnostic));
+                continue;
+            }
+            if (declaredRootFullNames.Contains(candidate.DatabaseFullName!)) {
+                results.Add(new HookModel(candidate.Kind, candidate.MethodReference, candidate.DatabaseFullName, null));
+                continue;
+            }
+            var reason = declaredChildFullNames.Contains(candidate.DatabaseFullName!)
+                ? "is a [ChildDatabase<...>], not a Root"
+                : "is not declared as a [Database] anywhere in this compilation";
+            results.Add(new HookModel(candidate.Kind, candidate.MethodReference, null, Diagnostic.Create(
+                HookTargetNotARootDiagnostic, Location.None, candidate.MethodReference, candidate.DatabaseFullName, reason)));
+        }
+        return results.ToImmutable();
+    }
+
+    static private OmittedHookCandidate ToOmittedCandidate(GeneratorAttributeSyntaxContext ctx, LifecycleHookKind kind) {
+        var method = (IMethodSymbol)ctx.TargetSymbol;
+        if (!HasValidSignature(method)) {
+            var location = method.Locations.FirstOrDefault() ?? Location.None;
+            return new OmittedHookCandidate(kind, method.ToDisplayString(),
+                Diagnostic.Create(InvalidSignatureDiagnosticFor(kind), location, method.ToDisplayString()));
+        }
+        return new OmittedHookCandidate(kind, MethodReferenceFor(method), null);
+    }
+
+    static private ImmutableArray<HookModel> ExpandOmitted(ImmutableArray<OmittedHookCandidate> candidates, ImmutableArray<string> declaredRootFullNames) {
+        var results = ImmutableArray.CreateBuilder<HookModel>();
+        foreach (var candidate in candidates) {
+            if (candidate.Diagnostic is not null) {
+                results.Add(new HookModel(candidate.Kind, candidate.MethodReference, null, candidate.Diagnostic));
+                continue;
+            }
+            if (declaredRootFullNames.Length == 0) {
+                results.Add(new HookModel(candidate.Kind, candidate.MethodReference, null, Diagnostic.Create(
+                    NoDatabaseFoundForHookDiagnostic, Location.None, candidate.MethodReference, candidate.Kind)));
+                continue;
+            }
+            foreach (var root in declaredRootFullNames)
+                results.Add(new HookModel(candidate.Kind, candidate.MethodReference, root, null));
+        }
+        return results.ToImmutable();
     }
 
     static private void Emit(SourceProductionContext context, ImmutableArray<DatabaseModel> databases, ImmutableArray<HookModel> hooks) {
@@ -140,8 +245,8 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
             foreach (var kind in AllKinds) {
                 if (!resolved.TryGetValue((kind, database.FullName), out var methodReference)) continue;
                 var paramList = TakesSession(kind) ? "Session session" : "";
-                var ctxArgs = TakesSession(kind) ? "this, session" : "this, Session.System";
-                body.AppendLine($"    protected override Task<Result> {OverrideMethodNameFor(kind)}({paramList}) => {methodReference}(new RhinoContext<{database.SimpleName}>({ctxArgs}));");
+                var ctxArgs = TakesSession(kind) ? "session.Identity, session" : "Identity.System";
+                body.AppendLine($"    protected override Task<Result> {OverrideMethodNameFor(kind)}({paramList}) => {methodReference}(new RhinoCtx(this, {ctxArgs}));");
             }
             if (body.Length == 0) continue;
 
@@ -187,6 +292,19 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
     private enum LifecycleHookKind { OnInit, OnStart, OnClientConnect, OnClientDisconnect }
 
     private sealed class HookModel(LifecycleHookKind kind, string methodReference, string? databaseFullName, Diagnostic? diagnostic) {
+        public LifecycleHookKind Kind { get; } = kind;
+        public string MethodReference { get; } = methodReference;
+        public string? DatabaseFullName { get; } = databaseFullName;
+        public Diagnostic? Diagnostic { get; } = diagnostic;
+    }
+
+    private sealed class OmittedHookCandidate(LifecycleHookKind kind, string methodReference, Diagnostic? diagnostic) {
+        public LifecycleHookKind Kind { get; } = kind;
+        public string MethodReference { get; } = methodReference;
+        public Diagnostic? Diagnostic { get; } = diagnostic;
+    }
+
+    private sealed class ExplicitHookCandidate(LifecycleHookKind kind, string methodReference, string? databaseFullName, Diagnostic? diagnostic) {
         public LifecycleHookKind Kind { get; } = kind;
         public string MethodReference { get; } = methodReference;
         public string? DatabaseFullName { get; } = databaseFullName;
