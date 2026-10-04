@@ -9,6 +9,7 @@ public enum FrameType : ushort {
     Resume,
     Rpc,
     RpcResult,
+    Hello,
 }
 
 public readonly record struct Frame(FrameType Type, ReadOnlyMemory<byte> Payload);

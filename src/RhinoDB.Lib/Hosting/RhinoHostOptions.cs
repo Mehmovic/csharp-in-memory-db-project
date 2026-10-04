@@ -21,6 +21,7 @@ public sealed class RhinoHostOptions {
     public ulong? WalPruneOlderThanUtcTicks { get; private init; }
     public int HttpPort { get; private init; } = 7777;
     public bool HttpEnabled { get; private init; }
+    public uint ServerVersion { get; private init; }
 
     static public Result<RhinoHostOptions> Load(string configDirectory) {
         RhinoDbConfig config;
@@ -30,10 +31,10 @@ public sealed class RhinoHostOptions {
             return Result<RhinoHostOptions>.Error(DbError.SystemFailure(ex));
         }
 
-        return FromConfig(config.Host);
+        return FromConfig(config.Host, config.Server.PackedVersion);
     }
 
-    static public Result<RhinoHostOptions> FromConfig(HostConfig host) {
+    static public Result<RhinoHostOptions> FromConfig(HostConfig host, uint serverVersion = 0) {
         if (!TryParseMode(host.Mode, out var mode))
             return Result<RhinoHostOptions>.Error(DbError.SystemFailure(new ArgumentException(
                 $"Unknown Host.Mode '{host.Mode}' - expected run, replay, migrate, wal-prune, or wal-migrate.")));
@@ -62,6 +63,7 @@ public sealed class RhinoHostOptions {
             WalPruneOlderThanUtcTicks = walPruneOlderThanUtcTicks,
             HttpPort = host.HttpPort,
             HttpEnabled = host.HttpEnabled ?? (mode == RhinoRunMode.Run),
+            ServerVersion = serverVersion,
         };
     }
 

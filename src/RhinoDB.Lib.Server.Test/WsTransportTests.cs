@@ -80,6 +80,12 @@ public class WsTransportTests {
         return buffer;
     }
 
+    static private Task SendHelloAsync(ClientWebSocket client, uint appVersion = 1) {
+        var payload = new byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, appVersion);
+        return client.SendAsync(EncodeFrame((ushort)FrameType.Hello, payload), WebSocketMessageType.Binary, true, CancellationToken.None);
+    }
+
     static private async Task<(ushort Type, byte[] Payload)> ReceiveFrameAsync(ClientWebSocket client) {
         var buffer = new byte[64 * 1024];
         using var message = new MemoryStream();
@@ -103,6 +109,7 @@ public class WsTransportTests {
         var host = hostResult.Unwrap();
         var client = new ClientWebSocket();
         await client.ConnectAsync(new Uri($"ws://127.0.0.1:{host.NetworkPort}/rt"), CancellationToken.None);
+        await SendHelloAsync(client);
         return (host, client);
     }
 
@@ -177,6 +184,7 @@ public class WsTransportTests {
         using var _ = host;
         var client = new ClientWebSocket();
         await client.ConnectAsync(new Uri($"ws://127.0.0.1:{host.NetworkPort}/rt"), CancellationToken.None);
+        await SendHelloAsync(client);
 
         // AcceptConnectionAsync awaits DispatchClientConnectAsync before its read loop starts, so a
         // round-tripped frame proves OnClientConnectAsync already ran server-side - no polling needed.
@@ -208,6 +216,7 @@ public class WsTransportTests {
         using var _ = host;
         var client = new ClientWebSocket();
         await client.ConnectAsync(new Uri($"ws://127.0.0.1:{host.NetworkPort}/rt"), CancellationToken.None);
+        await SendHelloAsync(client);
 
         var result = await client.ReceiveAsync(new byte[256], CancellationToken.None);
 
@@ -234,6 +243,7 @@ public class WsTransportTests {
         using var _ = host;
         var client = new ClientWebSocket();
         await client.ConnectAsync(new Uri($"ws://127.0.0.1:{host.NetworkPort}/rt"), CancellationToken.None);
+        await SendHelloAsync(client);
 
         var result = await client.ReceiveAsync(new byte[256], CancellationToken.None);
 
@@ -242,5 +252,66 @@ public class WsTransportTests {
         Assert.That(client.CloseStatusDescription, Is.EqualTo("Custom:42"));
         await client.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
         host.GetDatabase<RejectingDb>().Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task Hello_WithAnAppVersionTheValidatorRejects_ClosesWithPolicyViolationAndClientAppVersionInvalidBeforeOnClientConnectEverFires() {
+        WriteConfig(dir, 0);
+        var hostResult = await RhinoHostBuilder.Create(dir)
+            .SetAppVersionValidator(version => version < 5)
+            .AddDatabase<LifecycleTrackingDb, DefaultTransaction>(options => { options.CreateDb = cold => new LifecycleTrackingDb(cold); })
+            .BuildAsync();
+
+        var host = hostResult.Unwrap();
+        using var _ = host;
+        var client = new ClientWebSocket();
+        await client.ConnectAsync(new Uri($"ws://127.0.0.1:{host.NetworkPort}/rt"), CancellationToken.None);
+        await SendHelloAsync(client, appVersion: 1);
+
+        var result = await client.ReceiveAsync(new byte[256], CancellationToken.None);
+
+        Assert.That(result.MessageType, Is.EqualTo(WebSocketMessageType.Close));
+        Assert.That(client.CloseStatus, Is.EqualTo(WebSocketCloseStatus.PolicyViolation));
+        Assert.That(client.CloseStatusDescription, Is.EqualTo("ClientAppVersionInvalid"));
+        Assert.That(host.GetDatabase<LifecycleTrackingDb>().ConnectCalled, Is.False,
+            "an invalid app version must reject before OnClientConnect ever runs, not after.");
+        await client.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
+        host.GetDatabase<LifecycleTrackingDb>().Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task Hello_WithAnAppVersionTheValidatorAccepts_ConnectsNormally() {
+        var (host, client) = await ConnectAsyncWithVersion(RhinoHostBuilder.Create(dir).SetAppVersionValidator(version => version < 5), appVersion: 10);
+        using var _ = host;
+        using var __ = client;
+
+        await client.SendAsync(EncodeFrame((ushort)FrameType.Heartbeat, []), WebSocketMessageType.Binary, true, CancellationToken.None);
+        var (type, _) = await ReceiveFrameAsync(client);
+
+        Assert.That(type, Is.EqualTo((ushort)FrameType.Ack));
+        host.GetDatabase<FakeDb>().Cold!.Dispose();
+    }
+
+    [Test]
+    public void NoValidatorConfigured_NeverRejectsAnyAppVersion() {
+        Assert.DoesNotThrowAsync(async () => {
+            var (host, client) = await ConnectAsync(RhinoHostBuilder.Create(dir));
+            using var _ = host;
+            using var __ = client;
+            host.GetDatabase<FakeDb>().Cold!.Dispose();
+        });
+    }
+
+    private async Task<(RhinoHost Host, ClientWebSocket Client)> ConnectAsyncWithVersion(RhinoHostBuilder builder, uint appVersion) {
+        WriteConfig(dir, 0);
+        var hostResult = await builder.AddDatabase<FakeDb, DefaultTransaction>(options => {
+            options.CreateDb = cold => new FakeDb(cold);
+        }).BuildAsync();
+
+        var host = hostResult.Unwrap();
+        var client = new ClientWebSocket();
+        await client.ConnectAsync(new Uri($"ws://127.0.0.1:{host.NetworkPort}/rt"), CancellationToken.None);
+        await SendHelloAsync(client, appVersion);
+        return (host, client);
     }
 }

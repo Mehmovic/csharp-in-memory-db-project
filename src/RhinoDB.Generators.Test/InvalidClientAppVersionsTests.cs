@@ -124,4 +124,63 @@ public class InvalidClientAppVersionsTests {
         Assert.That(method.Invoke(null, [PackedVersion.Pack(2, 0, 0)]), Is.True, "above the floor but not the pin");
         Assert.That(method.Invoke(null, [PackedVersion.Pack(3, 0, 0)]), Is.False, "above the floor and matches the pin - accepted");
     }
+
+    [Test]
+    public async Task AddGeneratedClientCompat_WiresTheDeclaredRuleIntoTheBuiltHostsIsAppVersionInvalid() {
+        var dir = Path.Combine(Path.GetTempPath(), "rhinodb-clientappversion-wiring-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try {
+            // RhinoClientCompat is internal, specifically so this compiles cleanly despite
+            // RhinoDB.Sandbox.MigrationFixture.dll (already referenced by this harness, and itself a
+            // TableGenerator consumer) baking in its own copy of the exact same simple name in the exact
+            // same global namespace - an internal type never leaks across an assembly boundary, so the
+            // fixture's copy is invisible here and this extension call resolves to only one candidate.
+            const string source = """
+                using MemoryPack;
+                using MessagePack;
+                using RhinoDB.Core.Tables;
+                using RhinoDB.Lib.Execution;
+                using RhinoDB.Lib.Hosting;
+                using System.Threading.Tasks;
+
+                [assembly: InvalidClientAppVersions(LessThanOrEqualTo = new uint[] { 5u })]
+
+                namespace TestNs;
+
+                [Database]
+                public partial class RootDb : DbContext<RootDbTransaction> { }
+
+                [Table<RootDb>(TableKind.Persistent)]
+                [MemoryPackable]
+                [MessagePackObject]
+                public readonly partial record struct Row([PrimaryKey] [property: Key(0)] int Id);
+
+                public static class TestHelpers {
+                    public static async Task<(bool Low, bool High)> Run(string configDir) {
+                        var builder = RhinoHostBuilder.Create(configDir)
+                            .AddGeneratedClientCompat()
+                            .AddDatabase<RootDb, RootDbTransaction>(o => o.CreateDb = cold => new RootDb(cold));
+                        var hostResult = await builder.BuildAsync();
+                        var host = hostResult.Unwrap();
+                        var result = (host.IsAppVersionInvalid(1u), host.IsAppVersionInvalid(10u));
+                        host.Dispose();
+                        return result;
+                    }
+                }
+                """;
+
+            var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
+
+            Assert.That(asm.GetType("RhinoClientCompat")!.GetMethod("AddGeneratedClientCompat"), Is.Not.Null,
+                "only emitted when RhinoDB.Lib.Hosting.RhinoHostBuilder actually resolves in this compilation.");
+
+            var task = (Task<(bool Low, bool High)>)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "Run", dir)!;
+            var (low, high) = await task;
+
+            Assert.That(low, Is.True, "version 1 is <= the declared floor of 5 - must be invalid.");
+            Assert.That(high, Is.False, "version 10 is above the floor - must be valid.");
+        } finally {
+            try { Directory.Delete(dir, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
 }

@@ -189,6 +189,22 @@ public class RhinoHostOptionsTests {
     }
 
     [Test]
+    public void Load_AlsoReadsTheServerSectionsPackedVersion() {
+        RhinoHostConfigTestHelper.WriteConfig(dir, new HostConfig { ColdPath = dir }, new ServerConfig { Version = "2.3.1" });
+
+        var result = RhinoHostOptions.Load(dir).Unwrap();
+
+        Assert.That(result.ServerVersion, Is.EqualTo(ServerVersionParser.Parse("2.3.1")));
+    }
+
+    [Test]
+    public void FromConfig_WithNoServerVersionGiven_DefaultsToZero() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir }).Unwrap();
+
+        Assert.That(result.ServerVersion, Is.EqualTo(0u));
+    }
+
+    [Test]
     public void Load_WithNoFilePresent_WritesADefaultAndStillResolves() {
         // GeneratorConfigLoader.LoadFull already auto-creates a default file when one is missing -
         // RhinoHostOptions.Load must still resolve cleanly against that default (no ColdPath

@@ -20,6 +20,7 @@ public sealed class RhinoHostBuilder {
     private readonly Dictionary<uint, RpcCommandHandler> rpcCommands = [];
     private readonly Dictionary<(string Method, string Route), RestCommandHandler> restCommands = [];
     private readonly Dictionary<Type, IChildDatabaseRegistry> childRegistrations = [];
+    private Func<uint, bool>? isAppVersionInvalid;
     public event Action<ArchiveRetentionRunReport>? OnRetentionRun;
 
     private RhinoHostBuilder(string configDirectory) {
@@ -58,6 +59,11 @@ public sealed class RhinoHostBuilder {
             : this;
     }
 
+    public RhinoHostBuilder SetAppVersionValidator(Func<uint, bool> validator) {
+        isAppVersionInvalid = validator;
+        return this;
+    }
+
     public RhinoHostBuilder AddChildDatabase<TChildDb, TTx, TKey>(Action<ChildDatabaseOptions<TChildDb, TTx, TKey>> configure)
         where TChildDb : DbContext<TTx>
         where TTx : ITransaction
@@ -86,7 +92,7 @@ public sealed class RhinoHostBuilder {
         if (policy is not null)
             collector = reg.StartArchiveCollector(builtDb, policy, report => OnRetentionRun?.Invoke(report));
 
-        var host = new RhinoHost(builtDb, tableCompatAdapters, rpcCommands, restCommands, childRegistrations, collector);
+        var host = new RhinoHost(builtDb, tableCompatAdapters, rpcCommands, restCommands, childRegistrations, isAppVersionInvalid ?? (_ => false), reg.ServerVersion, collector);
 
         TryLoadNetworkHostProvider();
         if (reg.HttpEnabled && RhinoNetworkHostProvider.Factory is { } factory) {
@@ -117,6 +123,7 @@ public sealed class RhinoHostBuilder {
         bool HttpEnabled { get; }
         int HttpPort { get; }
         string ColdPath { get; }
+        uint ServerVersion { get; }
     }
 
     private sealed class DatabaseRegistration<TDb, TTx>(DatabaseOptions<TDb, TTx> options)
@@ -128,6 +135,7 @@ public sealed class RhinoHostBuilder {
         public ArchiveRetentionPolicy? ArchiveRetentionOverride { get; } = options.ArchiveRetention;
         public bool HttpEnabled => parsedOptions?.HttpEnabled ?? false;
         public int HttpPort => parsedOptions?.HttpPort ?? 0;
+        public uint ServerVersion => parsedOptions?.ServerVersion ?? 0;
         public string ColdPath => parsedOptions?.ColdPath ?? throw new InvalidOperationException("ColdPath was read before RunAsync resolved it.");
 
         public ArchiveRetentionPolicy? ConfiguredRetention() => builtDb?.ConfiguredArchiveRetention;
@@ -284,6 +292,8 @@ public sealed class RhinoHost : IDisposable {
     private readonly IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands;
     private readonly IReadOnlyDictionary<(string Method, string Route), RestCommandHandler> restCommands;
     private readonly IReadOnlyDictionary<Type, IChildDatabaseRegistry> childRegistrations;
+    private readonly Func<uint, bool> isAppVersionInvalid;
+    private readonly uint serverVersion;
     private readonly IDisposable? collector;
     private IRhinoNetworkHost? networkHost;
     private bool disposed;
@@ -292,16 +302,23 @@ public sealed class RhinoHost : IDisposable {
         object database, IReadOnlyDictionary<Type, object> tableCompatAdapters,
         IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands,
         IReadOnlyDictionary<(string Method, string Route), RestCommandHandler> restCommands,
-        IReadOnlyDictionary<Type, IChildDatabaseRegistry> childRegistrations, IDisposable? collector) {
+        IReadOnlyDictionary<Type, IChildDatabaseRegistry> childRegistrations, Func<uint, bool> isAppVersionInvalid,
+        uint serverVersion, IDisposable? collector) {
         this.database = database;
         this.tableCompatAdapters = tableCompatAdapters;
         this.rpcCommands = rpcCommands;
         this.restCommands = restCommands;
         this.childRegistrations = childRegistrations;
+        this.isAppVersionInvalid = isAppVersionInvalid;
+        this.serverVersion = serverVersion;
         this.collector = collector;
     }
 
     public TDb GetDatabase<TDb>() where TDb : notnull => (TDb)database;
+
+    public bool IsAppVersionInvalid(uint version) => isAppVersionInvalid(version);
+
+    public uint ServerVersion => serverVersion;
 
     public TableCompatOptions<TRow>? GetTableCompatAdapter<TRow>() =>
         tableCompatAdapters.TryGetValue(typeof(TRow), out var options)

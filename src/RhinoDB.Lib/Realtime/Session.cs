@@ -16,8 +16,9 @@ public sealed class Identity(PrincipalId principal) {
     static public readonly Identity Anonymous = new Identity(PrincipalId.Anonymous);
 }
 
-public sealed class Session(ConnectionId connectionId, Identity identity) {
+public sealed class Session(ConnectionId connectionId, Identity identity, uint appVersion = 0) {
     public ConnectionId ConnectionId { get; } = connectionId;
     public Identity Identity { get; } = identity;
+    public uint AppVersion { get; } = appVersion;
     static public readonly Session System = new Session(ConnectionId.System, Identity.System);
 }

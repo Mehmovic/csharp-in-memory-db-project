@@ -4,11 +4,20 @@ using RhinoDB.Lib.Realtime;
 namespace RhinoDB.Lib.Execution;
 
 public sealed class RhinoCtx {
+    static private readonly InvalidOperationException InvalidServerVersionException = new InvalidOperationException(
+        "Server version needs a RhinoHost-backed RhinoCtx (e.g. a [Procedure]) - not available from a lifecycle hook, which fires before/independent of the host.");
+    
+    static private readonly InvalidOperationException InvalidChildDatabaseException = new InvalidOperationException(
+        "Child database access needs a RhinoHost-backed RhinoCtx (e.g. a [Procedure]) - not available from a lifecycle hook, which fires before/independent of the host.");
+    
     private readonly object? directDb;
     private readonly RhinoHost? host;
+    private uint? serverVersion;
 
     public Identity Identity { get; }
     public Session? Session { get; }
+
+    public uint ServerVersion => serverVersion ??= host?.ServerVersion ?? throw InvalidServerVersionException;
 
     public RhinoCtx(object directDb, Identity identity, Session? session = null) {
         this.directDb = directDb;
@@ -51,10 +60,7 @@ public sealed class RhinoCtx {
 
     private Task<Result<TChildDb>> ResolveChildAsync<TChildDb, TTx, TKey>(TKey key)
         where TChildDb : DbContext<TTx> where TTx : ITransaction where TKey : notnull {
-        if (host is null)
-            throw new InvalidOperationException(
-                "Child database access needs a RhinoHost-backed RhinoCtx (e.g. a [Procedure]) - "
-                + "not available from a lifecycle hook, which fires before/independent of the host.");
+        if (host is null) throw InvalidChildDatabaseException;
         return host.GetOrActivateChildAsync<TChildDb, TTx, TKey>(key);
     }
 }
