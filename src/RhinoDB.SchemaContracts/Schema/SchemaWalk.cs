@@ -9,7 +9,7 @@ namespace RhinoDB.SchemaContracts;
 static public class SchemaWalk {
     public const string CustomTypeAttributeFullName = "RhinoDB.Core.Tables.CustomTypeAttribute";
 
-    static public readonly DiagnosticDescriptor MissingSerializationAttributesOnCustomTypeFieldDiagnostic = new(
+    static public readonly DiagnosticDescriptor MissingSerializationAttributesOnCustomTypeFieldDiagnostic = new DiagnosticDescriptor(
         "RHINO016",
         "Field's type must be a [CustomType] with mandatory IDC/client serialization attributes",
         "Field '{0}.{1}' has type '{2}', which is missing {3} - a field that isn't unmanaged or string "

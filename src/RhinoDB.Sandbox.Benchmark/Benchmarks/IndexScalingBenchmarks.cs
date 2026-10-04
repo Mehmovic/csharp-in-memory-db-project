@@ -49,7 +49,7 @@ public class IndexScalingBenchmarks {
         uniqueHash = new HashIndex<int>();
         uniqueBTree = new BTreeIndex<int, DefaultComparer<int>>();
         uniqueHashString = new HashIndex<string>();
-        uniqueBTreeString = new(256);
+        uniqueBTreeString = new BTreeIndex<string, OrdinalStringComparer>(256);
 
         for (var i = 0; i < Rows; i++) {
             uniqueHash.Insert(i, i);

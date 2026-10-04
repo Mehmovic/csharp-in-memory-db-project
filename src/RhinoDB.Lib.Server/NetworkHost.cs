@@ -42,6 +42,21 @@ internal sealed class NetworkHostFactory : IRhinoNetworkHostFactory {
                 await transport.AcceptConnectionAsync(socket, context.RequestAborted);
             });
 
+            foreach (var (method, route) in host.RegisteredRestCommands) {
+                app.MapMethods(route, [method], async (HttpContext context) => {
+                    using var bodyStream = new MemoryStream();
+                    await context.Request.Body.CopyToAsync(bodyStream, context.RequestAborted);
+                    var query = context.Request.Query.ToDictionary(kv => kv.Key, kv => kv.Value.ToString());
+                    var request = new RestRequest(method, route, query, bodyStream.ToArray());
+
+                    var response = await host.DispatchRestAsync(method, route, request, context.RequestAborted);
+
+                    context.Response.StatusCode = response.StatusCode;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.Body.WriteAsync(response.Body, context.RequestAborted);
+                });
+            }
+
             await app.StartAsync(ct);
 
             return Result<IRhinoNetworkHost>.Ok(new NetworkHost(app, ResolveBoundPort(app, port)));

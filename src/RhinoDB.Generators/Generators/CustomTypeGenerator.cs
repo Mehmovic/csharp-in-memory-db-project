@@ -11,7 +11,7 @@ namespace RhinoDB.Generators;
 
 [Generator]
 public sealed class CustomTypeGenerator : IIncrementalGenerator {
-    static private readonly DiagnosticDescriptor MissingSerializationAttributesDiagnostic = new(
+    static private readonly DiagnosticDescriptor MissingSerializationAttributesDiagnostic = new DiagnosticDescriptor(
         "RHINO017",
         "CustomType missing mandatory IDC/client serialization attributes",
         "Type '{0}' is [CustomType]-attributed but is missing {1} - every custom type must carry both "

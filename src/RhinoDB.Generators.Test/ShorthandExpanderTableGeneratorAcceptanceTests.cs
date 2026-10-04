@@ -19,7 +19,7 @@ namespace RhinoDB.Generators.Test;
 // ComposeSingleCompilationUnit below merges multiple Expand() outputs into one valid file purely for
 // this test harness's benefit, not a real constraint on the tool itself.
 public class ShorthandExpanderTableGeneratorAcceptanceTests {
-    static private readonly Dictionary<string, string> NoProjectSources = new();
+    static private readonly Dictionary<string, string> NoProjectSources = new Dictionary<string, string>();
 
     private const string DatabaseBoilerplate =
         "using RhinoDB.Lib.Execution;\n\n[Database]\npublic partial class GameDb : DbContext<GameDbTransaction> { }\n";

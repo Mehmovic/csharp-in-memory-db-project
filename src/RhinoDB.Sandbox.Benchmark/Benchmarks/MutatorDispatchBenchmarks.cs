@@ -114,7 +114,7 @@ public sealed class ClassBenchMutator(BenchStorage storage) : IRowMutator<BenchR
 // keeps capacity, so steady-state allocations stay at zero for every arm.
 public sealed class BenchStorage(int rowCount) {
     private readonly BenchRow[] rows = new BenchRow[rowCount];
-    private readonly List<(int Key, BenchRow Row)> changes = new(rowCount);
+    private readonly List<(int Key, BenchRow Row)> changes = new List<(int Key, BenchRow Row)>(rowCount);
 
     public int ChangeCount => changes.Count;
 

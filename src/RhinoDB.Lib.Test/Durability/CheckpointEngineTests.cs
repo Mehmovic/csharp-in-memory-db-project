@@ -98,7 +98,7 @@ public class CheckpointEngineTests {
     public async Task RunCheckpoint_TruncatesTheWalAfterCommitting() {
         var path = Path.Combine(dir, "wal.dat");
         var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0, sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
-        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new(TableId, ChangeKind.Insert, [1], [42]) });
+        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new WalChange(TableId, ChangeKind.Insert, [1], [42]) });
         var engine = new CheckpointEngine(env, wal, archiveDir);
         var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };
 
@@ -226,7 +226,7 @@ public class CheckpointEngineTests {
         // WAL would destroy it permanently, so the checkpoint must refuse as a whole.
         var path = Path.Combine(dir, "wal.dat");
         var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0, sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
-        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new(TableId, ChangeKind.Insert, [1], [42]) });
+        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new WalChange(TableId, ChangeKind.Insert, [1], [42]) });
         var engine = new CheckpointEngine(env, wal, archiveDir);
         var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };
         const uint unknownTableId = 999;
@@ -323,7 +323,7 @@ public class CheckpointEngineTests {
     public async Task RunCheckpoint_WhenArchivingFails_ReturnsTheErrorAndLeavesTheWalIntact() {
         var path = Path.Combine(dir, "wal.dat");
         var wal = WriteAheadLog.Create(path, Guid.NewGuid(), 0, sizeThresholdBytes: long.MaxValue, TimeSpan.FromMinutes(10)).Unwrap();
-        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new(TableId, ChangeKind.Insert, [1], [42]) });
+        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new WalChange(TableId, ChangeKind.Insert, [1], [42]) });
 
         // Make the archive directory un-creatable: a plain FILE sits where it needs to go, so
         // WriteSegment's Directory.CreateDirectory throws and the archive write fails.
@@ -344,7 +344,7 @@ public class CheckpointEngineTests {
     [Test]
     public async Task RunCheckpoint_WhenArchivingFails_StillCommitsTheRowsSoNoDataIsLost() {
         var wal = CreateWal();
-        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new(TableId, ChangeKind.Insert, [1], [42]) });
+        await wal.AppendConfirmed(1, WalEntryKind.Operation, new WalChange[] { new WalChange(TableId, ChangeKind.Insert, [1], [42]) });
         File.WriteAllText(archiveDir, "not a directory");
         var engine = new CheckpointEngine(env, wal, archiveDir);
         var tableDbis = new Dictionary<uint, uint> { [TableId] = widgetsDbi };

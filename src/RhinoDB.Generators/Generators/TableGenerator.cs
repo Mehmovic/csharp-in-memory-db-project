@@ -21,7 +21,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
     private const string InvalidClientAppVersionsAttributeFullName = "RhinoDB.Core.Tables.InvalidClientAppVersionsAttribute";
     private const string DbErrorFullName = "RhinoDB.Core.DbError";
 
-    static private readonly DiagnosticDescriptor MissingPrimaryKeyDiagnostic = new(
+    static private readonly DiagnosticDescriptor MissingPrimaryKeyDiagnostic = new DiagnosticDescriptor(
         "RHINO001",
         "Table row missing [PrimaryKey]",
         "Row type '{0}' is [Table]-attributed but declares no [PrimaryKey] parameter",
@@ -30,7 +30,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor EmptyAccessorDiagnostic = new(
+    static private readonly DiagnosticDescriptor EmptyAccessorDiagnostic = new DiagnosticDescriptor(
         "RHINO002",
         "Empty Accessor name",
         "{0} has an explicit Accessor that is an empty string - omit Accessor for the default name, or give it a real one",
@@ -39,7 +39,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor CompositeIndexKindMismatchDiagnostic = new(
+    static private readonly DiagnosticDescriptor CompositeIndexKindMismatchDiagnostic = new DiagnosticDescriptor(
         "RHINO003",
         "Composite index fields disagree on Kind/Uniqueness",
         "Fields sharing Accessor '{0}' on '{1}' must all declare the same IndexKind and Uniqueness",
@@ -48,7 +48,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor CompositeIndexTooManyFieldsDiagnostic = new(
+    static private readonly DiagnosticDescriptor CompositeIndexTooManyFieldsDiagnostic = new DiagnosticDescriptor(
         "RHINO004",
         "Composite index has too many fields",
         "Composite index '{0}' on '{1}' has {2} fields sharing one Accessor - at most 3 are supported",
@@ -57,7 +57,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor DuplicateOrderDiagnostic = new(
+    static private readonly DiagnosticDescriptor DuplicateOrderDiagnostic = new DiagnosticDescriptor(
         "RHINO005",
         "Duplicate explicit Order in composite index",
         "Composite index '{0}' on '{1}' has two or more fields with the same explicit Order value",
@@ -66,7 +66,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor InvalidAutoIncrementTypeDiagnostic = new(
+    static private readonly DiagnosticDescriptor InvalidAutoIncrementTypeDiagnostic = new DiagnosticDescriptor(
         "RHINO007",
         "AutoIncrement field must be an incrementable unmanaged integer type",
         "'{0}.{1}' is [AutoIncrement] but its type isn't one of sbyte/byte/short/ushort/int/uint/long/ulong - " + "AutoIncrement needs a type the system can generate a new value for",
@@ -75,7 +75,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor EvictableOnInstantKindDiagnostic = new(
+    static private readonly DiagnosticDescriptor EvictableOnInstantKindDiagnostic = new DiagnosticDescriptor(
         "RHINO008",
         "Evictable has no effect on Instant-kind tables",
         "'{0}' is TableKind.Instant and sets Evictable = true - Instant-kind tables have no cold storage " + "to evict to/from at all. Remove Evictable or use TableKind.Persistent.",
@@ -84,7 +84,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor InvalidValidateMethodSignatureDiagnostic = new(
+    static private readonly DiagnosticDescriptor InvalidValidateMethodSignatureDiagnostic = new DiagnosticDescriptor(
         "RHINO009",
         "Invalid [Validate] method signature",
         "'{0}.{1}' is [Validate] but must be an at-least-internal static method shaped 'static DbError? {1}({0} row)' - "
@@ -94,7 +94,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor TableIdCollisionDiagnostic = new(
+    static private readonly DiagnosticDescriptor TableIdCollisionDiagnostic = new DiagnosticDescriptor(
         "RHINO011",
         "Table id hash collision within one database",
         "{0} has two tables whose Accessors hash to the same tableId: {1} and {2} - rename one Accessor, since the tableId (FNV-1a of the Accessor) identifies tables in the WAL and in cold storage",
@@ -102,7 +102,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
     );
-    static private readonly DiagnosticDescriptor DuplicateIndexAccessorOnFieldDiagnostic = new(
+    static private readonly DiagnosticDescriptor DuplicateIndexAccessorOnFieldDiagnostic = new DiagnosticDescriptor(
         "RHINO012",
         "Duplicate [Index] accessor on one field",
         "{0}.{1} declares two or more [Index] attributes that resolve to the same Accessor '{2}' - each index on a field needs its own Accessor",
@@ -110,7 +110,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
     );
-    static private readonly DiagnosticDescriptor ReservedIndexAccessorDiagnostic = new(
+    static private readonly DiagnosticDescriptor ReservedIndexAccessorDiagnostic = new DiagnosticDescriptor(
         "RHINO013",
         "Index accessor collides with a generated member",
         "Index '{0}' on '{1}' would generate a member with the same name as the generated ops API - '{0}' is taken by Primary or by Insert/Update/Delete/Iter/Evict, so give this index a different Accessor",
@@ -119,7 +119,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor IndexAccessorFieldNameCollisionDiagnostic = new(
+    static private readonly DiagnosticDescriptor IndexAccessorFieldNameCollisionDiagnostic = new DiagnosticDescriptor(
         "RHINO014",
         "Index accessors collide on the generated field name",
         "Index accessors '{0}' and '{1}' on '{2}' differ only in the casing of their first letter, so they would both generate the field name '{3}Index' - rename one Accessor",
@@ -127,7 +127,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
     );
-    static private readonly DiagnosticDescriptor DuplicateAccessorDiagnostic = new(
+    static private readonly DiagnosticDescriptor DuplicateAccessorDiagnostic = new DiagnosticDescriptor(
         "RHINO010",
         "Duplicate table Accessor within one database and TableKind",
         "'{0}' has two or more tables of the same TableKind using Accessor '{1}' - each table's Accessor must be "
@@ -138,7 +138,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor MissingSerializationAttributesDiagnostic = new(
+    static private readonly DiagnosticDescriptor MissingSerializationAttributesDiagnostic = new DiagnosticDescriptor(
         "RHINO015",
         "Table row missing mandatory client-protocol serialization attribute",
         "Row type '{0}' is [Table]-attributed but is missing {1} - this project's ClientProtocol "
@@ -151,7 +151,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor InvalidMigrationMethodSignatureDiagnostic = new(
+    static private readonly DiagnosticDescriptor InvalidMigrationMethodSignatureDiagnostic = new DiagnosticDescriptor(
         "RHINO018",
         "Invalid [Migration] method signature",
         "'{0}.{1}' is [Migration(FromRevision=N)] but must be an at-least-internal static method taking "
@@ -162,7 +162,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor MigrationChainGapDiagnostic = new(
+    static private readonly DiagnosticDescriptor MigrationChainGapDiagnostic = new DiagnosticDescriptor(
         "RHINO020",
         "[Migration] chain has an internal gap",
         "'{0}' has [Migration(FromRevision=N)] methods registered for revisions {1}, but revision {2} is "
@@ -173,7 +173,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor MissingMigrationForBreakingChangeDiagnostic = new(
+    static private readonly DiagnosticDescriptor MissingMigrationForBreakingChangeDiagnostic = new DiagnosticDescriptor(
         "RHINO019",
         "Breaking schema change has no matching [Migration]",
         "'{0}.{1}' changed in a way that breaks Raw decoding of its already-persisted rows (a field "
@@ -186,7 +186,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor InvalidGenerationValueDiagnostic = new(
+    static private readonly DiagnosticDescriptor InvalidGenerationValueDiagnostic = new DiagnosticDescriptor(
         "RHINO021",
         "[Database(InvalidGenerations=)] contains a nonsensical generation number",
         "'{0}' declares InvalidGenerations containing {1}, which is <= 0 - generation 0 is a database's "
@@ -197,7 +197,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor MalformedDescriptorDiagnostic = new(
+    static private readonly DiagnosticDescriptor MalformedDescriptorDiagnostic = new DiagnosticDescriptor(
         "RHINO023",
         "Descriptor.json is malformed",
         "The committed Descriptor.json additional file failed to parse: {0} - fix or regenerate it; until "
@@ -208,7 +208,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor InvalidDowngradeMethodSignatureDiagnostic = new(
+    static private readonly DiagnosticDescriptor InvalidDowngradeMethodSignatureDiagnostic = new DiagnosticDescriptor(
         "RHINO026",
         "Invalid [ClientDowngrade] method signature",
         "'{0}.{1}' is [ClientDowngrade(ToRevision=N)] but must be an at-least-internal static method taking "
@@ -219,7 +219,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor InvalidRevisionValueDiagnostic = new(
+    static private readonly DiagnosticDescriptor InvalidRevisionValueDiagnostic = new DiagnosticDescriptor(
         "RHINO027",
         "[InvalidRevisions(Revisions=)] contains a nonsensical revision number",
         "'{0}' declares InvalidRevisions containing {1}, which is <= 0 - revision 0 is a row type's "
@@ -230,7 +230,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor MixedExplicitAndOmittedDatabaseDiagnostic = new(
+    static private readonly DiagnosticDescriptor MixedExplicitAndOmittedDatabaseDiagnostic = new DiagnosticDescriptor(
         "RHINO028",
         "[Table] mixes an explicit typeof(...) with an omitted one on the same row",
         "'{0}' has both a [Table] attribute naming an explicit database and one that omits it - omitting "
@@ -242,7 +242,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor NoDatabaseFoundDiagnostic = new(
+    static private readonly DiagnosticDescriptor NoDatabaseFoundDiagnostic = new DiagnosticDescriptor(
         "RHINO029",
         "[Table] omits the database type and no [Database] type was found",
         "'{0}' is [Table]-attributed without specifying typeof(...) for its database, and this compilation "
@@ -252,7 +252,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor MalformedGeneratorConfigDiagnostic = new(
+    static private readonly DiagnosticDescriptor MalformedGeneratorConfigDiagnostic = new DiagnosticDescriptor(
         "RHINO024",
         "rdbsettings.json is malformed",
         "The committed rdbsettings.json additional file failed to parse: {0} - fix or regenerate it; "

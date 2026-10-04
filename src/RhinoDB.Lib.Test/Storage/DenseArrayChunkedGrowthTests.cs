@@ -6,7 +6,7 @@ public class DenseArrayChunkedGrowthTests
 
     private const int ChunkSize = 4;
 
-    static private DenseArray<TestRow> NewStore() => new(chunkSize: ChunkSize);
+    static private DenseArray<TestRow> NewStore() => new DenseArray<TestRow>(chunkSize: ChunkSize);
 
     static private void FillTo(DenseArray<TestRow> store, int count)
     {

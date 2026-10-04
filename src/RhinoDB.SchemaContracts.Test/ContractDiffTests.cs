@@ -3,15 +3,14 @@ using RhinoDB.SchemaContracts;
 namespace RhinoDB.SchemaContracts.Test;
 
 public class ContractDiffTests {
-    static private FieldDescriptor Field(string path, string typeFullName, RowFieldKind kind = RowFieldKind.Unmanaged) =>
-        new() { Path = path, TypeFullName = typeFullName, Kind = kind };
+    static private FieldDescriptor Field(string path, string typeFullName, RowFieldKind kind = RowFieldKind.Unmanaged) => new FieldDescriptor { Path = path, TypeFullName = typeFullName, Kind = kind };
 
     static private TableDescriptor Table(
         string accessor = "Player",
         string kind = "Persistent",
         string pkType = "int",
         params FieldDescriptor[] fields
-    ) => new() {
+    ) => new TableDescriptor {
         DatabaseFullName = "TestNs.GameDb",
         Accessor = accessor,
         RowTypeFullName = "global::TestNs.Player",

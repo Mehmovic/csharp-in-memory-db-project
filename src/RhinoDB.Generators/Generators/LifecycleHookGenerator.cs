@@ -20,7 +20,7 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
     static private readonly DiagnosticDescriptor InvalidOnClientConnectMethodSignatureDiagnostic = InvalidSignatureDiagnostic("RHINO033", "OnClientConnect");
     static private readonly DiagnosticDescriptor InvalidOnClientDisconnectMethodSignatureDiagnostic = InvalidSignatureDiagnostic("RHINO034", "OnClientDisconnect");
 
-    static private readonly DiagnosticDescriptor DuplicateLifecycleHookDiagnostic = new(
+    static private readonly DiagnosticDescriptor DuplicateLifecycleHookDiagnostic = new DiagnosticDescriptor(
         "RHINO032",
         "Database has more than one hook of the same kind",
         "Database '{0}' has more than one [{1}] hook ({2}) - a database can have at most one {1} hook",
@@ -29,11 +29,10 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private DiagnosticDescriptor InvalidSignatureDiagnostic(string id, string hookName) => new(
+    static private DiagnosticDescriptor InvalidSignatureDiagnostic(string id, string hookName) => new DiagnosticDescriptor(
         id,
         $"[{hookName}] method has an invalid signature",
-        $"'{{0}}' is [{hookName}]-attributed but must be a static method shaped like "
-        + "'static Task<Result> Method(RhinoContext<TDb> ctx)' for some database type TDb",
+        $"'{{0}}' is [{hookName}]-attributed but must be a static method shaped like " + "'static Task<Result> Method(RhinoContext<TDb> ctx)' for some database type TDb",
         "RhinoDB.Generators",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true

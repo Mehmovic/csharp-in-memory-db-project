@@ -30,7 +30,7 @@ public class MigrationStatusCommandTests {
         // omitName models a descriptor written before Name existed: the source now has MORE
         // fields than the old descriptor, which ContractDiff classifies as AdditiveOnly.
         var fields = new List<FieldDescriptor> {
-            new() { Path = "Id", TypeFullName = "int", Kind = RowFieldKind.Unmanaged },
+            new FieldDescriptor { Path = "Id", TypeFullName = "int", Kind = RowFieldKind.Unmanaged },
         };
         if (!omitName)
             fields.Add(new FieldDescriptor { Path = "Name", TypeFullName = "string", Kind = RowFieldKind.Unmanaged });

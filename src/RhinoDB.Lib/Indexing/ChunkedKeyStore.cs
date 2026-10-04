@@ -620,11 +620,7 @@ internal struct ChunkedKeyStore<TKey, TCmp>
         SetMax(chunkIdx, chunk.Keys[last], UsesPrefix ? chunk.Prefixes![last] : 0, chunk.Offsets[last]);
     }
 
-    static private Chunk RentChunk(int capacity)
-        => new(
-            ArrayPool<TKey>.Shared.Rent(capacity),
-            UsesPrefix ? ArrayPool<ulong>.Shared.Rent(capacity) : null,
-            ArrayPool<int>.Shared.Rent(capacity));
+    static private Chunk RentChunk(int capacity) => new Chunk(ArrayPool<TKey>.Shared.Rent(capacity), UsesPrefix ? ArrayPool<ulong>.Shared.Rent(capacity) : null, ArrayPool<int>.Shared.Rent(capacity));
 
     static private void ReturnChunk(in Chunk chunk) {
         if (chunk.Keys is null) return;

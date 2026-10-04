@@ -19,7 +19,10 @@ public sealed class WsTransport(RhinoHost host) : IRealtimeTransport {
 
         var connectResult = await host.DispatchClientConnectAsync(session);
         if (connectResult.IsError()) {
-            await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, null, ct);
+            var error = connectResult.GetError();
+            var closeStatus = error.Kind == ErrorKind.SystemFailure ? WebSocketCloseStatus.InternalServerError : WebSocketCloseStatus.PolicyViolation;
+            var description = error.Kind == ErrorKind.Custom ? $"{error.Kind}:{error.CustomCode}" : error.Kind.ToString();
+            await socket.CloseAsync(closeStatus, description, ct);
             return;
         }
 

@@ -29,7 +29,7 @@ public class OrderedIndexTests {
     }
 
     static private readonly Impl[] All = [
-        new() {
+        new Impl {
             Name = "BTreeIndex", AllowsDuplicateKeys = false,
             Create = (Func<BTreeIndex<int, DefaultComparer<int>>>)(() => new BTreeIndex<int, DefaultComparer<int>>()),
             Gt = (Func<BTreeIndex<int, DefaultComparer<int>>, int, int[]>)((i, k) => Read(i.GetOffsetsGt(k))),
@@ -39,7 +39,7 @@ public class OrderedIndexTests {
             Iter = (Func<BTreeIndex<int, DefaultComparer<int>>, int[]>)((i) => Read(i.GetOffsetsIter())),
             Range = (Func<BTreeIndex<int, DefaultComparer<int>>, int, int, int[]>)((i, f, t) => Read(i.GetOffsetsRange(f, t))),
         },
-        new() {
+        new Impl {
             Name = "NonUniqueBTreeIndex", AllowsDuplicateKeys = true,
             Create = (Func<NonUniqueBTreeIndex<int, DefaultComparer<int>>>)(() => new NonUniqueBTreeIndex<int, DefaultComparer<int>>()),
             Gt = (Func<NonUniqueBTreeIndex<int, DefaultComparer<int>>, int, int[]>)((i, k) => Read(i.GetOffsetsGt(k))),

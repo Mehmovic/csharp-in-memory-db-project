@@ -33,8 +33,8 @@ public class CompositeIndexBenchmarks {
 
     [GlobalSetup]
     public void Setup() {
-        numeric = new(256);
-        strOrdinal = new(256);
+        numeric = new BTreeIndex<(int ClubId, long Season), TupleComparer<int, long, DefaultComparer<int>, DefaultComparer<long>>>(256);
+        strOrdinal = new BTreeIndex<(int ClubId, string Name), TupleComparer<int, string, DefaultComparer<int>, OrdinalStringComparer>>(256);
         strDefault = new BTreeIndex<(int, string), DefaultComparer<(int, string)>>();
 
         for (var i = 0; i < Rows; i++) {

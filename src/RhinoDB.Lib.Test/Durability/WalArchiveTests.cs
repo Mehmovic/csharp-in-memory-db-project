@@ -30,12 +30,15 @@ public class WalArchiveTests {
         try { Directory.Delete(dir, recursive: true); } catch { /* best-effort cleanup */ }
     }
 
-    static private DecodedWalEntry Entry(ulong lsn, long key = 1) =>
-        new(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(key), [9])]);
+    static private DecodedWalEntry Entry(ulong lsn, long key = 1) => new DecodedWalEntry(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(key), [9])]);
 
     // Same as Entry, but stamped - what a real committed operation looks like.
-    static private DecodedWalEntry StampedEntry(ulong lsn, ulong utcTicks, long key = 1) =>
-        new(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(key), [9])], utcTicks);
+    static private DecodedWalEntry StampedEntry(ulong lsn, ulong utcTicks, long key = 1) => new DecodedWalEntry(
+        lsn,
+        WalEntryKind.Operation,
+        [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(key), [9])],
+        utcTicks
+    );
 
     // 2026-01-01T00:00:00Z, 2026-02-01T00:00:00Z, 2026-03-01T00:00:00Z as UTC ticks.
     static private readonly ulong January = (ulong)new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;

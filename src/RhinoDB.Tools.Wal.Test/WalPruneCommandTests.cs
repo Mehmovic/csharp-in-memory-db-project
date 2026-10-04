@@ -32,8 +32,12 @@ public class WalPruneCommandTests {
         body(dir);
     }
 
-    static private DecodedWalEntry StampedEntry(ulong lsn, ulong utcTicks) =>
-        new(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(lsn), [9])], utcTicks);
+    static private DecodedWalEntry StampedEntry(ulong lsn, ulong utcTicks) => new DecodedWalEntry(
+        lsn,
+        WalEntryKind.Operation,
+        [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes(lsn), [9])],
+        utcTicks
+    );
 
     private void WriteSegments(params (ulong ticks, uint generation)[] segments) {
         WithColdStore(coldPath => {

@@ -5,8 +5,8 @@ using RhinoDB.SchemaContracts;
 namespace RhinoDB.Tools.Migration;
 
 static public class MigrationPruneHistoryCommand {
-    static private readonly Regex SnapshotFilePattern = new(@"^(?<name>.+)_Rev(?<revision>\d+)\.g\.cs$");
-    static private readonly Regex StubFilePattern = new(@"^(?<name>.+)_FromRev(?<revision>\d+)\.cs$");
+    static private readonly Regex SnapshotFilePattern = new Regex(@"^(?<name>.+)_Rev(?<revision>\d+)\.g\.cs$");
+    static private readonly Regex StubFilePattern = new Regex(@"^(?<name>.+)_FromRev(?<revision>\d+)\.cs$");
 
     static public int Run(string[] args) {
         var projectPath = ProjectPathArg.Resolve(args, out var resolveError);

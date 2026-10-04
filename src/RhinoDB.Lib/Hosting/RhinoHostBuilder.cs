@@ -7,11 +7,18 @@ namespace RhinoDB.Lib.Hosting;
 
 public delegate Task<Result<ReadOnlyMemory<byte>>> RpcCommandHandler(RhinoHost host, ReadOnlyMemory<byte> body, CancellationToken ct);
 
+public sealed record RestRequest(string Method, string Route, IReadOnlyDictionary<string, string> Query, ReadOnlyMemory<byte> Body);
+public sealed record RestResponse(int StatusCode, ReadOnlyMemory<byte> Body) {
+    static public RestResponse Ok(ReadOnlyMemory<byte> body) => new RestResponse(200, body);
+}
+public delegate Task<RestResponse> RestCommandHandler(RhinoHost host, RestRequest request, CancellationToken ct);
+
 public sealed class RhinoHostBuilder {
     private readonly string configDirectory;
     private IDatabaseRegistration? registration;
     private readonly Dictionary<Type, object> tableCompatAdapters = [];
     private readonly Dictionary<uint, RpcCommandHandler> rpcCommands = [];
+    private readonly Dictionary<(string Method, string Route), RestCommandHandler> restCommands = [];
     public event Action<ArchiveRetentionRunReport>? OnRetentionRun;
 
     private RhinoHostBuilder(string configDirectory) {
@@ -44,6 +51,12 @@ public sealed class RhinoHostBuilder {
         return !rpcCommands.TryAdd(commandHash, handler) ? throw new ArgumentException($"An RPC command with hash {commandHash} is already registered.", nameof(commandHash)) : this;
     }
 
+    public RhinoHostBuilder AddRestCommand(string method, string route, RestCommandHandler handler) {
+        return !restCommands.TryAdd((method, route), handler)
+            ? throw new ArgumentException($"A REST command for {method} {route} is already registered.", nameof(route))
+            : this;
+    }
+
     public async Task<Result<RhinoHost>> BuildAsync() {
         if (registration is not { } reg)
             return Result<RhinoHost>.Error(DbError.SystemFailure(
@@ -58,7 +71,7 @@ public sealed class RhinoHostBuilder {
         if (policy is not null)
             collector = reg.StartArchiveCollector(builtDb, policy, report => OnRetentionRun?.Invoke(report));
 
-        var host = new RhinoHost(builtDb, tableCompatAdapters, rpcCommands, collector);
+        var host = new RhinoHost(builtDb, tableCompatAdapters, rpcCommands, restCommands, collector);
 
         TryLoadNetworkHostProvider();
         if (reg.HttpEnabled && RhinoNetworkHostProvider.Factory is { } factory) {
@@ -252,16 +265,19 @@ public sealed class RhinoHost : IDisposable {
     private readonly object database;
     private readonly IReadOnlyDictionary<Type, object> tableCompatAdapters;
     private readonly IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands;
+    private readonly IReadOnlyDictionary<(string Method, string Route), RestCommandHandler> restCommands;
     private readonly IDisposable? collector;
     private IRhinoNetworkHost? networkHost;
     private bool disposed;
 
     internal RhinoHost(
         object database, IReadOnlyDictionary<Type, object> tableCompatAdapters,
-        IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands, IDisposable? collector) {
+        IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands,
+        IReadOnlyDictionary<(string Method, string Route), RestCommandHandler> restCommands, IDisposable? collector) {
         this.database = database;
         this.tableCompatAdapters = tableCompatAdapters;
         this.rpcCommands = rpcCommands;
+        this.restCommands = restCommands;
         this.collector = collector;
     }
 
@@ -276,6 +292,13 @@ public sealed class RhinoHost : IDisposable {
         if (!rpcCommands.TryGetValue(commandHash, out var handler))
             return Result<ReadOnlyMemory<byte>>.Error(DbError.UnknownRpcCommand());
         return await handler(this, body, ct);
+    }
+
+    public IEnumerable<(string Method, string Route)> RegisteredRestCommands => restCommands.Keys;
+
+    public async Task<RestResponse> DispatchRestAsync(string method, string route, RestRequest request, CancellationToken ct) {
+        if (!restCommands.TryGetValue((method, route), out var handler)) return new RestResponse(404, ReadOnlyMemory<byte>.Empty);
+        return await handler(this, request, ct);
     }
 
     public Task<Result> DispatchClientConnectAsync(Session session) => ((IRhinoClientLifecycle)database).OnClientConnectAsync(session);

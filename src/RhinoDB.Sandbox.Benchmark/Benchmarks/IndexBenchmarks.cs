@@ -33,7 +33,7 @@ public class IndexBenchmarks {
     [GlobalSetup]
     public void Setup() {
         intIndex = new BTreeIndex<int, DefaultComparer<int>>();
-        strIndex = new(256);
+        strIndex = new BTreeIndex<string, OrdinalStringComparer>(256);
         for (var i = 0; i < Rows; i++) {
             intIndex.Insert(i, i);
             strIndex.Insert(Key(i), i);

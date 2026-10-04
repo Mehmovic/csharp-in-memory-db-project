@@ -15,7 +15,7 @@ namespace RhinoDB.Lib.Indexing.Test;
 // entries already span tens of chunks - the binary-search start path and the
 // cross-chunk duplicate walk get real work to do without a slow test.
 public class HashIndex_CompositeStringKeyTests {
-    static private HashIndex<(int ClubId, string Name)> NewIndex() => new();
+    static private HashIndex<(int ClubId, string Name)> NewIndex() => new HashIndex<(int ClubId, string Name)>();
 
     [Test]
     public void Insert_DifferentNameSameClub_BothRetrievable() {
@@ -72,7 +72,7 @@ public class HashIndex_CompositeStringKeyTests {
 }
 
 public class NonUniqueHashIndex_CompositeStringKeyTests {
-    static private NonUniqueHashIndex<(int ClubId, string Name)> NewIndex() => new();
+    static private NonUniqueHashIndex<(int ClubId, string Name)> NewIndex() => new NonUniqueHashIndex<(int ClubId, string Name)>();
 
     static private int[] OffsetsOf(NonUniqueHashIndex<(int ClubId, string Name)> index, (int ClubId, string Name) key) {
         using var list = index.GetOffsets(key);
@@ -121,7 +121,8 @@ public class NonUniqueHashIndex_CompositeStringKeyTests {
 }
 
 public class BTreeIndex_CompositeStringKeyTests {
-    static private BTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>> NewIndex(int chunkSize = 256) => new(chunkSize);
+    static private BTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>> NewIndex(int chunkSize = 256) =>
+        new BTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>>(chunkSize);
 
     static private int[] RangeOf(BTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>> index, (int, string) from, (int, string) to) {
         using var list = index.GetOffsetsRange(from, to);
@@ -237,7 +238,8 @@ public class BTreeIndex_CompositeStringKeyTests {
 }
 
 public class NonUniqueBTreeIndex_CompositeStringKeyTests {
-    static private NonUniqueBTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>> NewIndex(int chunkSize = 256) => new(chunkSize);
+    static private NonUniqueBTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>> NewIndex(int chunkSize = 256) =>
+        new NonUniqueBTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>>(chunkSize);
 
     static private int[] OffsetsOf(NonUniqueBTreeIndex<(int ClubId, string Name), DefaultComparer<(int ClubId, string Name)>> index, (int ClubId, string Name) key) {
         using var list = index.GetOffsets(key);

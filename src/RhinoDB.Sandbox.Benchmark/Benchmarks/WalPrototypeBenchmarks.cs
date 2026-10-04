@@ -11,8 +11,8 @@ public class WalPrototypeBenchmarks {
 
     private string filePath = null!;
     private FileStream fileStream = null!;
-    private readonly Lock appendLock = new();
-    private readonly Lock groupLock = new();
+    private readonly Lock appendLock = new Lock();
+    private readonly Lock groupLock = new Lock();
     private TaskCompletionSource<bool>? inFlightGroup;
     private long nextFreshKey;
 

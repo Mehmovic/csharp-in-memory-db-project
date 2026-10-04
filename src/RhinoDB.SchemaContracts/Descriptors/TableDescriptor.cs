@@ -10,7 +10,7 @@ public sealed class TableDescriptor {
 
     public int Revision { get; set; }
 
-    public FieldDescriptor PrimaryKey { get; set; } = new();
+    public FieldDescriptor PrimaryKey { get; set; } = new FieldDescriptor();
 
     public List<FieldDescriptor> Fields { get; set; } = [];
 

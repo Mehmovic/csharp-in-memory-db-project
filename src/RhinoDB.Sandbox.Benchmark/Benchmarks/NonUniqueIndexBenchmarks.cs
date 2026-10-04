@@ -52,7 +52,7 @@ public class NonUniqueIndexBenchmarks {
         lowBTree = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(ChunkSize);
         wideBTree = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(ChunkSize);
         highBTree = new NonUniqueBTreeIndex<int, DefaultComparer<int>>(ChunkSize);
-        stringBTree = new(ChunkSize);
+        stringBTree = new NonUniqueBTreeIndex<string, OrdinalStringComparer>(ChunkSize);
 
         lowHash = new NonUniqueHashIndex<int>();
         wideHash = new NonUniqueHashIndex<int>();

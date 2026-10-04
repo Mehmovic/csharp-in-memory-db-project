@@ -14,7 +14,7 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
     private const string FrozenSchemaAttributeFullName = "RhinoDB.Core.Tables.FrozenSchemaAttribute";
     private const string PrimaryKeyAttributeFullName = "RhinoDB.Core.Tables.PrimaryKeyAttribute";
 
-    static private readonly DiagnosticDescriptor MissingPrimaryKeyDiagnostic = new(
+    static private readonly DiagnosticDescriptor MissingPrimaryKeyDiagnostic = new DiagnosticDescriptor(
         "RHINO022",
         "Frozen schema row missing [PrimaryKey]",
         "Row type '{0}' is [FrozenSchema]-attributed but declares no [PrimaryKey] parameter - a frozen "
@@ -25,7 +25,7 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor MissingSerializationAttributesDiagnostic = new(
+    static private readonly DiagnosticDescriptor MissingSerializationAttributesDiagnostic = new DiagnosticDescriptor(
         "RHINO025",
         "Frozen schema row missing mandatory client-protocol serialization attribute",
         "Row type '{0}' is [FrozenSchema]-attributed but is missing {1} - this project's ClientProtocol "

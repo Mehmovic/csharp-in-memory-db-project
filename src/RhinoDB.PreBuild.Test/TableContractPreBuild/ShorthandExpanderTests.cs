@@ -4,7 +4,7 @@ using RhinoDB.SchemaContracts;
 namespace RhinoDB.PreBuild.Test;
 
 public class ShorthandExpanderTests {
-    static private readonly Dictionary<string, string> NoProjectSources = new();
+    static private readonly Dictionary<string, string> NoProjectSources = new Dictionary<string, string>();
 
     [Test]
     public void Expand_VersionedMemoryPackProtocol_ReferenceTypedField_UsesVersionTolerantAndNoMessagePack() {

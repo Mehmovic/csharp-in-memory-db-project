@@ -15,7 +15,7 @@ static public class DescriptorBuilder {
         string kind,
         uint tableIdHash,
         int revision
-    ) => new() {
+    ) => new TableDescriptor {
         DatabaseFullName = databaseFullName,
         Accessor = accessor,
         RowTypeFullName = rowType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),

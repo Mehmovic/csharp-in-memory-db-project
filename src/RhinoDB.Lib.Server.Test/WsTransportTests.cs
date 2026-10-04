@@ -49,6 +49,10 @@ public class WsTransportTests {
         }
     }
 
+    private sealed class RejectingDb(ColdStore cold, DbError error) : DbContext(cold) {
+        protected internal override Task<Result> OnClientConnectAsync(Session session) => Task.FromResult(Result.Error(error));
+    }
+
     static private async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 2000) {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
         while (!condition() && DateTime.UtcNow < deadline) await Task.Delay(10);
@@ -189,5 +193,54 @@ public class WsTransportTests {
 
         Assert.That(db.DisconnectCalled, Is.True);
         db.Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task OnClientConnect_RejectingWithSystemFailure_ClosesWithInternalServerErrorAndTheKindAsDescription() {
+        WriteConfig(dir, 0);
+        var hostResult = await RhinoHostBuilder.Create(dir)
+            .AddDatabase<RejectingDb, DefaultTransaction>(options => {
+                options.CreateDb = cold => new RejectingDb(cold, DbError.SystemFailure(new Exception("boom")));
+            })
+            .BuildAsync();
+
+        var host = hostResult.Unwrap();
+        using var _ = host;
+        var client = new ClientWebSocket();
+        await client.ConnectAsync(new Uri($"ws://127.0.0.1:{host.NetworkPort}/rt"), CancellationToken.None);
+
+        var result = await client.ReceiveAsync(new byte[256], CancellationToken.None);
+
+        Assert.That(result.MessageType, Is.EqualTo(WebSocketMessageType.Close));
+        Assert.That(client.CloseStatus, Is.EqualTo(WebSocketCloseStatus.InternalServerError));
+        Assert.That(client.CloseStatusDescription, Is.EqualTo("SystemFailure"));
+        // Echo the close back (same as any well-behaved client would) - otherwise Kestrel's graceful
+        // shutdown waits out its own drain timeout for this still-half-closed connection when the
+        // host is disposed below, making the test take ~30s for no real reason.
+        await client.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
+        host.GetDatabase<RejectingDb>().Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task OnClientConnect_RejectingWithACustomError_ClosesWithPolicyViolationAndTheKindAndCodeAsDescription() {
+        WriteConfig(dir, 0);
+        var hostResult = await RhinoHostBuilder.Create(dir)
+            .AddDatabase<RejectingDb, DefaultTransaction>(options => {
+                options.CreateDb = cold => new RejectingDb(cold, DbError.Custom(42));
+            })
+            .BuildAsync();
+
+        var host = hostResult.Unwrap();
+        using var _ = host;
+        var client = new ClientWebSocket();
+        await client.ConnectAsync(new Uri($"ws://127.0.0.1:{host.NetworkPort}/rt"), CancellationToken.None);
+
+        var result = await client.ReceiveAsync(new byte[256], CancellationToken.None);
+
+        Assert.That(result.MessageType, Is.EqualTo(WebSocketMessageType.Close));
+        Assert.That(client.CloseStatus, Is.EqualTo(WebSocketCloseStatus.PolicyViolation));
+        Assert.That(client.CloseStatusDescription, Is.EqualTo("Custom:42"));
+        await client.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
+        host.GetDatabase<RejectingDb>().Cold!.Dispose();
     }
 }

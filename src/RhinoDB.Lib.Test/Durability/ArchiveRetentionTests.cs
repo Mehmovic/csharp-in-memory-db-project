@@ -87,8 +87,12 @@ public class ArchiveRetentionTests {
         return dir;
     }
 
-    static private DecodedWalEntry StampedEntry(ulong lsn, ulong utcTicks) =>
-        new(lsn, WalEntryKind.Operation, [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes((long)lsn), [9])], utcTicks);
+    static private DecodedWalEntry StampedEntry(ulong lsn, ulong utcTicks) => new DecodedWalEntry(
+        lsn,
+        WalEntryKind.Operation,
+        [new WalChange(1, ChangeKind.Insert, BitConverter.GetBytes((long)lsn), [9])],
+        utcTicks
+    );
 
     private void WriteSegments(string coldPath, params (ulong ticks, uint generation)[] segments) {
         var archiveDir = Path.Combine(coldPath, WalArchive.ArchiveDirectoryName);

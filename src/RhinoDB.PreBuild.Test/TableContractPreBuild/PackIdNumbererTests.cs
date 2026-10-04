@@ -4,8 +4,7 @@ using RhinoDB.PreBuild;
 namespace RhinoDB.PreBuild.Test;
 
 public class PackIdNumbererTests {
-    static private ParsedShorthandField Field(string name, int? explicitPackId = null) =>
-        new(name, "int", ImmutableArray<string>.Empty, explicitPackId);
+    static private ParsedShorthandField Field(string name, int? explicitPackId = null) => new ParsedShorthandField(name, "int", ImmutableArray<string>.Empty, explicitPackId);
 
     [Test]
     public void Assign_NoExplicitPackIdAnywhere_ForwardFillsFromZero() {
