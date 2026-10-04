@@ -18,7 +18,7 @@ public class RawSerializerTests {
         [Database]
         public partial class GameDb : DbContext<GameDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(GameDb))]
+        [Table<GameDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Metric(
@@ -29,7 +29,7 @@ public class RawSerializerTests {
             [property: MemoryPackOrder(4)] [property: Key(4)] string Label
         );
 
-        [Table(TableKind.Persistent, typeof(GameDb))]
+        [Table<GameDb>(TableKind.Persistent)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Ledger(
@@ -98,7 +98,7 @@ public class RawSerializerTests {
         [Database]
         public partial class GameDb : DbContext<GameDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(GameDb))]
+        [Table<GameDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Player(
@@ -136,7 +136,7 @@ public class RawSerializerTests {
         [Database]
         public partial class GameDb : DbContext<GameDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(GameDb))]
+        [Table<GameDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Inventory(
@@ -184,7 +184,7 @@ public class RawSerializerTests {
         [Database]
         public partial class PointDb : DbContext<PointDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(PointDb))]
+        [Table<PointDb>(TableKind.Instant)]
         [MemoryPackable]
         [MessagePackObject]
         public readonly partial record struct Point(

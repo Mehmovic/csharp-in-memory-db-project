@@ -23,14 +23,14 @@ public class IndexComparerEmissionTests {
         public partial class CompDb : DbContext<CompDbTransaction> { }
 
         // A string BTree PRIMARY key - the single-string ordinal case. A Hash primary key takes no comparer, so the kind has to be explicit for this to mean anything.
-        [Table(TableKind.Instant, typeof(CompDb))]
+        [Table<CompDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Team(
             [PrimaryKey(IndexKind.BTree)] [property: MemoryPackOrder(0)] [property: Key(0)] string Name);
 
         // Secondary indexes over string, composite, and a non-string key for contrast.
-        [Table(TableKind.Instant, typeof(CompDb))]
+        [Table<CompDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Player(

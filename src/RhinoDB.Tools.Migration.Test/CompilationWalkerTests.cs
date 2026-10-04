@@ -13,7 +13,7 @@ public class CompilationWalkerTests {
             [Database]
             public partial class GameDb { }
 
-            [Table(TableKind.Instant, typeof(GameDb))]
+            [Table<GameDb>(TableKind.Instant)]
             public readonly partial record struct Widget([PrimaryKey] int Id, string Name);
             """);
 
@@ -37,7 +37,7 @@ public class CompilationWalkerTests {
             [Database]
             public partial class GameDb { }
 
-            [Table(TableKind.Persistent, typeof(GameDb))]
+            [Table<GameDb>(TableKind.Persistent)]
             public readonly partial record struct Account([PrimaryKey] int Id, decimal Balance);
             """);
 
@@ -56,7 +56,7 @@ public class CompilationWalkerTests {
             [Database]
             public partial class GameDb { }
 
-            [Table(TableKind.Instant, typeof(GameDb), Accessor = "Players")]
+            [Table<GameDb>(TableKind.Instant, Accessor = "Players")]
             public readonly partial record struct Widget([PrimaryKey] int Id);
             """);
 
@@ -78,8 +78,8 @@ public class CompilationWalkerTests {
             [Database]
             public partial class AdminDb { }
 
-            [Table(TableKind.Instant, typeof(GameDb))]
-            [Table(TableKind.Instant, typeof(AdminDb))]
+            [Table<GameDb>(TableKind.Instant)]
+            [Table<AdminDb>(TableKind.Instant)]
             public readonly partial record struct Widget([PrimaryKey] int Id);
             """);
 
@@ -99,7 +99,7 @@ public class CompilationWalkerTests {
             [Database]
             public partial class GameDb { }
 
-            [Table(TableKind.Instant, typeof(GameDb))]
+            [Table<GameDb>(TableKind.Instant)]
             public readonly partial record struct Widget(int Id);
             """);
 
@@ -137,7 +137,7 @@ public class CompilationWalkerTests {
             [CustomType]
             public readonly partial record struct Loadout(int WeaponId);
 
-            [Table(TableKind.Instant, typeof(GameDb))]
+            [Table<GameDb>(TableKind.Instant)]
             public readonly partial record struct Player([PrimaryKey] int Id, Loadout Loadout);
             """);
 
@@ -159,7 +159,7 @@ public class CompilationWalkerTests {
             [Database]
             public partial class GameDb { }
 
-            [Table(TableKind.Instant, typeof(GameDb))]
+            [Table<GameDb>(TableKind.Instant)]
             public readonly partial record struct Widget([PrimaryKey] int Id);
 
             public readonly partial record struct Widget {

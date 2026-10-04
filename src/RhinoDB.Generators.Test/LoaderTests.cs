@@ -23,21 +23,21 @@ public class LoaderTests {
         [Database]
         public partial class GameDb : DbContext<GameDbTransaction> { }
 
-        [Table(TableKind.Persistent, typeof(GameDb))]
+        [Table<GameDb>(TableKind.Persistent)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Club(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] int Rating);
 
-        [Table(TableKind.Persistent, typeof(GameDb), Evictable = true)]
+        [Table<GameDb>(TableKind.Persistent, Evictable = true)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Account(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance);
 
-        [Table(TableKind.Instant, typeof(GameDb))]
+        [Table<GameDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Session([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
@@ -198,7 +198,7 @@ public class LoaderTests {
             [Database]
             public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
 
-            [Table(TableKind.Persistent, typeof(LeagueDb))]
+            [Table<LeagueDb>(TableKind.Persistent)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Club(
@@ -270,7 +270,7 @@ public class LoaderTests {
             [Database]
             public partial class ShopDb : DbContext<ShopDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(ShopDb))]
+            [Table<ShopDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);

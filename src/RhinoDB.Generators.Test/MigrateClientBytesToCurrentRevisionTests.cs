@@ -38,7 +38,7 @@ public class MigrateClientBytesToCurrentRevisionTests {
                                             [PrimaryKey] [property: MemoryPackOrder(0)] int Id,
                                             [property: MemoryPackOrder(1)] decimal Balance);
 
-                                        [Table(TableKind.Persistent, typeof(VaultDb))]
+                                        [Table<VaultDb>(TableKind.Persistent)]
                                         [MemoryPackable]
                                         public readonly partial record struct Account(
                                             [PrimaryKey] [property: MemoryPackOrder(0)] int Id,
@@ -121,7 +121,7 @@ public class MigrateClientBytesToCurrentRevisionTests {
             [MessagePackObject]
             public readonly record struct AccountV0([PrimaryKey] [property: Key(0)] int Id);
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             [MessagePackObject]
             public readonly partial record struct Account([PrimaryKey] [property: Key(0)] int Id, [property: Key(1)] decimal Balance) {
                 [Migration(0)]

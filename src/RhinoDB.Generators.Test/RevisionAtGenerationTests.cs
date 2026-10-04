@@ -39,7 +39,7 @@ public class RevisionAtGenerationTests {
                                   [Database]
                                   public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-                                  [Table(TableKind.Persistent, typeof(VaultDb))]
+                                  [Table<VaultDb>(TableKind.Persistent)]
                                   [MemoryPackable]
                                   [MessagePackObject]
                                   public readonly partial record struct Account([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);

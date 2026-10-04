@@ -89,7 +89,7 @@ public class ExpandShorthandTaskExecuteTests {
                 [Database]
                 public partial class SampleDb { }
 
-                [InstantTable(typeof(SampleDb))]
+                [InstantTable<SampleDb>]
                 public readonly partial record struct Player([PrimaryKey] int Id, string Name);
                 """);
 

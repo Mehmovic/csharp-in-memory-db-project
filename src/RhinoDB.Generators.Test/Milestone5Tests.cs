@@ -16,7 +16,7 @@ public class Milestone5Tests {
         [Database]
         public partial class ShopDb : DbContext<ShopDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(ShopDb))]
+        [Table<ShopDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Club(
@@ -138,7 +138,7 @@ public class Milestone5Tests {
             [Database]
             public partial class BadDb : DbContext<BadDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(BadDb))]
+            [Table<BadDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id) {
@@ -168,7 +168,7 @@ public class Milestone5Tests {
             [Database]
             public partial class PrivateValidateDb : DbContext<PrivateValidateDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(PrivateValidateDb))]
+            [Table<PrivateValidateDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id) {

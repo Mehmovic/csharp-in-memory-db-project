@@ -15,7 +15,7 @@ public class AutoIncrementTests {
         [Database]
         public partial class GadgetDb : DbContext<GadgetDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(GadgetDb))]
+        [Table<GadgetDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Gadget(
@@ -147,7 +147,7 @@ public class AutoIncrementTests {
             [Database]
             public partial class WidgetDb : DbContext<WidgetDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(WidgetDb))]
+            [Table<WidgetDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Widget(
@@ -203,7 +203,7 @@ public class AutoIncrementTests {
             [Database]
             public partial class TicketDb : DbContext<TicketDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(TicketDb))]
+            [Table<TicketDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Ticket(
@@ -263,7 +263,7 @@ public class AutoIncrementTests {
             [Database]
             public partial class NegDb : DbContext<NegDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(NegDb))]
+            [Table<NegDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Item(
@@ -309,7 +309,7 @@ public class AutoIncrementTests {
             [Database]
             public partial class CrateDb : DbContext<CrateDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(CrateDb))]
+            [Table<CrateDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Crate(
@@ -363,7 +363,7 @@ public class AutoIncrementTests {
             [Database]
             public partial class BadDb : DbContext<BadDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(BadDb))]
+            [Table<BadDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Invoice(

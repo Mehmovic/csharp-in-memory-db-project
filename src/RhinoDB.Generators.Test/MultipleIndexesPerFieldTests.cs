@@ -23,7 +23,7 @@ public class MultipleIndexesPerFieldTests {
         [Database]
         public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(LeagueDb))]
+        [Table<LeagueDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Player(

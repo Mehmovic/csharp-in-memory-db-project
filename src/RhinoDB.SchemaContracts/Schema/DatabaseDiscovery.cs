@@ -6,6 +6,7 @@ namespace RhinoDB.SchemaContracts;
 
 static public class DatabaseDiscovery {
     public const string DatabaseAttributeFullName = "RhinoDB.Core.Tables.DatabaseAttribute";
+    public const string ChildDatabaseAttributeFullName = "RhinoDB.Core.Tables.ChildDatabaseAttribute`2";
 
     static public DatabaseModel ToDatabaseModel(GeneratorAttributeSyntaxContext ctx) {
         var databaseType = (INamedTypeSymbol)ctx.TargetSymbol;
@@ -15,6 +16,14 @@ static public class DatabaseDiscovery {
             databaseType.Name,
             databaseType.ContainingNamespace.IsGlobalNamespace ? null : databaseType.ContainingNamespace.ToDisplayString(),
             invalidGenerations
+        );
+    }
+
+    static public (string RootFullName, string KeyFullName) ToChildDatabaseTypeArgs(GeneratorAttributeSyntaxContext ctx) {
+        var attributeClass = (INamedTypeSymbol)ctx.Attributes[0].AttributeClass!;
+        return (
+            attributeClass.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            attributeClass.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
         );
     }
 

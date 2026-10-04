@@ -22,7 +22,7 @@ public class CompositeStringIndexTests {
         [Database]
         public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(LeagueDb))]
+        [Table<LeagueDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Player(
@@ -30,7 +30,7 @@ public class CompositeStringIndexTests {
             [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "ByClubAndName", Order = 0)] [property: MemoryPackOrder(1)] [property: Key(1)] int ClubId,
             [Index(IndexKind.Hash, Uniqueness.Unique, Accessor = "ByClubAndName", Order = 1)] [property: MemoryPackOrder(2)] [property: Key(2)] string Name);
 
-        [Table(TableKind.Instant, typeof(LeagueDb))]
+        [Table<LeagueDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct SquadSlot(

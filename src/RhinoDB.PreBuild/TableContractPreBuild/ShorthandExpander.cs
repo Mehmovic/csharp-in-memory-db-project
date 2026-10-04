@@ -51,7 +51,7 @@ static public class ShorthandExpander {
 
         var kindName = parsed.Kind == ShorthandKind.InstantTable ? "TableKind.Instant" : "TableKind.Persistent";
         var namedArgs = string.Concat(parsed.TableNamedArguments.Select(a => $", {a.Name} = {a.Value}"));
-        sb.AppendLine($"[Table({kindName}, typeof({parsed.DatabaseTypeName}){namedArgs})]");
+        sb.AppendLine($"[Table<{parsed.DatabaseTypeName}>({kindName}{namedArgs})]");
     }
 
     static private void EmitFields(StringBuilder sb, ImmutableArray<ParsedShorthandField> fields, ImmutableArray<byte> slots) {

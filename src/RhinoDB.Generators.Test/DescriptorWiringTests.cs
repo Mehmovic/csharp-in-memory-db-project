@@ -17,7 +17,7 @@ public class DescriptorWiringTests {
             [Database]
             public partial class GameDb : DbContext<GameDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(GameDb))]
+            [Table<GameDb>(TableKind.Instant)]
             [MemoryPackable]
             [MessagePackObject]
             public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
@@ -50,7 +50,7 @@ public class DescriptorWiringTests {
             [Database]
             public partial class GameDb : DbContext<GameDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(GameDb))]
+            [Table<GameDb>(TableKind.Instant)]
             [MemoryPackable]
             [MessagePackObject]
             public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
@@ -75,7 +75,7 @@ public class DescriptorWiringTests {
             [Database]
             public partial class GameDb : DbContext<GameDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(GameDb))]
+            [Table<GameDb>(TableKind.Instant)]
             [MemoryPackable]
             [MessagePackObject]
             public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
@@ -125,7 +125,7 @@ public class DescriptorWiringTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Account(
@@ -153,7 +153,7 @@ public class DescriptorWiringTests {
             [FrozenSchema(0)]
             public readonly record struct OldAccountShape([PrimaryKey] int Id, decimal Balance);
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Account(
@@ -180,7 +180,7 @@ public class DescriptorWiringTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Account(
@@ -205,7 +205,7 @@ public class DescriptorWiringTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct BrandNewTable(
@@ -232,7 +232,7 @@ public class DescriptorWiringTests {
             public readonly record struct AccountV0(int Id);
             public readonly record struct AccountV2(int Id, decimal Balance);
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Account(

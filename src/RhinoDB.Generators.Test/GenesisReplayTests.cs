@@ -22,7 +22,7 @@ public class GenesisReplayTests {
         [Database]
         public partial class GameDb : DbContext<GameDbTransaction> { }
 
-        [Table(TableKind.Persistent, typeof(GameDb))]
+        [Table<GameDb>(TableKind.Persistent)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Club(

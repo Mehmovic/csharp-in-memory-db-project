@@ -20,7 +20,7 @@ public class Milestone2Tests {
         [Database]
         public partial class ShopDb : DbContext<ShopDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(ShopDb))]
+        [Table<ShopDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Club(
@@ -28,7 +28,7 @@ public class Milestone2Tests {
             [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
             [Index(IndexKind.Hash, Uniqueness.Unique)] [property: MemoryPackOrder(2)] [property: Key(2)] string ShortCode);
 
-        [Table(TableKind.Instant, typeof(ShopDb))]
+        [Table<ShopDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Player(
@@ -36,7 +36,7 @@ public class Milestone2Tests {
             [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
             [Index(IndexKind.Hash, Uniqueness.NonUnique)] [property: MemoryPackOrder(2)] [property: Key(2)] int ClubId);
 
-        [Table(TableKind.Instant, typeof(ShopDb))]
+        [Table<ShopDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Fixture(

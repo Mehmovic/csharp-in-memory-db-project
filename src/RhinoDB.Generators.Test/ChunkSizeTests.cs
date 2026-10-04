@@ -20,7 +20,7 @@ public class ChunkSizeTests {
         [Database]
         public partial class DefaultChunkDb : DbContext<DefaultChunkDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(DefaultChunkDb))]
+        [Table<DefaultChunkDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
@@ -37,7 +37,7 @@ public class ChunkSizeTests {
         [Database]
         public partial class ExplicitChunkDb : DbContext<ExplicitChunkDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(ExplicitChunkDb), ChunkSize = 100)]
+        [Table<ExplicitChunkDb>(TableKind.Instant, ChunkSize = 100)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);

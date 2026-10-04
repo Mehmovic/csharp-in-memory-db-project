@@ -35,7 +35,7 @@ public class OperationRevertPersistentTests {
         [Database]
         public partial class PRDb : DbContext<PRDbTransaction> { }
 
-        [Table(TableKind.Persistent, typeof(PRDb))]
+        [Table<PRDb>(TableKind.Persistent)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Vault(
@@ -45,7 +45,7 @@ public class OperationRevertPersistentTests {
 
         // Same operation, second table, opposite kind - proves the transaction-level
         // revert loop spans both kinds rather than only the ones it was written for.
-        [Table(TableKind.Instant, typeof(PRDb))]
+        [Table<PRDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Tally(
@@ -55,7 +55,7 @@ public class OperationRevertPersistentTests {
         // Evictable: Evict stages a candidate that is applied at the NEXT operation
         // boundary, not during Apply, so an eviction and a revert interact across two
         // operations rather than one.
-        [Table(TableKind.Persistent, typeof(PRDb), Evictable = true)]
+        [Table<PRDb>(TableKind.Persistent, Evictable = true)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Crate(

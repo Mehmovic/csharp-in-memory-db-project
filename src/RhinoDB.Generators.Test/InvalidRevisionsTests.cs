@@ -16,7 +16,7 @@ public class InvalidRevisionsTests {
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
             [InvalidRevisions(Revisions = new[] { 0 })]
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             public readonly partial record struct Widget([PrimaryKey] int Id);
             """;
 
@@ -36,7 +36,7 @@ public class InvalidRevisionsTests {
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
             [InvalidRevisions(Revisions = new[] { -1 })]
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             public readonly partial record struct Widget([PrimaryKey] int Id);
             """;
 
@@ -55,7 +55,7 @@ public class InvalidRevisionsTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             public readonly partial record struct Widget([PrimaryKey] int Id);
             """;
 
@@ -79,7 +79,7 @@ public class InvalidRevisionsTests {
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
             [InvalidRevisions(Revisions = new[] { 3, 5 })]
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             public readonly partial record struct Widget([PrimaryKey] int Id);
             """;
 
@@ -108,8 +108,8 @@ public class InvalidRevisionsTests {
             public partial class ArchiveDb : DbContext<ArchiveDbTransaction> { }
 
             [InvalidRevisions(Revisions = new[] { 3 })]
-            [Table(TableKind.Persistent, typeof(VaultDb))]
-            [Table(TableKind.Persistent, typeof(ArchiveDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
+            [Table<ArchiveDb>(TableKind.Persistent)]
             public readonly partial record struct Widget([PrimaryKey] int Id);
             """;
 

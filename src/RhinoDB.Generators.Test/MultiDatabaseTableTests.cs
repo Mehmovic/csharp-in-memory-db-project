@@ -18,8 +18,8 @@ public class MultiDatabaseTableTests {
         [Database]
         public partial class ShardDb : DbContext<ShardDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(GameDb))]
-        [Table(TableKind.Instant, typeof(ShardDb))]
+        [Table<GameDb>(TableKind.Instant)]
+        [Table<ShardDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Player(
@@ -89,8 +89,8 @@ public class MultiDatabaseTableTests {
             [Database]
             public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(LeagueDb), Accessor = "PrimaryPlayers")]
-            [Table(TableKind.Instant, typeof(LeagueDb), Accessor = "BackupPlayers")]
+            [Table<LeagueDb>(TableKind.Instant, Accessor = "PrimaryPlayers")]
+            [Table<LeagueDb>(TableKind.Instant, Accessor = "BackupPlayers")]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(
@@ -220,7 +220,7 @@ public class MultiDatabaseTableTests {
             [Database]
             public partial class SecondDb : DbContext<SecondDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(FirstDb))]
+            [Table<FirstDb>(TableKind.Instant)]
             [Table(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
@@ -246,8 +246,8 @@ public class MultiDatabaseTableTests {
             [Database]
             public partial class DupAccessorDb : DbContext<DupAccessorDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(DupAccessorDb), Accessor = "Players")]
-            [Table(TableKind.Instant, typeof(DupAccessorDb), Accessor = "Players")]
+            [Table<DupAccessorDb>(TableKind.Instant, Accessor = "Players")]
+            [Table<DupAccessorDb>(TableKind.Instant, Accessor = "Players")]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(

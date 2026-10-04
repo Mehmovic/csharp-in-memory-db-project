@@ -28,7 +28,7 @@ public class OperationRevertTests {
         [Database]
         public partial class RevertDb : DbContext<RevertDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(RevertDb))]
+        [Table<RevertDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Account(
@@ -36,7 +36,7 @@ public class OperationRevertTests {
             [property: MemoryPackOrder(1)] [property: Key(1)] int Balance,
             [Index(IndexKind.Hash, Uniqueness.NonUnique)] [property: MemoryPackOrder(2)] [property: Key(2)] int ClubId);
 
-        [Table(TableKind.Instant, typeof(RevertDb))]
+        [Table<RevertDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Ledger(

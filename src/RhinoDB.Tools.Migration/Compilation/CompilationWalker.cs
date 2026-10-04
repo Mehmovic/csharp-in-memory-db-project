@@ -21,7 +21,7 @@ static public class CompilationWalker {
 
         var tables = new List<TableDescriptor>();
         foreach (var type in types) {
-            var tableAttributes = type.GetAttributes().Where(a => a.AttributeClass?.ToDisplayString() == TableAttributeFullName).ToImmutableArray();
+            var tableAttributes = type.GetAttributes().Where(a => IsTableAttributeClass(a.AttributeClass)).ToImmutableArray();
             if (tableAttributes.Length == 0) continue;
 
             var primaryCtor = SchemaWalk.FindPrimaryConstructor(type);
@@ -32,8 +32,8 @@ static public class CompilationWalker {
             if (primaryKeyParam is null) continue;
 
             foreach (var attribute in tableAttributes) {
+                if (ExplicitDatabaseType(attribute) is not { } databaseType) continue;
                 var kind = (int)attribute.ConstructorArguments[0].Value! == 0 ? "Instant" : "Persistent";
-                var databaseType = (INamedTypeSymbol)attribute.ConstructorArguments[1].Value!;
                 var accessor = StringNamedArg(attribute, "Accessor") is { Length: > 0 } explicitAccessor ? explicitAccessor : type.Name;
 
                 tables.Add(DescriptorBuilder.BuildTable(
@@ -70,4 +70,12 @@ static public class CompilationWalker {
     }
 
     static private uint ComputeTableId(string accessor) => TableIdHash.Compute(accessor);
+
+    static private bool IsTableAttributeClass(INamedTypeSymbol? attributeClass) =>
+        attributeClass is { Name: "TableAttribute" } && attributeClass.ContainingNamespace.ToDisplayString() == "RhinoDB.Core.Tables";
+
+    static private INamedTypeSymbol? ExplicitDatabaseType(AttributeData attribute) =>
+        attribute.AttributeClass is { IsGenericType: true, TypeArguments.Length: 1 } genericAttributeClass
+            ? (INamedTypeSymbol)genericAttributeClass.TypeArguments[0]
+            : null;
 }

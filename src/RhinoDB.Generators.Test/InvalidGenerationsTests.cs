@@ -12,7 +12,7 @@ public class InvalidGenerationsTests {
             [Database(InvalidGenerations = new[] { 0 })]
             public partial class ZeroGenDb : DbContext<ZeroGenDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(ZeroGenDb))]
+            [Table<ZeroGenDb>(TableKind.Instant)]
             public readonly partial record struct Widget([PrimaryKey] int Id);
             """;
 
@@ -31,7 +31,7 @@ public class InvalidGenerationsTests {
             [Database(InvalidGenerations = new[] { -1 })]
             public partial class NegativeGenDb : DbContext<NegativeGenDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(NegativeGenDb))]
+            [Table<NegativeGenDb>(TableKind.Instant)]
             public readonly partial record struct Widget([PrimaryKey] int Id);
             """;
 
@@ -52,7 +52,7 @@ public class InvalidGenerationsTests {
             [Database]
             public partial class PlainDb : DbContext<PlainDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(PlainDb))]
+            [Table<PlainDb>(TableKind.Instant)]
             [MemoryPackable]
             [MessagePackObject]
             public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);
@@ -79,7 +79,7 @@ public class InvalidGenerationsTests {
             [Database(InvalidGenerations = new[] { 3, 5 })]
             public partial class TaintedDb : DbContext<TaintedDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(TaintedDb))]
+            [Table<TaintedDb>(TableKind.Instant)]
             [MemoryPackable]
             [MessagePackObject]
             public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);

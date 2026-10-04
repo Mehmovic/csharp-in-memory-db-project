@@ -39,7 +39,7 @@ public class CustomTypeGeneratorTests {
             [property: MemoryPackOrder(0)] [property: Key(0)] string Email,
             [property: MemoryPackOrder(1)] [property: Key(1)] Address HomeAddress);
 
-        [Table(TableKind.Instant, typeof(GameDb))]
+        [Table<GameDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Player(

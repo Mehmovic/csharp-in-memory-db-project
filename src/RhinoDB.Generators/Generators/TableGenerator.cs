@@ -11,6 +11,7 @@ namespace RhinoDB.Generators;
 [Generator]
 public sealed class TableGenerator : IIncrementalGenerator {
     private const string TableAttributeFullName = "RhinoDB.Core.Tables.TableAttribute";
+    private const string TableGenericAttributeFullName = "RhinoDB.Core.Tables.TableAttribute`1";
     private const string PrimaryKeyAttributeFullName = "RhinoDB.Core.Tables.PrimaryKeyAttribute";
     private const string AutoIncrementAttributeFullName = "RhinoDB.Core.Tables.AutoIncrementAttribute";
     private const string IndexAttributeFullName = "RhinoDB.Core.Tables.IndexAttribute";
@@ -232,11 +233,11 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private readonly DiagnosticDescriptor MixedExplicitAndOmittedDatabaseDiagnostic = new DiagnosticDescriptor(
         "RHINO028",
-        "[Table] mixes an explicit typeof(...) with an omitted one on the same row",
-        "'{0}' has both a [Table] attribute naming an explicit database and one that omits it - omitting "
-        + "typeof(...) means \"build this table for every declared [Database],\" which no longer makes sense "
-        + "once another attribute on the same row already pins one specific database. Either give every "
-        + "attribute an explicit typeof(...), or omit it on all of them.",
+        "[Table] mixes an explicit [Table<TDb>] with an omitted [Table] on the same row",
+        "'{0}' has both a [Table<TDb>] attribute naming an explicit database and a [Table] attribute that "
+        + "omits it - omitting the database means \"build this table for every declared [Database],\" which no "
+        + "longer makes sense once another attribute on the same row already pins one specific database. "
+        + "Either give every attribute an explicit [Table<TDb>], or use the non-generic [Table] on all of them.",
         "RhinoDB.Generators",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
@@ -245,8 +246,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
     static private readonly DiagnosticDescriptor NoDatabaseFoundDiagnostic = new DiagnosticDescriptor(
         "RHINO029",
         "[Table] omits the database type and no [Database] type was found",
-        "'{0}' is [Table]-attributed without specifying typeof(...) for its database, and this compilation "
-        + "declares no [Database] type to infer it from - specify one explicitly, e.g. [Table(TableKind.X, typeof(YourDb))]",
+        "'{0}' is [Table]-attributed without specifying an explicit database, and this compilation "
+        + "declares no [Database] type to infer it from - specify one explicitly, e.g. [Table<YourDb>(TableKind.X)]",
         "RhinoDB.Generators",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
@@ -293,15 +294,46 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var declaredDatabaseFullNames = databases.Collect()
             .Select(static (dbs, _) => dbs.Select(d => d.FullName).ToImmutableArray());
 
-        var tableResults = context.SyntaxProvider
+        var childDatabases = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                DatabaseDiscovery.ChildDatabaseAttributeFullName,
+                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                transform: static (ctx, _) => DatabaseDiscovery.ToDatabaseModel(ctx)
+            );
+
+        var emitTargetDatabases = databases.Collect()
+            .Combine(childDatabases.Collect())
+            .Select(static (pair, _) => pair.Left.Concat(pair.Right).ToImmutableArray())
+            .SelectMany(static (dbs, _) => dbs);
+
+        var omittedTableRows = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 TableAttributeFullName,
                 predicate: static (node, _) => node is StructDeclarationSyntax or RecordDeclarationSyntax,
                 transform: static (ctx, _) => ctx
-            )
+            );
+
+        var explicitTableRows = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                TableGenericAttributeFullName,
+                predicate: static (node, _) => node is StructDeclarationSyntax or RecordDeclarationSyntax,
+                transform: static (ctx, _) => ctx
+            );
+
+        var tableRowContexts = omittedTableRows.Collect()
+            .Combine(explicitTableRows.Collect())
+            .Select(static (pair, _) => pair.Left
+                .Concat(pair.Right)
+                .GroupBy(static c => c.TargetSymbol, SymbolEqualityComparer.Default)
+                .Select(static g => g.First())
+                .ToImmutableArray());
+
+        var tableResults = tableRowContexts
             .Combine(configProtocol)
             .Combine(declaredDatabaseFullNames)
-            .Select(static (pair, _) => ToTableModels(pair.Left.Left, pair.Left.Right, pair.Right))
+            .Select(static (pair, _) => pair.Left.Left
+                .SelectMany(ctx => ToTableModels(ctx, pair.Left.Right, pair.Right))
+                .ToImmutableArray())
             .SelectMany(static (results, _) => results);
 
         context.RegisterSourceOutput(
@@ -327,7 +359,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
                 }
             });
 
-        var combined = databases.Combine(tables).Combine(descriptor).Combine(configResult);
+        var combined = emitTargetDatabases.Combine(tables).Combine(descriptor).Combine(configResult);
         context.RegisterSourceOutput(combined, static (spc, pair) => {
             if (pair.Left.Right.ParseError is { } descriptorDiagnostic) spc.ReportDiagnostic(descriptorDiagnostic);
             if (pair.Right.ParseError is { } configDiagnostic) spc.ReportDiagnostic(configDiagnostic);
@@ -623,8 +655,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
         if (rowDiagnostics.Count > 0) return [(null, rowDiagnostics.ToImmutable())];
 
-        var hasExplicitDatabase = ctx.Attributes.Any(a => a.ConstructorArguments[1].Value is INamedTypeSymbol);
-        var hasOmittedDatabase = ctx.Attributes.Any(a => a.ConstructorArguments[1].Value is not INamedTypeSymbol);
+        var tableAttributes = rowType.GetAttributes().Where(IsTableAttributeClass).ToImmutableArray();
+
+        var hasExplicitDatabase = tableAttributes.Any(a => ExplicitDatabaseType(a) is not null);
+        var hasOmittedDatabase = tableAttributes.Any(a => ExplicitDatabaseType(a) is null);
         if (hasExplicitDatabase && hasOmittedDatabase) {
             return [
                 (null, ImmutableArray.Create(Diagnostic.Create(MixedExplicitAndOmittedDatabaseDiagnostic, ctx.TargetNode.GetLocation(), rowType.Name)))
@@ -632,8 +666,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         }
 
         var expanded = ImmutableArray.CreateBuilder<(AttributeData Attribute, string OwnerDatabaseFullName)>();
-        foreach (var attribute in ctx.Attributes) {
-            if (attribute.ConstructorArguments[1].Value is INamedTypeSymbol explicitDatabaseType) {
+        foreach (var attribute in tableAttributes) {
+            if (ExplicitDatabaseType(attribute) is { } explicitDatabaseType) {
                 expanded.Add((attribute, explicitDatabaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
                 continue;
             }
@@ -866,6 +900,15 @@ public sealed class TableGenerator : IIncrementalGenerator {
             : $"{KeyExpr("inserted", idx)}, i";
 
     static private uint ComputeTableId(string accessor) => TableIdHash.Compute(accessor);
+
+    static private bool IsTableAttributeClass(AttributeData attribute) =>
+        attribute.AttributeClass is { Name: "TableAttribute" } attributeClass
+        && attributeClass.ContainingNamespace.ToDisplayString() == "RhinoDB.Core.Tables";
+
+    static private INamedTypeSymbol? ExplicitDatabaseType(AttributeData attribute) =>
+        attribute.AttributeClass is { IsGenericType: true, TypeArguments.Length: 1 } genericAttributeClass
+            ? (INamedTypeSymbol)genericAttributeClass.TypeArguments[0]
+            : null;
 
     static private string EmitOpsClass(TableModel table, DatabaseModel database, DatabaseContractDescriptor? descriptor, ClientProtocolKind clientProtocol) =>
         table.Kind == TableKind.Persistent

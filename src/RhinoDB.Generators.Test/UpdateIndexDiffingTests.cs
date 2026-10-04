@@ -28,7 +28,7 @@ public class UpdateIndexDiffingTests {
         [Database]
         public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(LeagueDb))]
+        [Table<LeagueDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Club(
@@ -36,7 +36,7 @@ public class UpdateIndexDiffingTests {
             [property: MemoryPackOrder(1)] [property: Key(1)] string Name,
             [Index(IndexKind.Hash, Uniqueness.Unique)] [property: MemoryPackOrder(2)] [property: Key(2)] string ShortCode);
 
-        [Table(TableKind.Instant, typeof(LeagueDb))]
+        [Table<LeagueDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Player(

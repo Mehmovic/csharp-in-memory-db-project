@@ -27,7 +27,7 @@ public class PersistentSecondaryIndexTests {
         [Database]
         public partial class BankDb : DbContext<BankDbTransaction> { }
 
-        [Table(TableKind.Persistent, typeof(BankDb), Evictable = true)]
+        [Table<BankDb>(TableKind.Persistent, Evictable = true)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Account(

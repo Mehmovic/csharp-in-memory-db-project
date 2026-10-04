@@ -5,5 +5,5 @@ namespace CreateSampleProject;
 [Database]
 public partial class SampleDb { }
 
-[Table(TableKind.Persistent, typeof(SampleDb))]
+[Table<SampleDb>(TableKind.Persistent)]
 public readonly partial record struct Widget([PrimaryKey] int Id, string Name);

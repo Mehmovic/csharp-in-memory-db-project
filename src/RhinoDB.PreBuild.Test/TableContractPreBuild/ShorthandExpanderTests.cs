@@ -13,7 +13,7 @@ public class ShorthandExpanderTests {
 
             namespace TestNs;
 
-            [InstantTable(typeof(GameDb))]
+            [InstantTable<GameDb>]
             public readonly partial record struct Metric(
                 [PrimaryKey] int Id,
                 uint Count,
@@ -33,7 +33,7 @@ public class ShorthandExpanderTests {
 
             namespace TestNs;
 
-            [Table(TableKind.Instant, typeof(GameDb))]
+            [Table<GameDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             public readonly partial record struct Metric(
                 [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
@@ -53,7 +53,7 @@ public class ShorthandExpanderTests {
         var shorthand = """
             namespace TestNs;
 
-            [InstantTable(typeof(UnmanagedDb))]
+            [InstantTable<UnmanagedDb>]
             public readonly partial record struct Point(
                 [PrimaryKey] int Id,
                 int X,
@@ -70,7 +70,7 @@ public class ShorthandExpanderTests {
 
             namespace TestNs;
 
-            [Table(TableKind.Instant, typeof(UnmanagedDb))]
+            [Table<UnmanagedDb>(TableKind.Instant)]
             [MemoryPackable]
             public readonly partial record struct Point(
                 [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
@@ -88,7 +88,7 @@ public class ShorthandExpanderTests {
         var shorthand = """
             namespace TestNs;
 
-            [InstantTable(typeof(GameDb))]
+            [InstantTable<GameDb>]
             public readonly partial record struct Point(
                 [PrimaryKey] int Id,
                 int X
@@ -106,7 +106,7 @@ public class ShorthandExpanderTests {
         var shorthand = """
             namespace TestNs;
 
-            [InstantTable(typeof(GameDb))]
+            [InstantTable<GameDb>]
             public readonly partial record struct Point(
                 [PrimaryKey] int Id,
                 int X
@@ -124,7 +124,7 @@ public class ShorthandExpanderTests {
         var shorthand = """
             namespace TestNs;
 
-            [PersistentTable(typeof(GameDb), Accessor = "Widgets", ChunkSize = 8192)]
+            [PersistentTable<GameDb>(Accessor = "Widgets", ChunkSize = 8192)]
             public readonly partial record struct PersistentSample(
                 [PrimaryKey] int Id,
                 long Value
@@ -133,7 +133,7 @@ public class ShorthandExpanderTests {
 
         var expanded = ShorthandExpander.Expand(shorthand, NoProjectSources, ClientProtocolKind.Raw);
 
-        Assert.That(expanded, Does.Contain("[Table(TableKind.Persistent, typeof(GameDb), Accessor = \"Widgets\", ChunkSize = 8192)]"));
+        Assert.That(expanded, Does.Contain("[Table<GameDb>(TableKind.Persistent, Accessor = \"Widgets\", ChunkSize = 8192)]"));
     }
 
     [Test]

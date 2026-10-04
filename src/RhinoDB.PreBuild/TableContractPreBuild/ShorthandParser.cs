@@ -62,11 +62,10 @@ static public class ShorthandParser {
         };
 
     static private string ParseDatabaseArgument(AttributeSyntax attr, string typeName) {
-        var positional = attr.ArgumentList?.Arguments.FirstOrDefault(a => a.NameEquals is null);
-        if (positional?.Expression is not TypeOfExpressionSyntax typeOf)
-            throw new ShorthandParseException($"'{typeName}''s shorthand table attribute must have a 'typeof(Db)' first argument.");
+        if (attr.Name is not GenericNameSyntax { TypeArgumentList.Arguments.Count: 1 } generic)
+            throw new ShorthandParseException($"'{typeName}''s shorthand table attribute must name the database as a generic type argument, e.g. [InstantTable<YourDb>].");
 
-        return typeOf.Type.ToString();
+        return generic.TypeArgumentList.Arguments[0].ToString();
     }
 
     static private ImmutableArray<(string Name, string Value)> ParseNamedArguments(AttributeSyntax attr) {

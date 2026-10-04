@@ -10,7 +10,7 @@ public class ShorthandParserTests {
 
             namespace TestNs;
 
-            [InstantTable(typeof(GameDb))]
+            [InstantTable<GameDb>]
             public readonly partial record struct InstantSample(
                 [PrimaryKey] int Id,
                 long Value
@@ -38,7 +38,7 @@ public class ShorthandParserTests {
         var parsed = ShorthandParser.Parse("""
             namespace TestNs;
 
-            [PersistentTable(typeof(GameDb), Accessor = "Widgets", ChunkSize = 8192, Evictable = true)]
+            [PersistentTable<GameDb>(Accessor = "Widgets", ChunkSize = 8192, Evictable = true)]
             public readonly partial record struct PersistentSample(
                 [PrimaryKey] int Id,
                 [PackId(0)] long Value
@@ -94,7 +94,7 @@ public class ShorthandParserTests {
         var parsed = ShorthandParser.Parse("""
             namespace TestNs;
 
-            [InstantTable(typeof(GameDb))]
+            [InstantTable<GameDb>]
             public readonly partial record struct Foo(
                 [PrimaryKey] [AutoIncrement] int Id
             );
@@ -127,7 +127,7 @@ public class ShorthandParserTests {
         Assert.Throws<ShorthandParseException>(() => ShorthandParser.Parse("""
             namespace TestNs;
 
-            [InstantTable(typeof(SandboxDb))]
+            [InstantTable<SandboxDb>]
             public readonly partial record struct PvPTable(
                 [PrimaryKey] int Id,
                 int Score,
@@ -141,7 +141,7 @@ public class ShorthandParserTests {
         var parsed = ShorthandParser.Parse("""
             namespace TestNs;
 
-            [InstantTable(typeof(GameDb))]
+            [InstantTable<GameDb>]
             public readonly partial record struct Foo(
                 [PrimaryKey] int Id,
                 [Index(IndexKind.BTree, Uniqueness.Unique, Order = 2)] string Name

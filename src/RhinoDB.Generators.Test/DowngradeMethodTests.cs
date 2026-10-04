@@ -21,7 +21,7 @@ public class DowngradeMethodTests {
                                         [FrozenSchema(1)]
                                         public readonly record struct AccountV1([PrimaryKey] int Id, decimal Balance);
 
-                                        [Table(TableKind.Persistent, typeof(VaultDb))]
+                                        [Table<VaultDb>(TableKind.Persistent)]
                                         public readonly partial record struct Account([PrimaryKey] int Id, decimal Balance, string Tier) {
                                             [Migration(0)]
                                             internal static AccountV1 UpgradeFromV0(AccountV0 old) => new AccountV1(old.Id, 0m);
@@ -101,7 +101,7 @@ public class DowngradeMethodTests {
             [FrozenSchema(1)]
             public readonly record struct AccountV1([PrimaryKey] int Id, decimal Balance);
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             public readonly partial record struct Account([PrimaryKey] int Id, decimal Balance, string Tier) {
                 [Migration(0)]
                 internal static AccountV1 UpgradeFromV0(AccountV0 old) => new AccountV1(old.Id, 0m);
@@ -133,7 +133,7 @@ public class DowngradeMethodTests {
             [FrozenSchema(0)]
             public readonly record struct AccountV0([PrimaryKey] int Id);
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             public readonly partial record struct Account([PrimaryKey] int Id) {
                 [ClientDowngrade(0)]
                 internal AccountV0 DowngradeToV0(Account current) => new AccountV0(current.Id);
@@ -158,7 +158,7 @@ public class DowngradeMethodTests {
             [FrozenSchema(0)]
             public readonly record struct AccountV0([PrimaryKey] int Id);
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             public readonly partial record struct Account([PrimaryKey] int Id) {
                 [ClientDowngrade(0)]
                 static AccountV0 DowngradeToV0(Account current) => new AccountV0(current.Id);
@@ -183,7 +183,7 @@ public class DowngradeMethodTests {
             [FrozenSchema(0)]
             public readonly record struct AccountV0([PrimaryKey] int Id);
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             public readonly partial record struct Account([PrimaryKey] int Id) {
                 [ClientDowngrade(0)]
                 internal static AccountV0 DowngradeToV0() => new AccountV0(0);
@@ -205,7 +205,7 @@ public class DowngradeMethodTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             public readonly partial record struct Account([PrimaryKey] int Id) {
                 [ClientDowngrade(0)]
                 internal static void DowngradeToV0(Account current) { }

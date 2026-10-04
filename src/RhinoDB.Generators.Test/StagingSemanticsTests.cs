@@ -22,7 +22,7 @@ public class StagingSemanticsTests {
         [Database]
         public partial class WidgetDb : DbContext<WidgetDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(WidgetDb))]
+        [Table<WidgetDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Widget(

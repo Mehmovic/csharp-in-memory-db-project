@@ -18,7 +18,7 @@ public class AccessorOverrideTests {
         [Database]
         public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(LeagueDb), Accessor = "Teams")]
+        [Table<LeagueDb>(TableKind.Instant, Accessor = "Teams")]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Club(

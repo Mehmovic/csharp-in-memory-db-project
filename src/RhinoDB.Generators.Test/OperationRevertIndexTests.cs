@@ -29,7 +29,7 @@ public class OperationRevertIndexTests {
         public partial class RevDb : DbContext<RevDbTransaction> { }
 
         // Hash primary key, unique Hash secondary, non-unique Hash secondary.
-        [Table(TableKind.Instant, typeof(RevDb))]
+        [Table<RevDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Item(
@@ -40,7 +40,7 @@ public class OperationRevertIndexTests {
 
         // BTree primary key, unique BTree secondary, non-unique BTree secondary - the
         // chunk-based index, where an entry's slot can move on a split or a swap-remove.
-        [Table(TableKind.Instant, typeof(RevDb), RingBufferCapacity = 32)]
+        [Table<RevDb>(TableKind.Instant, RingBufferCapacity = 32)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Rank(
@@ -50,7 +50,7 @@ public class OperationRevertIndexTests {
             [property: MemoryPackOrder(3)] [property: Key(3)] int Score);
 
         // A composite unique Hash index over two columns.
-        [Table(TableKind.Instant, typeof(RevDb))]
+        [Table<RevDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Pair(

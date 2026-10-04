@@ -2,7 +2,7 @@ using RhinoDB.Core.Tables;
 
 namespace RhinoDB.Sandbox;
 
-[InstantTable(typeof(SandboxDb))]
+[InstantTable<SandboxDb>]
 public readonly partial record struct PvPTable(
     [PrimaryKey] int Id,
     int Score,

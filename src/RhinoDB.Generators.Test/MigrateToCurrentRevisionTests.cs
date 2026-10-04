@@ -24,7 +24,7 @@ public class MigrateToCurrentRevisionTests {
                                         [FrozenSchema(1)]
                                         public readonly record struct AccountV1([PrimaryKey] int Id, decimal Balance);
 
-                                        [Table(TableKind.Persistent, typeof(VaultDb))]
+                                        [Table<VaultDb>(TableKind.Persistent)]
                                         [MemoryPackable(GenerateType.VersionTolerant)]
                                         [MessagePackObject]
                                         public readonly partial record struct Account(
@@ -105,7 +105,7 @@ public class MigrateToCurrentRevisionTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             [MemoryPackable]
             [MessagePackObject]
             public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);

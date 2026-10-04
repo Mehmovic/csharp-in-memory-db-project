@@ -24,7 +24,7 @@ public class ShorthandExpansionRunnerTests {
 
         namespace TestNs;
 
-        [InstantTable(typeof(TestDb))]
+        [InstantTable<TestDb>]
         public readonly partial record struct Widget(
             [PrimaryKey] int Id,
             int Value

@@ -4,7 +4,7 @@ public class ContractViolationCheckerTests {
     static private ParsedShorthandFile ParseTable(string fields) => ShorthandParser.Parse($$"""
                                                                                             namespace TestNs;
 
-                                                                                            [InstantTable(typeof(GameDb))]
+                                                                                            [InstantTable<GameDb>]
                                                                                             public readonly partial record struct Row(
                                                                                                 {{fields}}
                                                                                             );

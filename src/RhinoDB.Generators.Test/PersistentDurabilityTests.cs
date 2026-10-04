@@ -27,7 +27,7 @@ public class PersistentDurabilityTests {
         [Database]
         public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-        [Table(TableKind.Persistent, typeof(VaultDb), Evictable = true)]
+        [Table<VaultDb>(TableKind.Persistent, Evictable = true)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Account(

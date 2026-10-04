@@ -8,7 +8,7 @@ namespace RhinoDB.Sandbox.MigrationFixture;
 [Database]
 public partial class LeagueDb : DbContext<LeagueDbTransaction> { }
 
-[Table(TableKind.Persistent, typeof(LeagueDb))]
+[Table<LeagueDb>(TableKind.Persistent)]
 [MemoryPackable(GenerateType.VersionTolerant)]
 [MessagePackObject]
 public readonly partial record struct Player(

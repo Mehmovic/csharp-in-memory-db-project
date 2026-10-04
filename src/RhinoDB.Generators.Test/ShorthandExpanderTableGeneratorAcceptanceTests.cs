@@ -29,7 +29,7 @@ public class ShorthandExpanderTableGeneratorAcceptanceTests {
         var expanded = ShorthandExpander.Expand("""
             namespace TestNs;
 
-            [InstantTable(typeof(GameDb))]
+            [InstantTable<GameDb>]
             public readonly partial record struct ShorthandMetric(
                 [PrimaryKey] int Id,
                 string Label
@@ -47,7 +47,7 @@ public class ShorthandExpanderTableGeneratorAcceptanceTests {
         var expanded = ShorthandExpander.Expand("""
             namespace TestNs;
 
-            [InstantTable(typeof(GameDb))]
+            [InstantTable<GameDb>]
             public readonly partial record struct ShorthandPoint(
                 [PrimaryKey] int Id,
                 int X,
@@ -78,7 +78,7 @@ public class ShorthandExpanderTableGeneratorAcceptanceTests {
         var expandedTable = ShorthandExpander.Expand("""
             namespace TestNs;
 
-            [InstantTable(typeof(GameDb))]
+            [InstantTable<GameDb>]
             public readonly partial record struct ShorthandPlayer(
                 [PrimaryKey] int Id,
                 ShorthandPlayerName Name

@@ -21,7 +21,7 @@ public class TableIdDriftTests {
         [Database]
         public partial class DriftDb : DbContext<DriftDbTransaction> { }
 
-        [Table(TableKind.Persistent, typeof(DriftDb), Accessor = "Accounts")]
+        [Table<DriftDb>(TableKind.Persistent, Accessor = "Accounts")]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Account(

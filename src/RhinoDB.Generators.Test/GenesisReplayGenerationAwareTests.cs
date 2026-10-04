@@ -38,7 +38,7 @@ public class GenesisReplayGenerationAwareTests {
                                   [FrozenSchema(0)]
                                   public readonly record struct AccountV0([PrimaryKey] int Id, decimal Balance);
 
-                                  [Table(TableKind.Persistent, typeof(VaultDb))]
+                                  [Table<VaultDb>(TableKind.Persistent)]
                                   [MemoryPackable(GenerateType.VersionTolerant)]
                                   [MessagePackObject]
                                   public readonly partial record struct Account(

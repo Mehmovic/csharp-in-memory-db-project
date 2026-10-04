@@ -20,7 +20,7 @@ public class IterTests {
         [Database]
         public partial class ShopDb : DbContext<ShopDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(ShopDb))]
+        [Table<ShopDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Widget(
@@ -51,7 +51,7 @@ public class IterTests {
         [Database]
         public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-        [Table(TableKind.Persistent, typeof(VaultDb))]
+        [Table<VaultDb>(TableKind.Persistent)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Account(

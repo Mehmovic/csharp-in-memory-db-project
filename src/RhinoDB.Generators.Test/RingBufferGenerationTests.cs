@@ -26,21 +26,21 @@ public class RingBufferGenerationTests {
         [Database]
         public partial class RingDb : DbContext<RingDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(RingDb), RingBufferCapacity = 100)]
+        [Table<RingDb>(TableKind.Instant, RingBufferCapacity = 100)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Widget(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] int Value);
 
-        [Table(TableKind.Persistent, typeof(RingDb), RingBufferCapacity = 100)]
+        [Table<RingDb>(TableKind.Persistent, RingBufferCapacity = 100)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Account(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] decimal Balance);
 
-        [Table(TableKind.Instant, typeof(RingDb))]
+        [Table<RingDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Muted(

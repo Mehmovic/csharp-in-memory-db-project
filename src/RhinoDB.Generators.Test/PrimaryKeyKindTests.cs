@@ -18,7 +18,7 @@ public class PrimaryKeyKindTests {
         [Database]
         public partial class RankingDb : DbContext<RankingDbTransaction> {{ }}
 
-        [Table(TableKind.Instant, typeof(RankingDb))]
+        [Table<RankingDb>(TableKind.Instant)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Ranking(

@@ -28,14 +28,14 @@ public class LsnContinuityTests {
         [Database]
         public partial class GameDb : DbContext<GameDbTransaction> { }
 
-        [Table(TableKind.Instant, typeof(GameDb), RingBufferCapacity = 100)]
+        [Table<GameDb>(TableKind.Instant, RingBufferCapacity = 100)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Widget(
             [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
             [property: MemoryPackOrder(1)] [property: Key(1)] int Value);
 
-        [Table(TableKind.Persistent, typeof(GameDb), RingBufferCapacity = 100)]
+        [Table<GameDb>(TableKind.Persistent, RingBufferCapacity = 100)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Club(

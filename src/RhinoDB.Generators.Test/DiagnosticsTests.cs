@@ -22,7 +22,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class NoKeyDb : DbContext<NoKeyDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(NoKeyDb))]
+            [Table<NoKeyDb>(TableKind.Instant)]
             public readonly partial record struct Widget(int Id, string Name);
             """;
 
@@ -43,7 +43,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class EmptyAccessorDb : DbContext<EmptyAccessorDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(EmptyAccessorDb))]
+            [Table<EmptyAccessorDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Widget(
@@ -68,7 +68,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class EmptyTableAccessorDb : DbContext<EmptyTableAccessorDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(EmptyTableAccessorDb), Accessor = "")]
+            [Table<EmptyTableAccessorDb>(TableKind.Instant, Accessor = "")]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Widget(
@@ -93,7 +93,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class MismatchDb : DbContext<MismatchDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(MismatchDb))]
+            [Table<MismatchDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Fixture(
@@ -119,7 +119,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class TooManyDb : DbContext<TooManyDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(TooManyDb))]
+            [Table<TooManyDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Wide(
@@ -147,7 +147,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class DupOrderDb : DbContext<DupOrderDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(DupOrderDb))]
+            [Table<DupOrderDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Fixture(
@@ -180,14 +180,14 @@ public class DiagnosticsTests {
             [Database]
             public partial class CollideDb : DbContext<CollideDbTransaction> { }
 
-            [Table(TableKind.Persistent, typeof(CollideDb), Accessor = "Tblj3vu")]
+            [Table<CollideDb>(TableKind.Persistent, Accessor = "Tblj3vu")]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Widget(
                 [PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id,
                 [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
 
-            [Table(TableKind.Persistent, typeof(CollideDb), Accessor = "Tbl4tea")]
+            [Table<CollideDb>(TableKind.Persistent, Accessor = "Tbl4tea")]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Gadget(
@@ -212,7 +212,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class SameFieldDb : DbContext<SameFieldDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(SameFieldDb))]
+            [Table<SameFieldDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(
@@ -241,7 +241,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class SameAccessorDb : DbContext<SameAccessorDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(SameAccessorDb))]
+            [Table<SameAccessorDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(
@@ -268,7 +268,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class TakenNameDb : DbContext<TakenNameDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(TakenNameDb))]
+            [Table<TakenNameDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(
@@ -295,7 +295,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class OpsNameDb : DbContext<OpsNameDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(OpsNameDb))]
+            [Table<OpsNameDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(
@@ -320,7 +320,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class CasingDb : DbContext<CasingDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(CasingDb))]
+            [Table<CasingDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(
@@ -347,7 +347,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class DistinctDb : DbContext<DistinctDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(DistinctDb))]
+            [Table<DistinctDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(
@@ -375,7 +375,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class NoSerializationDb : DbContext<NoSerializationDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(NoSerializationDb))]
+            [Table<NoSerializationDb>(TableKind.Instant)]
             public readonly partial record struct Widget([PrimaryKey] int Id, string Name);
             """;
 
@@ -393,7 +393,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class NoSerializationDb : DbContext<NoSerializationDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(NoSerializationDb))]
+            [Table<NoSerializationDb>(TableKind.Instant)]
             public readonly partial record struct Widget([PrimaryKey] int Id, string Name);
             """;
 
@@ -415,7 +415,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class HalfSerializationDb : DbContext<HalfSerializationDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(HalfSerializationDb))]
+            [Table<HalfSerializationDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             public readonly partial record struct Widget(
                 [PrimaryKey] [property: MemoryPackOrder(0)] int Id,
@@ -446,7 +446,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class UnmanagedDb : DbContext<UnmanagedDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(UnmanagedDb))]
+            [Table<UnmanagedDb>(TableKind.Instant)]
             [MemoryPackable]
             [MessagePackObject]
             public readonly partial record struct Point(
@@ -473,7 +473,7 @@ public class DiagnosticsTests {
 
             public readonly record struct PlayerName(string First, string Last);
 
-            [Table(TableKind.Instant, typeof(CustomFieldDb))]
+            [Table<CustomFieldDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(
@@ -511,7 +511,7 @@ public class DiagnosticsTests {
                 [property: MemoryPackOrder(0)] [property: Key(0)] string First,
                 [property: MemoryPackOrder(1)] [property: Key(1)] string Last);
 
-            [Table(TableKind.Instant, typeof(CustomFieldDb))]
+            [Table<CustomFieldDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(
@@ -546,7 +546,7 @@ public class DiagnosticsTests {
                 [property: MemoryPackOrder(0)] [property: Key(0)] string First,
                 [property: MemoryPackOrder(1)] [property: Key(1)] string Last);
 
-            [Table(TableKind.Instant, typeof(CustomFieldDb))]
+            [Table<CustomFieldDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(
@@ -588,7 +588,7 @@ public class DiagnosticsTests {
                 [property: MemoryPackOrder(0)] [property: Key(0)] string Email,
                 [property: MemoryPackOrder(1)] [property: Key(1)] Address HomeAddress);
 
-            [Table(TableKind.Instant, typeof(CustomFieldDb))]
+            [Table<CustomFieldDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Player(
@@ -618,7 +618,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class ArrayFieldDb : DbContext<ArrayFieldDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(ArrayFieldDb))]
+            [Table<ArrayFieldDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Widget(
@@ -647,7 +647,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class CollectionFieldDb : DbContext<CollectionFieldDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(CollectionFieldDb))]
+            [Table<CollectionFieldDb>(TableKind.Instant)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Inventory(
@@ -764,7 +764,7 @@ public class DiagnosticsTests {
             [Database]
             public partial class MarkerDb : DbContext<MarkerDbTransaction> { }
 
-            [InstantTable(typeof(MarkerDb))]
+            [InstantTable<MarkerDb>]
             [MemoryPackable]
             [MessagePackObject]
             public readonly partial record struct Widget(

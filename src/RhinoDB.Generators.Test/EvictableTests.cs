@@ -21,7 +21,7 @@ public class EvictableTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            [Table(TableKind.Persistent, typeof(VaultDb))]
+            [Table<VaultDb>(TableKind.Persistent)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Account(
@@ -48,7 +48,7 @@ public class EvictableTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            [Table(TableKind.Persistent, typeof(VaultDb), Evictable = false)]
+            [Table<VaultDb>(TableKind.Persistent, Evictable = false)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Account(
@@ -75,7 +75,7 @@ public class EvictableTests {
             [Database]
             public partial class VaultDb : DbContext<VaultDbTransaction> { }
 
-            [Table(TableKind.Persistent, typeof(VaultDb), Evictable = true)]
+            [Table<VaultDb>(TableKind.Persistent, Evictable = true)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Account(
@@ -102,7 +102,7 @@ public class EvictableTests {
             [Database]
             public partial class ShopDb : DbContext<ShopDbTransaction> { }
 
-            [Table(TableKind.Instant, typeof(ShopDb), Evictable = true)]
+            [Table<ShopDb>(TableKind.Instant, Evictable = true)]
             [MemoryPackable(GenerateType.VersionTolerant)]
             [MessagePackObject]
             public readonly partial record struct Widget([PrimaryKey] [property: MemoryPackOrder(0)] [property: Key(0)] int Id);

@@ -31,7 +31,7 @@ public class BulkLoadFromColdTests {
         [Database]
         public partial class BulkDb : DbContext<BulkDbTransaction> { }
 
-        [Table(TableKind.Persistent, typeof(BulkDb))]
+        [Table<BulkDb>(TableKind.Persistent)]
         [MemoryPackable(GenerateType.VersionTolerant)]
         [MessagePackObject]
         public readonly partial record struct Item(
