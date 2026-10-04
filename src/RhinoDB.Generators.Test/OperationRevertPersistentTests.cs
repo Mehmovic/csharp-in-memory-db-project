@@ -106,10 +106,20 @@ public class OperationRevertPersistentTests {
 
     // The transaction exposes each table accessor as a public readonly *field*, not a
     // property - see the note in OperationRevertTests.T.
+    // Persistent-kind tables are still a flat field/property on tx; Instant-kind tables moved
+    // under a nested tx.Instant accessor (TableGenerator.EmitDatabase) - fall back to resolving
+    // through that nested accessor when the name is not found directly on tx itself.
     static private object T(object tx, string accessor) {
         var type = tx.GetType();
         var field = type.GetField(accessor);
-        return field is not null ? field.GetValue(tx)! : type.GetProperty(accessor)!.GetValue(tx)!;
+        if (field is not null) return field.GetValue(tx)!;
+        var prop = type.GetProperty(accessor);
+        if (prop is not null) return prop.GetValue(tx)!;
+
+        var instant = type.GetProperty("Instant")!.GetValue(tx)!;
+        var instantType = instant.GetType();
+        var instantField = instantType.GetField(accessor);
+        return instantField is not null ? instantField.GetValue(instant)! : instantType.GetProperty(accessor)!.GetValue(instant)!;
     }
 
     static private Result Run(object db, Type txType, Func<object, object, Result> body, PropagationMode mode = PropagationMode.Optimistic)
@@ -320,7 +330,7 @@ public class OperationRevertPersistentTests {
 
         // Evict stages; Update(0) applies; the fault stops change 1 so the update reverts.
         var reverted = Run(db, txType, (t, _) => {
-            ((dynamic)t).Crate.Storage.Evict(1);
+            ((dynamic)t).Crate.Evict(1);
             ((dynamic)t).Crate.Update(1, (dynamic)NewCrate(asm, 1, 999));
             ((dynamic)t).Crate.Insert((dynamic)NewCrate(asm, 2, 5));
             ArmFault(t, "Crate", 1);
@@ -358,7 +368,7 @@ public class OperationRevertPersistentTests {
             Run(db, tx, (t, _) => { ((dynamic)t).Crate.Insert((dynamic)NewCrate(asm, 1, 100)); return Result.Ok(); }, PropagationMode.Confirmed);
 
             Run(db, tx, (t, _) => {
-                ((dynamic)t).Crate.Storage.Evict(1);
+                ((dynamic)t).Crate.Evict(1);
                 ((dynamic)t).Crate.Update(1, (dynamic)NewCrate(asm, 1, 999));
                 ((dynamic)t).Crate.Insert((dynamic)NewCrate(asm, 2, 5));
                 ArmFault(t, "Crate", 1);

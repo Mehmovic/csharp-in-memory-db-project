@@ -58,14 +58,14 @@ public class StagingSemanticsTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
-                dtx.Widget.Update(1, (dynamic)NewWidget(asm, 1, "Ada", 42));
+                dtx.Instant.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
+                dtx.Instant.Widget.Update(1, (dynamic)NewWidget(asm, 1, "Ada", 42));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
         var stock = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { stock = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetStock", (object)((dynamic)tx).Widget, 1)!; return Result.Ok(); },
+            db, txType, (ctx, tx) => { stock = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetStock", (object)((dynamic)tx).Instant.Widget, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(stock, Is.EqualTo(42), "Most-recent-staged-change-wins applies at Apply() time, not via a same-operation overlay.");
@@ -79,9 +79,9 @@ public class StagingSemanticsTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
-                dtx.Widget.Delete(1);
-                foundWithinSameOperation = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)dtx.Widget, 1)!;
+                dtx.Instant.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
+                dtx.Instant.Widget.Delete(1);
+                foundWithinSameOperation = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)dtx.Instant.Widget, 1)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -101,14 +101,14 @@ public class StagingSemanticsTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
-                dtx.Widget.Delete(1);
+                dtx.Instant.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
+                dtx.Instant.Widget.Delete(1);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
         var foundAfterApply = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { foundAfterApply = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)((dynamic)tx).Widget, 1)!; return Result.Ok(); },
+            db, txType, (ctx, tx) => { foundAfterApply = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)((dynamic)tx).Instant.Widget, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(foundAfterApply, Is.False, "Insert-then-Delete in one operation must not leave the row permanently inserted.");
@@ -122,20 +122,20 @@ public class StagingSemanticsTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widget.Delete(1);
-                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 99));
+                dtx.Instant.Widget.Delete(1);
+                dtx.Instant.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 99));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
         var stock = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { stock = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetStock", (object)((dynamic)tx).Widget, 1)!; return Result.Ok(); },
+            db, txType, (ctx, tx) => { stock = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetStock", (object)((dynamic)tx).Instant.Widget, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(stock, Is.EqualTo(99), "Most-recent-staged-change-wins applies at Apply() time, not via a same-operation overlay.");
@@ -146,14 +146,14 @@ public class StagingSemanticsTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 2, "Bob", 5)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Insert((dynamic)NewWidget(asm, 2, "Bob", 5)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
-                dtx.Widget.Delete(2);
+                dtx.Instant.Widget.Insert((dynamic)NewWidget(asm, 1, "Ada", 10));
+                dtx.Instant.Widget.Delete(2);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -162,8 +162,8 @@ public class StagingSemanticsTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                foundOne = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)dtx.Widget, 1)!;
-                foundTwoAfterDelete = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)dtx.Widget, 2)!;
+                foundOne = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)dtx.Instant.Widget, 1)!;
+                foundTwoAfterDelete = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)dtx.Instant.Widget, 2)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

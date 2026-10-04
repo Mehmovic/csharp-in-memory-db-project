@@ -211,7 +211,7 @@ public class PersistentSecondaryIndexTests {
         reopenedCold.CompleteRecovery();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Evict(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Evict(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var foundAfterEvict = true;

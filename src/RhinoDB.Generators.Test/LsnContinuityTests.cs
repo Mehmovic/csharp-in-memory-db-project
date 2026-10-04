@@ -89,7 +89,7 @@ public class LsnContinuityTests {
                 db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, 80)); return Result.Ok(); },
                 PropagationMode.Confirmed);
             await (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
                 PropagationMode.Confirmed);
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 2, 75)); return Result.Ok(); },
@@ -161,7 +161,7 @@ public class LsnContinuityTests {
                 db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, 80)); return Result.Ok(); },
                 PropagationMode.Confirmed);
             await (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
                 PropagationMode.Confirmed);
             // Club Lsn=1 (WAL-recorded), Widget Lsn=2 (Instant-only, WAL-invisible) - the session ends
             // right here, on the Instant-only transaction.

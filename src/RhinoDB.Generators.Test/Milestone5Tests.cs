@@ -55,7 +55,7 @@ public class Milestone5Tests {
         var (db, txType, asm) = NewDb();
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", 100m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsOk(), Is.True);
@@ -66,7 +66,7 @@ public class Milestone5Tests {
         var (db, txType, asm) = NewDb();
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", -50m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", -50m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsError(), Is.True);
@@ -81,12 +81,12 @@ public class Milestone5Tests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", -50m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", -50m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubFindIsOk", (object)((dynamic)tx).Club, 1)!; return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubFindIsOk", (object)((dynamic)tx).Instant.Club, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.False);
@@ -97,11 +97,11 @@ public class Milestone5Tests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", 100m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Update(1, (dynamic)NewClub(asm, 1, "Arsenal", -1m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Club.Update(1, (dynamic)NewClub(asm, 1, "Arsenal", -1m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsError(), Is.True);
@@ -117,7 +117,7 @@ public class Milestone5Tests {
         var (db, txType, asm) = NewDb();
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Club.Insert((dynamic)NewClub(asm, 1, "  ", 100m)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Club.Insert((dynamic)NewClub(asm, 1, "  ", 100m)); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsError(), Is.True);

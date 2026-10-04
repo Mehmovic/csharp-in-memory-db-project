@@ -48,14 +48,14 @@ public class AutoIncrementTests {
         var gadget = NewGadget(asm, 0, "Widget A");
 
         var insertResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Gadget.Insert((dynamic)gadget); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Gadget.Insert((dynamic)gadget); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var assignedId = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                assignedId = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Gadget, 1)! ? 1 : -1;
+                assignedId = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Instant.Gadget, 1)! ? 1 : -1;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -72,8 +72,8 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Gadget.Insert((dynamic)first);
-                dtx.Gadget.Insert((dynamic)second);
+                dtx.Instant.Gadget.Insert((dynamic)first);
+                dtx.Instant.Gadget.Insert((dynamic)second);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -81,8 +81,8 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                foundBoth = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Gadget, 1)!
-                    && (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Gadget, 2)!;
+                foundBoth = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Instant.Gadget, 1)!
+                    && (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Instant.Gadget, 2)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -95,12 +95,12 @@ public class AutoIncrementTests {
         var gadget = NewGadget(asm, 42, "Explicit");
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Gadget.Insert((dynamic)gadget); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Gadget.Insert((dynamic)gadget); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)((dynamic)tx).Gadget, 42)!; return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)((dynamic)tx).Instant.Gadget, 42)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);
@@ -111,17 +111,17 @@ public class AutoIncrementTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Gadget.Insert((dynamic)NewGadget(asm, 0, "One")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Gadget.Insert((dynamic)NewGadget(asm, 0, "One")); return Result.Ok(); },
             PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Gadget.Insert((dynamic)NewGadget(asm, 0, "Two")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Gadget.Insert((dynamic)NewGadget(asm, 0, "Two")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var foundSecond = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                foundSecond = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Gadget, 2)!;
+                foundSecond = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "GadgetFindIsOk", (object)dtx.Instant.Gadget, 2)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -174,8 +174,8 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widget.Insert((dynamic)rowA);
-                dtx.Widget.Insert((dynamic)rowB);
+                dtx.Instant.Widget.Insert((dynamic)rowA);
+                dtx.Instant.Widget.Insert((dynamic)rowB);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -183,7 +183,7 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                sequenceOfB = (long)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetSequence", (object)dtx.Widget, 2)!;
+                sequenceOfB = (long)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetSequence", (object)dtx.Instant.Widget, 2)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -230,8 +230,8 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Ticket.Insert((dynamic)first);
-                dtx.Ticket.Insert((dynamic)second);
+                dtx.Instant.Ticket.Insert((dynamic)first);
+                dtx.Instant.Ticket.Insert((dynamic)second);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -241,8 +241,8 @@ public class AutoIncrementTests {
         var foundBothByCode = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                var byCode1 = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CodeIsOk", ((dynamic)tx).Ticket, 1)!;
-                var byCode2 = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CodeIsOk", ((dynamic)tx).Ticket, 2)!;
+                var byCode1 = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CodeIsOk", ((dynamic)tx).Instant.Ticket, 1)!;
+                var byCode2 = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CodeIsOk", ((dynamic)tx).Instant.Ticket, 2)!;
                 foundBothByCode = byCode1 && byCode2;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -285,12 +285,12 @@ public class AutoIncrementTests {
         var negative = Activator.CreateInstance(itemType, -5, "Negative")!;
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Item.Insert((dynamic)negative); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Item.Insert((dynamic)negative); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var assignedPositive = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { assignedPositive = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ItemFindIsOk", (object)((dynamic)tx).Item, 1)!; return Result.Ok(); },
+            db, txType, (ctx, tx) => { assignedPositive = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ItemFindIsOk", (object)((dynamic)tx).Instant.Item, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(assignedPositive, Is.True);
@@ -335,15 +335,15 @@ public class AutoIncrementTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Crate.Insert((dynamic)zero);
-                dtx.Crate.Insert((dynamic)explicitValue);
+                dtx.Instant.Crate.Insert((dynamic)zero);
+                dtx.Instant.Crate.Insert((dynamic)explicitValue);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                autoAssignedFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CrateFindIsOk", (object)dtx.Crate, 1u)!;
-                explicitPreserved = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CrateFindIsOk", (object)dtx.Crate, 7u)!;
+                autoAssignedFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CrateFindIsOk", (object)dtx.Instant.Crate, 1u)!;
+                explicitPreserved = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "CrateFindIsOk", (object)dtx.Instant.Crate, 7u)!;
                 Assert.That(autoAssignedFound, Is.True);
                 Assert.That(explicitPreserved, Is.True);
                 return Result.Ok();

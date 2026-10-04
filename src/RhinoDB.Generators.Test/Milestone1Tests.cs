@@ -56,12 +56,12 @@ public class Milestone1Tests {
         var widget = NewWidget(asm, 1, "Ada", 10);
 
         var insertResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)widget); return Result.Ok(); }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Insert((dynamic)widget); return Result.Ok(); }, PropagationMode.Optimistic);
         Assert.That(insertResult.IsOk(), Is.True);
 
         var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                var found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)((dynamic)tx).Widget, 1)!;
+                var found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)((dynamic)tx).Instant.Widget, 1)!;
                 return found ? Result.Ok() : Result.Error(DbError.IndexKeyNotFound());
             }, PropagationMode.Optimistic);
         Assert.That(getResult.IsOk(), Is.True);
@@ -74,14 +74,14 @@ public class Milestone1Tests {
         var updated = NewWidget(asm, 1, "Ada", 42);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)original); return Result.Ok(); }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Insert((dynamic)original); return Result.Ok(); }, PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Update(1, (dynamic)updated); return Result.Ok(); }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Update(1, (dynamic)updated); return Result.Ok(); }, PropagationMode.Optimistic);
 
         var stock = -1;
         var getResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                stock = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetStock", (object)((dynamic)tx).Widget, 1)!;
+                stock = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetStock", (object)((dynamic)tx).Instant.Widget, 1)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -95,14 +95,14 @@ public class Milestone1Tests {
         var widget = NewWidget(asm, 1, "Ada", 10);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)widget); return Result.Ok(); }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Insert((dynamic)widget); return Result.Ok(); }, PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Delete(1); return Result.Ok(); }, PropagationMode.Optimistic);
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Delete(1); return Result.Ok(); }, PropagationMode.Optimistic);
 
         var foundAfterDelete = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                foundAfterDelete = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)((dynamic)tx).Widget, 1)!;
+                foundAfterDelete = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)((dynamic)tx).Instant.Widget, 1)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -122,8 +122,8 @@ public class Milestone1Tests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widget.Insert((dynamic)widget);
-                foundWithinSameOperation = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)dtx.Widget, 1)!;
+                dtx.Instant.Widget.Insert((dynamic)widget);
+                foundWithinSameOperation = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetFindIsOk", (object)dtx.Instant.Widget, 1)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

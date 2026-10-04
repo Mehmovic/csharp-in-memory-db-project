@@ -45,12 +45,12 @@ public class MultiDatabaseTableTests {
         var player = Activator.CreateInstance(asm.GetType("TestNs.Player")!, 1, "Ada")!;
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            gameDb, gameDbTxType, (ctx, tx) => { ((dynamic)tx).Player.Insert((dynamic)player); return Result.Ok(); },
+            gameDb, gameDbTxType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Insert((dynamic)player); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var foundInShard = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            shardDb, shardDbTxType, (ctx, tx) => { foundInShard = ((dynamic)tx).Player.Get(1).IsOk(); return Result.Ok(); },
+            shardDb, shardDbTxType, (ctx, tx) => { foundInShard = ((dynamic)tx).Instant.Player.Get(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(foundInShard, Is.False);
@@ -66,10 +66,10 @@ public class MultiDatabaseTableTests {
         var player = Activator.CreateInstance(asm.GetType("TestNs.Player")!, 1, "Ada")!;
 
         var gameResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            gameDb, gameDbTxType, (ctx, tx) => { ((dynamic)tx).Player.Insert((dynamic)player); return Result.Ok(); },
+            gameDb, gameDbTxType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Insert((dynamic)player); return Result.Ok(); },
             PropagationMode.Optimistic);
         var shardResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            shardDb, shardDbTxType, (ctx, tx) => { ((dynamic)tx).Player.Insert((dynamic)player); return Result.Ok(); },
+            shardDb, shardDbTxType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Insert((dynamic)player); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(gameResult.IsOk(), Is.True);
@@ -107,12 +107,12 @@ public class MultiDatabaseTableTests {
         var player = Activator.CreateInstance(asm.GetType("TestNs.Player")!, 1, "Ada")!;
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).PrimaryPlayers.Insert((dynamic)player); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.PrimaryPlayers.Insert((dynamic)player); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var foundInBackup = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { foundInBackup = ((dynamic)tx).BackupPlayers.Get(1).IsOk(); return Result.Ok(); },
+            db, txType, (ctx, tx) => { foundInBackup = ((dynamic)tx).Instant.BackupPlayers.Get(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(foundInBackup, Is.False);

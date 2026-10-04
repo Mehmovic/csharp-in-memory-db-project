@@ -129,8 +129,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
     );
     static private readonly DiagnosticDescriptor DuplicateAccessorDiagnostic = new(
         "RHINO010",
-        "Duplicate table Accessor within one database",
-        "'{0}' has two or more tables using Accessor '{1}' - each table's Accessor must be unique within its owning database",
+        "Duplicate table Accessor within one database and TableKind",
+        "'{0}' has two or more tables of the same TableKind using Accessor '{1}' - each table's Accessor must be "
+        + "unique within its owning database AND TableKind, since TableKind.Instant and TableKind.Persistent "
+        + "tables surface under separate accessors (Db.Instant.X vs Db.X) and so don't collide with each other",
         "RhinoDB.Generators",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
@@ -717,14 +719,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
             return;
         }
 
-        var duplicateAccessors = tables.GroupBy(t => t.Accessor).Where(g => g.Count() > 1).Select(g => g.Key).ToImmutableArray();
+        var duplicateAccessors = tables.GroupBy(t => (t.Kind, t.Accessor)).Where(g => g.Count() > 1).Select(g => g.Key.Accessor).ToImmutableArray();
         if (duplicateAccessors.Length > 0) {
             foreach (var accessor in duplicateAccessors)
                 context.ReportDiagnostic(Diagnostic.Create(DuplicateAccessorDiagnostic, Location.None, database.SimpleName, accessor));
             return;
         }
 
-        var collidingTableIds = tables.GroupBy(t => ComputeTableId(t.Accessor)).Where(g => g.Count() > 1).ToImmutableArray();
+        var collidingTableIds = tables.GroupBy(t => (t.Kind, Id: ComputeTableId(t.Accessor))).Where(g => g.Count() > 1).ToImmutableArray();
         if (collidingTableIds.Length > 0) {
             foreach (var group in collidingTableIds) {
                 var colliding = group.Select(t => t.Accessor).ToImmutableArray();
@@ -1833,7 +1835,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    public StorageAccessor Storage => new(this);");
         sb.AppendLine($"    public readonly struct StorageAccessor({opsName} ops) {{");
         sb.AppendLine($"        public Result Load({key} id) => ops.LoadInternal(id);");
-        sb.AppendLine($"        public Result Evict({key} id) => ops.Evict(id);");
         sb.AppendLine($"        public Result<{row}> Peek({key} id) => ops.cold.Peek(ops.coldTable, id);");
         sb.AppendLine("    }");
         sb.AppendLine();
@@ -1917,10 +1918,14 @@ public sealed class TableGenerator : IIncrementalGenerator {
         }
 
         var txName = $"{database.SimpleName}Transaction";
+        var txInstantTables = tables.Where(t => t.Kind == TableKind.Instant).ToImmutableArray();
 
         sb.AppendLine($"public sealed class {txName} : ITransaction {{");
         foreach (var table in tables)
-            sb.AppendLine($"    public readonly {database.SimpleName}{table.Accessor}Ops {table.Accessor};");
+            sb.AppendLine($"    private readonly {database.SimpleName}{table.Accessor}Ops {Camel(table.Accessor)}Ops;");
+        foreach (var table in tables.Where(t => t.Kind == TableKind.Persistent))
+            sb.AppendLine($"    public {database.SimpleName}{table.Accessor}Ops {table.Accessor} => {Camel(table.Accessor)}Ops;");
+        if (txInstantTables.Length > 0) sb.AppendLine("    public InstantAccessor Instant { get; }");
         sb.AppendLine("    private readonly LsnSequence lsnSequence;");
         sb.AppendLine("    public ulong? LastLsn { get; private set; }");
         sb.AppendLine();
@@ -1930,26 +1935,28 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.Append("LsnSequence lsnSequence");
         sb.AppendLine(") {");
         foreach (var table in tables)
-            sb.AppendLine($"        {table.Accessor} = {Camel(table.Accessor)};");
+            sb.AppendLine($"        {Camel(table.Accessor)}Ops = {Camel(table.Accessor)};");
+        if (txInstantTables.Length > 0)
+            sb.AppendLine($"        Instant = new InstantAccessor({string.Join(", ", txInstantTables.Select(t => $"{Camel(t.Accessor)}Ops"))});");
         sb.AppendLine("        this.lsnSequence = lsnSequence;");
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine("    public Result Apply() {");
         foreach (var table in tables)
-            sb.AppendLine($"        if ({table.Accessor}.Dirty && !{table.Accessor}.Validate()) return Result.Error({table.Accessor}.LastError);");
-        var anyDirtyExpr = tables.Length > 0 ? string.Join(" || ", tables.Select(t => $"{t.Accessor}.Dirty")) : "false";
+            sb.AppendLine($"        if ({Camel(table.Accessor)}Ops.Dirty && !{Camel(table.Accessor)}Ops.Validate()) return Result.Error({Camel(table.Accessor)}Ops.LastError);");
+        var anyDirtyExpr = tables.Length > 0 ? string.Join(" || ", tables.Select(t => $"{Camel(t.Accessor)}Ops.Dirty")) : "false";
         sb.AppendLine($"        var anyDirty = {anyDirtyExpr};");
         sb.AppendLine("        LastLsn = anyDirty ? lsnSequence.Next() : null;");
         sb.AppendLine("        try {");
         foreach (var table in tables)
-            sb.AppendLine($"            if ({table.Accessor}.Dirty) {table.Accessor}.Apply(LastLsn ?? 0UL);");
+            sb.AppendLine($"            if ({Camel(table.Accessor)}Ops.Dirty) {Camel(table.Accessor)}Ops.Apply(LastLsn ?? 0UL);");
         foreach (var table in tables)
-            sb.AppendLine($"            {table.Accessor}.ReleaseUndoJournal();");
+            sb.AppendLine($"            {Camel(table.Accessor)}Ops.ReleaseUndoJournal();");
         sb.AppendLine("        }");
         sb.AppendLine("        catch (Exception ex) {");
         sb.AppendLine("            var reverted = true;");
         foreach (var table in tables.Reverse()) {
-            sb.AppendLine($"            if ({table.Accessor}.AppliedInOperation && !{table.Accessor}.RevertUndo()) {{");
+            sb.AppendLine($"            if ({Camel(table.Accessor)}Ops.AppliedInOperation && !{Camel(table.Accessor)}Ops.RevertUndo()) {{");
             sb.AppendLine("                reverted = false;");
             sb.AppendLine("            }");
         }
@@ -1963,20 +1970,27 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        get {");
         sb.AppendLine("            var total = 0;");
         foreach (var table in tables)
-            sb.AppendLine($"            total += {table.Accessor}.PendingStorageOrphanCount;");
+            sb.AppendLine($"            total += {Camel(table.Accessor)}Ops.PendingStorageOrphanCount;");
         sb.AppendLine("            return total;");
         sb.AppendLine("        }");
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine("    public void SweepDeleted() {");
         foreach (var table in tables)
-            sb.AppendLine($"        {table.Accessor}.SweepDeleted();");
+            sb.AppendLine($"        {Camel(table.Accessor)}Ops.SweepDeleted();");
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine("    public void Discard() {");
         foreach (var table in tables)
-            sb.AppendLine($"        if ({table.Accessor}.Dirty) {table.Accessor}.Discard();");
+            sb.AppendLine($"        if ({Camel(table.Accessor)}Ops.Dirty) {Camel(table.Accessor)}Ops.Discard();");
         sb.AppendLine("    }");
+        if (txInstantTables.Length > 0) {
+            sb.AppendLine();
+            sb.AppendLine("    public readonly struct InstantAccessor(" + string.Join(", ", txInstantTables.Select(t => $"{database.SimpleName}{t.Accessor}Ops {Camel(t.Accessor)}Ops")) + ") {");
+            foreach (var table in txInstantTables)
+                sb.AppendLine($"        public {database.SimpleName}{table.Accessor}Ops {table.Accessor} => {Camel(table.Accessor)}Ops;");
+            sb.AppendLine("    }");
+        }
         sb.AppendLine("}");
         sb.AppendLine();
 

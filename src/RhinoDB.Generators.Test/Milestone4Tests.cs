@@ -75,8 +75,8 @@ public class Milestone4Tests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS"));
-                foundWithinSameOperation = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", (object)dtx.Club, "ARS")!;
+                dtx.Instant.Club.Insert((dynamic)NewClub(asm, 1, "Arsenal", "ARS"));
+                foundWithinSameOperation = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", (object)dtx.Instant.Club, "ARS")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -86,7 +86,7 @@ public class Milestone4Tests {
         var foundInALaterOperation = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                foundInALaterOperation = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", ((dynamic)tx).Club, "ARS")!;
+                foundInALaterOperation = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ShortCodeIsOk", ((dynamic)tx).Instant.Club, "ARS")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -101,9 +101,9 @@ public class Milestone4Tests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
-                countWithinSameOperation = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubIdCount", (object)dtx.Player, 10)!;
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice", 10));
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 2, "Bob", 10));
+                countWithinSameOperation = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubIdCount", (object)dtx.Instant.Player, 10)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -113,7 +113,7 @@ public class Milestone4Tests {
         var countInALaterOperation = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                countInALaterOperation = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubIdCount", ((dynamic)tx).Player, 10)!;
+                countInALaterOperation = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ClubIdCount", ((dynamic)tx).Instant.Player, 10)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

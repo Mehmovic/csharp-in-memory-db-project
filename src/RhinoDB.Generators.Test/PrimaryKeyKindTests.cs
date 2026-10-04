@@ -47,12 +47,12 @@ public class PrimaryKeyKindTests {
         var ranking = Activator.CreateInstance(rankingType, 7, "Top")!;
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Ranking.Insert((dynamic)ranking); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Ranking.Insert((dynamic)ranking); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "FindIsOk", (object)((dynamic)tx).Ranking, 7)!; return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "FindIsOk", (object)((dynamic)tx).Instant.Ranking, 7)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsOk(), Is.True);
@@ -70,7 +70,7 @@ public class PrimaryKeyKindTests {
         for (var id = 1; id <= 4; id++) {
             var row = Activator.CreateInstance(rankingType, id, "R" + id)!;
             await (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Ranking.Insert((dynamic)row); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Ranking.Insert((dynamic)row); return Result.Ok(); },
                 PropagationMode.Optimistic);
         }
 
@@ -79,7 +79,7 @@ public class PrimaryKeyKindTests {
         var gtCount = 0;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                var ops = (object)((dynamic)tx).Ranking;
+                var ops = (object)((dynamic)tx).Instant.Ranking;
                 iterCount = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "PrimaryIterCount", ops)!;
                 rangeCount = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "PrimaryRangeCount", ops, 2, 3)!;
                 gtCount = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "PrimaryGtCount", ops, 3)!;

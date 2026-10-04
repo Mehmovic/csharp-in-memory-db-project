@@ -76,9 +76,9 @@ public class CompositeStringIndexTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, 10, "alice"));
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 2, 10, "bob"));
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 3, 20, "alice"));
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 1, 10, "alice"));
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 2, 10, "bob"));
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 3, 20, "alice"));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -88,11 +88,11 @@ public class CompositeStringIndexTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                aliceInTen = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Player, 10, "alice")!;
-                aliceInTwenty = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Player, 20, "alice")!;
+                aliceInTen = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Instant.Player, 10, "alice")!;
+                aliceInTwenty = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Instant.Player, 20, "alice")!;
                 // Same club, name that was never inserted - the composite key must
                 // not degrade into a club-only match.
-                partialMatch = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Player, 10, "carol")!;
+                partialMatch = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Instant.Player, 10, "carol")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -106,11 +106,11 @@ public class CompositeStringIndexTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Insert((dynamic)NewPlayer(asm, 1, 10, "alice")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Insert((dynamic)NewPlayer(asm, 1, 10, "alice")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Insert((dynamic)NewPlayer(asm, 2, 10, "alice")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Insert((dynamic)NewPlayer(asm, 2, 10, "alice")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsError(), Is.True);
@@ -124,8 +124,8 @@ public class CompositeStringIndexTests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, 10, "alice"));
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 2, 10, "bob"));
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 1, 10, "alice"));
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 2, 10, "bob"));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -137,10 +137,10 @@ public class CompositeStringIndexTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Insert((dynamic)NewPlayer(asm, 1, 10, "alice")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Insert((dynamic)NewPlayer(asm, 1, 10, "alice")); return Result.Ok(); },
             PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Update(1, (dynamic)NewPlayer(asm, 1, 10, "alicia")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Update(1, (dynamic)NewPlayer(asm, 1, 10, "alicia")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var oldPair = true;
@@ -148,8 +148,8 @@ public class CompositeStringIndexTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                oldPair = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Player, 10, "alice")!;
-                newPair = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Player, 10, "alicia")!;
+                oldPair = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Instant.Player, 10, "alice")!;
+                newPair = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", (object)dtx.Instant.Player, 10, "alicia")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -162,16 +162,16 @@ public class CompositeStringIndexTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Insert((dynamic)NewPlayer(asm, 1, 10, "alice")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Insert((dynamic)NewPlayer(asm, 1, 10, "alice")); return Result.Ok(); },
             PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Delete(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Delete(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var found = true;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", ((dynamic)tx).Player, 10, "alice")!;
+                found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndNameIsOk", ((dynamic)tx).Instant.Player, 10, "alice")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -185,10 +185,10 @@ public class CompositeStringIndexTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.SquadSlot.Insert((dynamic)NewSlot(asm, 1, 10, "gk"));
-                dtx.SquadSlot.Insert((dynamic)NewSlot(asm, 2, 10, "gk")); // same pair - allowed, not unique
-                dtx.SquadSlot.Insert((dynamic)NewSlot(asm, 3, 10, "cb"));
-                dtx.SquadSlot.Insert((dynamic)NewSlot(asm, 4, 20, "gk")); // other club
+                dtx.Instant.SquadSlot.Insert((dynamic)NewSlot(asm, 1, 10, "gk"));
+                dtx.Instant.SquadSlot.Insert((dynamic)NewSlot(asm, 2, 10, "gk")); // same pair - allowed, not unique
+                dtx.Instant.SquadSlot.Insert((dynamic)NewSlot(asm, 3, 10, "cb"));
+                dtx.Instant.SquadSlot.Insert((dynamic)NewSlot(asm, 4, 20, "gk")); // other club
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -199,10 +199,10 @@ public class CompositeStringIndexTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                gkInTen = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.SquadSlot, 10, "gk")!;
-                cbInTen = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.SquadSlot, 10, "cb")!;
-                gkInTwenty = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.SquadSlot, 20, "gk")!;
-                unmatched = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.SquadSlot, 10, "st")!;
+                gkInTen = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.Instant.SquadSlot, 10, "gk")!;
+                cbInTen = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.Instant.SquadSlot, 10, "cb")!;
+                gkInTwenty = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.Instant.SquadSlot, 20, "gk")!;
+                unmatched = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", (object)dtx.Instant.SquadSlot, 10, "st")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -219,13 +219,13 @@ public class CompositeStringIndexTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.SquadSlot.Insert((dynamic)NewSlot(asm, 1, 10, "gk"));
-                dtx.SquadSlot.Insert((dynamic)NewSlot(asm, 2, 20, "cb"));
+                dtx.Instant.SquadSlot.Insert((dynamic)NewSlot(asm, 1, 10, "gk"));
+                dtx.Instant.SquadSlot.Insert((dynamic)NewSlot(asm, 2, 20, "cb"));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).SquadSlot.Delete(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.SquadSlot.Delete(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         // Deleting the first row forces a swap-remove that relocates the second one -
@@ -233,7 +233,7 @@ public class CompositeStringIndexTests {
         var relocated = -1;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                relocated = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", ((dynamic)tx).SquadSlot, 20, "cb")!;
+                relocated = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubAndRoleCount", ((dynamic)tx).Instant.SquadSlot, 20, "cb")!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

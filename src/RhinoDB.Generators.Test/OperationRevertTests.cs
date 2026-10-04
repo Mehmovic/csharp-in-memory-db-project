@@ -72,10 +72,20 @@ public class OperationRevertTests {
     // that followed threw a NullReferenceException *inside the operation body* - which
     // aborted the whole body, so an operation silently did nothing and a test could
     // pass without running a single assertion. GetField is the correct accessor.
+    // Persistent-kind tables are still a flat field/property on tx; Instant-kind tables moved
+    // under a nested tx.Instant accessor (TableGenerator.EmitDatabase) - fall back to resolving
+    // through that nested accessor when the name is not found directly on tx itself.
     static private object T(object tx, string accessor) {
         var type = tx.GetType();
         var field = type.GetField(accessor);
-        return field is not null ? field.GetValue(tx)! : type.GetProperty(accessor)!.GetValue(tx)!;
+        if (field is not null) return field.GetValue(tx)!;
+        var prop = type.GetProperty(accessor);
+        if (prop is not null) return prop.GetValue(tx)!;
+
+        var instant = type.GetProperty("Instant")!.GetValue(tx)!;
+        var instantType = instant.GetType();
+        var instantField = instantType.GetField(accessor);
+        return instantField is not null ? instantField.GetValue(instant)! : instantType.GetProperty(accessor)!.GetValue(instant)!;
     }
 
     static private Result Run(object db, Type txType, Func<object, object, Result> body)
@@ -116,8 +126,8 @@ public class OperationRevertTests {
 
         // Baseline: one account and one ledger row exist before the failing operation.
         Run(db, txType, (tx, _) => {
-            ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 100, 7));
-            ((dynamic)tx).Ledger.Insert((dynamic)NewLedger(asm, 1, 50, 1));
+            ((dynamic)tx).Instant.Account.Insert((dynamic)NewAccount(asm, 1, 100, 7));
+            ((dynamic)tx).Instant.Ledger.Insert((dynamic)NewLedger(asm, 1, 50, 1));
             return Result.Ok();
         });
 
@@ -125,10 +135,10 @@ public class OperationRevertTests {
         Run(db, txType, (tx, _) => {
             accountOps = T(tx, "Account");
             ledgerOps = T(tx, "Ledger");
-            ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 999, 7));
-            ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 2, 555, 7));
-            ((dynamic)tx).Ledger.Update(1, (dynamic)NewLedger(asm, 1, 4242, 1));
-            ((dynamic)tx).Ledger.Insert((dynamic)NewLedger(asm, 2, 77, 2));
+            ((dynamic)tx).Instant.Account.Update(1, (dynamic)NewAccount(asm, 1, 999, 7));
+            ((dynamic)tx).Instant.Account.Insert((dynamic)NewAccount(asm, 2, 555, 7));
+            ((dynamic)tx).Instant.Ledger.Update(1, (dynamic)NewLedger(asm, 1, 4242, 1));
+            ((dynamic)tx).Instant.Ledger.Insert((dynamic)NewLedger(asm, 2, 77, 2));
             // Throw while applying the Account table's second change - by then its
             // update is already applied, so its journal has a real entry to restore.
             ArmFault(tx, "Account", 1);
@@ -155,8 +165,8 @@ public class OperationRevertTests {
         var (db, txType, asm) = NewDb();
 
         Run(db, txType, (tx, _) => {
-            ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 100, 7));
-            ((dynamic)tx).Ledger.Insert((dynamic)NewLedger(asm, 1, 50, 1));
+            ((dynamic)tx).Instant.Account.Insert((dynamic)NewAccount(asm, 1, 100, 7));
+            ((dynamic)tx).Instant.Ledger.Insert((dynamic)NewLedger(asm, 1, 50, 1));
             return Result.Ok();
         });
 
@@ -164,8 +174,8 @@ public class OperationRevertTests {
         // operation-level revert the Account change would survive - this is the
         // cross-table atomicity case a single-table undo would pass.
         var failed = Run(db, txType, (tx, _) => {
-            ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 999, 7));
-            ((dynamic)tx).Ledger.Update(1, (dynamic)NewLedger(asm, 1, 4242, 1));
+            ((dynamic)tx).Instant.Account.Update(1, (dynamic)NewAccount(asm, 1, 999, 7));
+            ((dynamic)tx).Instant.Ledger.Update(1, (dynamic)NewLedger(asm, 1, 4242, 1));
             ArmFault(tx, "Ledger", 0);
             return Result.Ok();
         });
@@ -189,12 +199,12 @@ public class OperationRevertTests {
         var (db, txType, asm) = NewDb();
 
         Run(db, txType, (tx, _) => {
-            ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 100, 7));
+            ((dynamic)tx).Instant.Account.Insert((dynamic)NewAccount(asm, 1, 100, 7));
             return Result.Ok();
         });
 
         var failed = Run(db, txType, (tx, _) => {
-            ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 999, 7));
+            ((dynamic)tx).Instant.Account.Update(1, (dynamic)NewAccount(asm, 1, 999, 7));
             ArmFault(tx, "Account", 0);
             return Result.Ok();
         });
@@ -209,7 +219,7 @@ public class OperationRevertTests {
 
         // Not poisoned: the next ordinary operation succeeds and commits.
         var next = Run(db, txType, (tx, _) => {
-            ((dynamic)tx).Account.Update(1, (dynamic)NewAccount(asm, 1, 250, 7));
+            ((dynamic)tx).Instant.Account.Update(1, (dynamic)NewAccount(asm, 1, 250, 7));
             return Result.Ok();
         });
         Assert.That(next.IsOk(), Is.True, "the database stays usable after a reverted failure");
@@ -229,11 +239,11 @@ public class OperationRevertTests {
     public void AFailedRevert_PoisonsAnInstantOnlyDatabaseSoLaterOperationsAreRefused() {
         var (db, txType, asm) = NewDb();
 
-        Run(db, txType, (tx, _) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 100, 7)); return Result.Ok(); });
+        Run(db, txType, (tx, _) => { ((dynamic)tx).Instant.Account.Insert((dynamic)NewAccount(asm, 1, 100, 7)); return Result.Ok(); });
 
         var failed = Run(db, txType, (tx, _) => {
-            ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 2, 300, 7));
-            ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 3, 400, 7));
+            ((dynamic)tx).Instant.Account.Insert((dynamic)NewAccount(asm, 2, 300, 7));
+            ((dynamic)tx).Instant.Account.Insert((dynamic)NewAccount(asm, 3, 400, 7));
             ArmFault(tx, "Account", 1);
             ArmRevertFault(tx, "Account");
             return Result.Ok();
@@ -242,12 +252,12 @@ public class OperationRevertTests {
 
         // The next operation must be refused outright - not run against memory the
         // database already knows it cannot trust.
-        var afterwards = Run(db, txType, (tx, _) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 4, 500, 7)); return Result.Ok(); });
+        var afterwards = Run(db, txType, (tx, _) => { ((dynamic)tx).Instant.Account.Insert((dynamic)NewAccount(asm, 4, 500, 7)); return Result.Ok(); });
         Assert.That(afterwards.GetError().Kind, Is.EqualTo(ErrorKind.ApplyFailed),
             "an instant-only database must refuse work after an unrevertible failure");
 
         var read = Run(db, txType, (tx, _) => {
-            ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 5, 600, 7));
+            ((dynamic)tx).Instant.Account.Insert((dynamic)NewAccount(asm, 5, 600, 7));
             return Result.Ok();
         });
         Assert.That(read.IsError(), Is.True);

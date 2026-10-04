@@ -54,7 +54,7 @@ public class ReadPathBenchmarks {
             var start = seeded;
             var end = Math.Min(seeded + SeedBatchSize, RecordCount);
             db.Run((ctx, tx) => {
-                for (var i = start; i < end; i++) tx.InstantWidget.Insert(new InstantWidget(i, i));
+                for (var i = start; i < end; i++) tx.Instant.InstantWidget.Insert(new InstantWidget(i, i));
                 return Result.Ok();
             }, PropagationMode.Optimistic).AsTask().GetAwaiter().GetResult();
             seeded = end;
@@ -79,12 +79,12 @@ public class ReadPathBenchmarks {
 
     [Benchmark]
     public ValueTask<Result<InstantWidget>> Enqueue_Find() =>
-        db.Run<InstantWidget, int>(static (ctx, tx, key) => tx.InstantWidget.Primary.Find(key).Get(), lookupKey, PropagationMode.Optimistic);
+        db.Run<InstantWidget, int>(static (ctx, tx, key) => tx.Instant.InstantWidget.Primary.Find(key).Get(), lookupKey, PropagationMode.Optimistic);
 
     [Benchmark(OperationsPerInvoke = BatchSize)]
     public async Task SubmitBatch_NoAwait_Find() {
         for (var i = 0; i < BatchSize; i++)
-            pendingReads[i] = db.Run<InstantWidget, int>(static (ctx, tx, key) => tx.InstantWidget.Primary.Find(key).Get(), lookupKey, PropagationMode.Optimistic);
+            pendingReads[i] = db.Run<InstantWidget, int>(static (ctx, tx, key) => tx.Instant.InstantWidget.Primary.Find(key).Get(), lookupKey, PropagationMode.Optimistic);
 
         for (var i = 0; i < BatchSize; i++) await pendingReads[i];
     }
@@ -94,6 +94,6 @@ public class ReadPathBenchmarks {
     [Benchmark(OperationsPerInvoke = BatchSize)]
     public async Task SubmitBatch_AwaitEach_Find() {
         for (var i = 0; i < BatchSize; i++)
-            await db.Run<InstantWidget, int>(static (ctx, tx, key) => tx.InstantWidget.Primary.Find(key).Get(), lookupKey, PropagationMode.Optimistic);
+            await db.Run<InstantWidget, int>(static (ctx, tx, key) => tx.Instant.InstantWidget.Primary.Find(key).Get(), lookupKey, PropagationMode.Optimistic);
     }
 }

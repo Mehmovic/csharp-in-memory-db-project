@@ -98,7 +98,7 @@ public class RingBufferGenerationTests {
         var (db, txType, asm) = NewDb(cold);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
             PropagationMode.Confirmed);
 
         var entries = GetAllEntries(GetRing(db, "Widget"));
@@ -116,10 +116,10 @@ public class RingBufferGenerationTests {
         var (db, txType, asm) = NewDb(cold);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
             PropagationMode.Confirmed);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Update(1, (dynamic)NewWidget(asm, 1, 500)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Update(1, (dynamic)NewWidget(asm, 1, 500)); return Result.Ok(); },
             PropagationMode.Confirmed);
 
         var entries = GetAllEntries(GetRing(db, "Widget"));
@@ -136,10 +136,10 @@ public class RingBufferGenerationTests {
         var (db, txType, asm) = NewDb(cold);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
             PropagationMode.Confirmed);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Delete(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Delete(1); return Result.Ok(); },
             PropagationMode.Confirmed);
 
         var entries = GetAllEntries(GetRing(db, "Widget"));
@@ -182,7 +182,7 @@ public class RingBufferGenerationTests {
         var (db, txType, asm) = NewDb(cold);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Insert((dynamic)NewWidget(asm, 1, 100)); return Result.Ok(); },
             PropagationMode.Confirmed);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 100m)); return Result.Ok(); },
@@ -204,7 +204,7 @@ public class RingBufferGenerationTests {
         var (db, txType, asm) = NewDb(cold);
 
         var insertResult = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Muted.Insert((dynamic)NewMuted(asm, 1)); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Muted.Insert((dynamic)NewMuted(asm, 1)); return Result.Ok(); },
             PropagationMode.Confirmed);
 
         Assert.That(insertResult.IsOk(), Is.True, "Muted must still insert successfully - RingBufferCapacity = 0 disables ring participation, not the table itself.");

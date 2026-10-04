@@ -50,12 +50,12 @@ public class AccessorOverrideTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Teams.Insert((dynamic)NewClub(asm, 1, "Arsenal")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Teams.Insert((dynamic)NewClub(asm, 1, "Arsenal")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var found = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "PrimaryFindIsOk", (object)((dynamic)tx).Teams, 1)!; return Result.Ok(); },
+            db, txType, (ctx, tx) => { found = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "PrimaryFindIsOk", (object)((dynamic)tx).Instant.Teams, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(found, Is.True);

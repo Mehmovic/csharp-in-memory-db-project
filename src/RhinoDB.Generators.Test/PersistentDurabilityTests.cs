@@ -216,7 +216,7 @@ public class PersistentDurabilityTests {
             db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
             PropagationMode.Confirmed);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Evict(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Evict(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var goneFromMemory = true;
@@ -265,7 +265,7 @@ public class PersistentDurabilityTests {
 
         Result evictResult = default!;
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { evictResult = ((dynamic)tx).Account.Storage.Evict(999); return Result.Ok(); },
+            db, txType, (ctx, tx) => { evictResult = ((dynamic)tx).Account.Evict(999); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsOk(), Is.True);
@@ -403,7 +403,7 @@ public class PersistentDurabilityTests {
             PropagationMode.Confirmed);
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Evict(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Evict(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         bool inMemory = true, peeked = false, reloaded = false;
@@ -436,7 +436,7 @@ public class PersistentDurabilityTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Account.Storage.Evict(1);
+                dtx.Account.Evict(1);
                 dtx.Account.Update(1, (dynamic)NewAccount(asm, 1, 1, 500m));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -475,7 +475,7 @@ public class PersistentDurabilityTests {
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 db, txType, (ctx, tx) => {
                     dynamic dtx = tx;
-                    dtx.Account.Storage.Evict(1);
+                    dtx.Account.Evict(1);
                     dtx.Account.Delete(1);
                     return Result.Ok();
                 }, PropagationMode.Confirmed);
@@ -512,7 +512,7 @@ public class PersistentDurabilityTests {
                 db, txType, (ctx, tx) => { ((dynamic)tx).Account.Insert((dynamic)NewAccount(asm, 1, 1, 100m)); return Result.Ok(); },
                 PropagationMode.Confirmed);
             await (Task<Result>)GeneratorTestHost.RunTransactional(
-                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Evict(1); return Result.Ok(); },
+                db, txType, (ctx, tx) => { ((dynamic)tx).Account.Evict(1); return Result.Ok(); },
                 PropagationMode.Optimistic);
             await (Task<Result>)GeneratorTestHost.RunTransactional(
                 db, txType, (ctx, tx) => Result.Ok(), PropagationMode.Optimistic);
@@ -549,7 +549,7 @@ public class PersistentDurabilityTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Account.Storage.Evict(1);
+                dtx.Account.Evict(1);
                 // With a 1-byte threshold, staging this single eviction already crosses
                 // it - the batch must be applied (mdbx write-through + memory drop)
                 // before this same operation returns, not deferred to the next

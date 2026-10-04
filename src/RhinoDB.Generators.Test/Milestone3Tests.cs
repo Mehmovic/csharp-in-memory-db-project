@@ -218,7 +218,7 @@ public class Milestone3Tests {
 
         var evicted = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            reopenedDb, txType, (ctx, tx) => { evicted = ((dynamic)tx).Account.Storage.Evict(1).IsOk(); return Result.Ok(); },
+            reopenedDb, txType, (ctx, tx) => { evicted = ((dynamic)tx).Account.Evict(1).IsOk(); return Result.Ok(); },
             PropagationMode.Optimistic);
         Assert.That(evicted, Is.True);
 
@@ -254,7 +254,7 @@ public class Milestone3Tests {
         reopenedCold.CompleteRecovery();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Storage.Evict(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Account.Evict(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         decimal peekedBalance = -1;
@@ -290,7 +290,7 @@ public class Milestone3Tests {
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice"));
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 1, "Alice"));
                 dtx.Account.Insert((dynamic)NewAccount(asm, 1, 2, 200m));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
@@ -299,7 +299,7 @@ public class Milestone3Tests {
 
         var playerFound = false;
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { playerFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "PlayerFindIsOk", (object)((dynamic)tx).Player, 1)!; return Result.Ok(); },
+            db, txType, (ctx, tx) => { playerFound = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "PlayerFindIsOk", (object)((dynamic)tx).Instant.Player, 1)!; return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(playerFound, Is.False,

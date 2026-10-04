@@ -91,16 +91,16 @@ public class IterTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "A"));
-                dtx.Widget.Insert((dynamic)NewWidget(asm, 2, "B"));
-                dtx.Widget.Insert((dynamic)NewWidget(asm, 3, "C"));
+                dtx.Instant.Widget.Insert((dynamic)NewWidget(asm, 1, "A"));
+                dtx.Instant.Widget.Insert((dynamic)NewWidget(asm, 2, "B"));
+                dtx.Instant.Widget.Insert((dynamic)NewWidget(asm, 3, "C"));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
         var names = new List<string>();
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                names.AddRange((System.Collections.Generic.List<string>)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetNames", (object)((dynamic)tx).Widget)!);
+                names.AddRange((System.Collections.Generic.List<string>)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetNames", (object)((dynamic)tx).Instant.Widget)!);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -117,18 +117,18 @@ public class IterTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Widget.Insert((dynamic)NewWidget(asm, 1, "A"));
-                dtx.Widget.Insert((dynamic)NewWidget(asm, 2, "B"));
+                dtx.Instant.Widget.Insert((dynamic)NewWidget(asm, 1, "A"));
+                dtx.Instant.Widget.Insert((dynamic)NewWidget(asm, 2, "B"));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Widget.Delete(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Widget.Delete(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var names = new List<string>();
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
-                names.AddRange((System.Collections.Generic.List<string>)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetNames", (object)((dynamic)tx).Widget)!);
+                names.AddRange((System.Collections.Generic.List<string>)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "WidgetNames", (object)((dynamic)tx).Instant.Widget)!);
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 

@@ -67,8 +67,8 @@ public class MultipleIndexesPerFieldTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, 1, 7, "Alpha"));
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 2, 1, 8, "Beta"));
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 1, 1, 7, "Alpha"));
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 2, 1, 8, "Beta"));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -79,10 +79,10 @@ public class MultipleIndexesPerFieldTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                byClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Player, 1)!;
-                byClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Player, 1)!;
-                byShirtResolves = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtIsOk", (object)dtx.Player, 7)!;
-                byShirtLoose = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtLooseCount", (object)dtx.Player, 7)!;
+                byClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Instant.Player, 1)!;
+                byClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Instant.Player, 1)!;
+                byShirtResolves = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtIsOk", (object)dtx.Instant.Player, 7)!;
+                byShirtLoose = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtLooseCount", (object)dtx.Instant.Player, 7)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -97,10 +97,10 @@ public class MultipleIndexesPerFieldTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Insert((dynamic)NewPlayer(asm, 1, 1, 7, "Alpha")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Insert((dynamic)NewPlayer(asm, 1, 1, 7, "Alpha")); return Result.Ok(); },
             PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Update(1, (dynamic)NewPlayer(asm, 1, 2, 7, "Alpha")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Update(1, (dynamic)NewPlayer(asm, 1, 2, 7, "Alpha")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var oldClub = -1;
@@ -110,10 +110,10 @@ public class MultipleIndexesPerFieldTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                oldClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Player, 1)!;
-                oldClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Player, 1)!;
-                newClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Player, 2)!;
-                newClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Player, 2)!;
+                oldClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Instant.Player, 1)!;
+                oldClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Instant.Player, 1)!;
+                newClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Instant.Player, 2)!;
+                newClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Instant.Player, 2)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -130,12 +130,12 @@ public class MultipleIndexesPerFieldTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 1, 1, 7, "Alpha"));
-                dtx.Player.Insert((dynamic)NewPlayer(asm, 2, 1, 8, "Beta"));
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 1, 1, 7, "Alpha"));
+                dtx.Instant.Player.Insert((dynamic)NewPlayer(asm, 2, 1, 8, "Beta"));
                 return Result.Ok();
             }, PropagationMode.Optimistic);
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Delete(1); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Delete(1); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         var byClub = -1;
@@ -145,10 +145,10 @@ public class MultipleIndexesPerFieldTests {
         await (Task<Result>)GeneratorTestHost.RunTransactional(
             db, txType, (ctx, tx) => {
                 dynamic dtx = tx;
-                byClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Player, 1)!;
-                byClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Player, 1)!;
-                byShirtResolves = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtIsOk", (object)dtx.Player, 7)!;
-                byShirtLoose = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtLooseCount", (object)dtx.Player, 7)!;
+                byClub = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubCount", (object)dtx.Instant.Player, 1)!;
+                byClubOrdered = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByClubOrderedCount", (object)dtx.Instant.Player, 1)!;
+                byShirtResolves = (bool)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtIsOk", (object)dtx.Instant.Player, 7)!;
+                byShirtLoose = (int)GeneratorTestHost.InvokeHelper(asm, "TestNs.TestHelpers", "ByShirtLooseCount", (object)dtx.Instant.Player, 7)!;
                 return Result.Ok();
             }, PropagationMode.Optimistic);
 
@@ -163,13 +163,13 @@ public class MultipleIndexesPerFieldTests {
         var (db, txType, asm) = NewDb();
 
         await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Insert((dynamic)NewPlayer(asm, 1, 1, 7, "Alpha")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Insert((dynamic)NewPlayer(asm, 1, 1, 7, "Alpha")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         // Same ShirtNumber, different player: ByShirt is Unique and must reject it,
         // even though the sibling ByShirtLoose index on the same field would allow it.
         var result = await (Task<Result>)GeneratorTestHost.RunTransactional(
-            db, txType, (ctx, tx) => { ((dynamic)tx).Player.Insert((dynamic)NewPlayer(asm, 2, 2, 7, "Beta")); return Result.Ok(); },
+            db, txType, (ctx, tx) => { ((dynamic)tx).Instant.Player.Insert((dynamic)NewPlayer(asm, 2, 2, 7, "Beta")); return Result.Ok(); },
             PropagationMode.Optimistic);
 
         Assert.That(result.IsError(), Is.True);

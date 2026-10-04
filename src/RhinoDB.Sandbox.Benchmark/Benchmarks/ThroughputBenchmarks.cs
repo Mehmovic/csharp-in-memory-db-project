@@ -37,7 +37,7 @@ public class ThroughputBenchmarks {
             var start = instantSeeded;
             var end = Math.Min(instantSeeded + SeedBatchSize, SeedRecordCount);
             instantDb.Run((ctx, tx) => {
-                for (var i = start; i < end; i++) tx.InstantWidget.Insert(new InstantWidget(i, i));
+                for (var i = start; i < end; i++) tx.Instant.InstantWidget.Insert(new InstantWidget(i, i));
                 return Result.Ok();
             }, PropagationMode.Optimistic).AsTask().GetAwaiter().GetResult();
             instantSeeded = end;
@@ -85,7 +85,7 @@ public class ThroughputBenchmarks {
         var tasks = new Task[ConcurrentOperations];
         for (var i = 0; i < ConcurrentOperations; i++) {
             var id = Interlocked.Increment(ref instantNextInsertId);
-            tasks[i] = instantDb.Run((ctx, tx) => { tx.InstantWidget.Insert(new InstantWidget(id, id)); return Result.Ok(); }, PropagationMode.Optimistic).AsTask();
+            tasks[i] = instantDb.Run((ctx, tx) => { tx.Instant.InstantWidget.Insert(new InstantWidget(id, id)); return Result.Ok(); }, PropagationMode.Optimistic).AsTask();
         }
         return Task.WhenAll(tasks);
     }
@@ -95,7 +95,7 @@ public class ThroughputBenchmarks {
         var tasks = new Task[ConcurrentOperations];
         for (var i = 0; i < ConcurrentOperations; i++) {
             var value = Interlocked.Increment(ref instantNextValue);
-            tasks[i] = instantDb.Run((ctx, tx) => { tx.InstantWidget.Update(instantLookupKey, new InstantWidget(instantLookupKey, value)); return Result.Ok(); }, PropagationMode.Optimistic).AsTask();
+            tasks[i] = instantDb.Run((ctx, tx) => { tx.Instant.InstantWidget.Update(instantLookupKey, new InstantWidget(instantLookupKey, value)); return Result.Ok(); }, PropagationMode.Optimistic).AsTask();
         }
         return Task.WhenAll(tasks);
     }
