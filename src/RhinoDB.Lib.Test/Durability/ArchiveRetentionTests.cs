@@ -356,7 +356,6 @@ public class ArchiveRetentionTests {
             builder.OnRetentionRun += _ => Interlocked.Increment(ref runs);
             builder.AddDatabase<NoRetentionDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new NoRetentionDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
                 options.ArchiveRetention = off;      // the disabled policy, from real config semantics
             });
 
@@ -376,7 +375,6 @@ public class ArchiveRetentionTests {
             controlBuilder.OnRetentionRun += _ => Interlocked.Increment(ref controlRuns);
             controlBuilder.AddDatabase<NoRetentionDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new NoRetentionDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
                 options.ArchiveRetention = on;
             });
 

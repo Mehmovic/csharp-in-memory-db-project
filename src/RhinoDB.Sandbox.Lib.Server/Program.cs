@@ -11,7 +11,6 @@ static internal class Program {
         var hostResult = await RhinoHostBuilder.Create()
             .AddDatabase<SandboxDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new SandboxDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
             })
             .BuildAsync();
 

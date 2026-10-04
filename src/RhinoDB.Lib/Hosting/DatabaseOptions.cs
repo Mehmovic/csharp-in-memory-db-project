@@ -8,7 +8,6 @@ public sealed class DatabaseOptions<TDb, TTx>
     where TDb : DbContext<TTx>
     where TTx : ITransaction {
     public Func<ColdStore, TDb>? CreateDb { get; set; }
-    public Func<TDb, Task>? LoadAsync { get; set; }
     public Func<TDb, ColdStore, ulong?, Result>? LoadFromGenesis { get; set; }
 
     // Absent for an Instant-only database

@@ -44,7 +44,6 @@ public class NetworkHostTests {
         var hostResult = await RhinoHostBuilder.Create(dirA)
             .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
             })
             .BuildAsync();
 
@@ -65,7 +64,6 @@ public class NetworkHostTests {
         var hostResult = await RhinoHostBuilder.Create(dirA)
             .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
             })
             .BuildAsync();
 
@@ -81,7 +79,6 @@ public class NetworkHostTests {
         var hostResult = await RhinoHostBuilder.Create(dirA)
             .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
             })
             .BuildAsync();
 
@@ -106,7 +103,6 @@ public class NetworkHostTests {
         var firstResult = await RhinoHostBuilder.Create(dirA)
             .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
             })
             .BuildAsync();
         using var firstHost = firstResult.Unwrap();
@@ -116,7 +112,6 @@ public class NetworkHostTests {
         var secondResult = await RhinoHostBuilder.Create(dirB)
             .AddDatabase<FakeDb, DefaultTransaction>(options => {
                 options.CreateDb = cold => new FakeDb(cold);
-                options.LoadAsync = _ => Task.CompletedTask;
             })
             .BuildAsync();
 

@@ -1,10 +1,11 @@
 using RhinoDB.Lib.Storage;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Durability;
+using RhinoDB.Lib.Realtime;
 
 namespace RhinoDB.Lib.Execution;
 
-public class DbContext<TTx> where TTx : ITransaction {
+public class DbContext<TTx> : IRhinoClientLifecycle where TTx : ITransaction {
     private readonly DbExecutionLoop<TTx> executionLoop;
 
     public CleanupCollector Cleanup { get; private init; }
@@ -30,6 +31,18 @@ public class DbContext<TTx> where TTx : ITransaction {
     protected internal virtual TTx CreateTransaction() => default!;
 
     protected internal virtual ArchiveRetentionPolicy? ConfiguredArchiveRetention => null;
+
+    protected internal virtual Task<Result> OnInitAsync() => Task.FromResult(Result.Ok());
+
+    protected internal virtual Task<Result> OnStartAsync() => Task.FromResult(Result.Ok());
+
+    protected internal virtual Task<Result> OnClientConnectAsync(Session session) => Task.FromResult(Result.Ok());
+
+    protected internal virtual Task<Result> OnClientDisconnectAsync(Session session) => Task.FromResult(Result.Ok());
+
+    Task<Result> IRhinoClientLifecycle.OnClientConnectAsync(Session session) => OnClientConnectAsync(session);
+
+    Task<Result> IRhinoClientLifecycle.OnClientDisconnectAsync(Session session) => OnClientDisconnectAsync(session);
 
     public ValueTask<Result> Run(Func<DbContext<TTx>, TTx, Result> func, PropagationMode mode = PropagationMode.Optimistic)
         => executionLoop.Enqueue(func, mode);

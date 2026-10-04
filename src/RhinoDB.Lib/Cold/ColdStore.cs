@@ -37,6 +37,8 @@ public sealed class ColdStore : IDisposable {
 
     public ulong RecoveredLsn { get; }
 
+    public bool WasFreshlyCreated { get; }
+
     private ColdStore(
         MdbxEnvironment env,
         WriteAheadLog wal,
@@ -44,13 +46,15 @@ public sealed class ColdStore : IDisposable {
         string archiveDirectory,
         DecodedWalEntry[] pendingRecoveryEntries,
         ulong recoveredLsn,
-        long evictionBatchThresholdBytes
+        long evictionBatchThresholdBytes,
+        bool wasFreshlyCreated
     ) {
         this.env = env;
         Wal = wal;
         DirectoryPath = directoryPath;
         PendingWalTail = pendingRecoveryEntries;
         RecoveredLsn = recoveredLsn;
+        WasFreshlyCreated = wasFreshlyCreated;
         checkpoint = new CheckpointEngine(env, wal, archiveDirectory);
         evictionBatch = new EvictionBatch(evictionBatchThresholdBytes);
     }
@@ -122,7 +126,8 @@ public sealed class ColdStore : IDisposable {
                 archiveDirectory,
                 pendingRecovery,
                 Math.Max(checkpointedLsn, maxTailLsn),
-                evictionBatchThresholdBytes
+                evictionBatchThresholdBytes,
+                isFreshDirectory
             )
         );
     }

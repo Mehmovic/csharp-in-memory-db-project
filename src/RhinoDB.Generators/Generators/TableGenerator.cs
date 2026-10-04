@@ -11,7 +11,6 @@ namespace RhinoDB.Generators;
 [Generator]
 public sealed class TableGenerator : IIncrementalGenerator {
     private const string TableAttributeFullName = "RhinoDB.Core.Tables.TableAttribute";
-    private const string DatabaseAttributeFullName = "RhinoDB.Core.Tables.DatabaseAttribute";
     private const string PrimaryKeyAttributeFullName = "RhinoDB.Core.Tables.PrimaryKeyAttribute";
     private const string AutoIncrementAttributeFullName = "RhinoDB.Core.Tables.AutoIncrementAttribute";
     private const string IndexAttributeFullName = "RhinoDB.Core.Tables.IndexAttribute";
@@ -229,11 +228,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
         isEnabledByDefault: true
     );
 
-    static private readonly DiagnosticDescriptor AmbiguousDatabaseDiagnostic = new(
+    static private readonly DiagnosticDescriptor MixedExplicitAndOmittedDatabaseDiagnostic = new(
         "RHINO028",
-        "[Table] omits the database type and the project declares more than one [Database]",
-        "'{0}' is [Table]-attributed without specifying typeof(...) for its database, but this compilation "
-        + "declares {1} [Database] types ({2}) - specify which one explicitly, e.g. [Table(TableKind.X, typeof(YourDb))]",
+        "[Table] mixes an explicit typeof(...) with an omitted one on the same row",
+        "'{0}' has both a [Table] attribute naming an explicit database and one that omits it - omitting "
+        + "typeof(...) means \"build this table for every declared [Database],\" which no longer makes sense "
+        + "once another attribute on the same row already pins one specific database. Either give every "
+        + "attribute an explicit typeof(...), or omit it on all of them.",
         "RhinoDB.Generators",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true
@@ -282,9 +283,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
         var databases = context.SyntaxProvider
             .ForAttributeWithMetadataName(
-                DatabaseAttributeFullName,
+                DatabaseDiscovery.DatabaseAttributeFullName,
                 predicate: static (node, _) => node is ClassDeclarationSyntax,
-                transform: static (ctx, _) => ToDatabaseModel(ctx)
+                transform: static (ctx, _) => DatabaseDiscovery.ToDatabaseModel(ctx)
             );
 
         var declaredDatabaseFullNames = databases.Collect()
@@ -618,29 +619,38 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
         var descriptorFields = DescriptorBuilder.FlattenFields(primaryCtor.Parameters);
 
-        if (rowDiagnostics.Count > 0) return ImmutableArray.Create<(TableModel?, ImmutableArray<Diagnostic>)>((null, rowDiagnostics.ToImmutable()));
+        if (rowDiagnostics.Count > 0) return [(null, rowDiagnostics.ToImmutable())];
+
+        var hasExplicitDatabase = ctx.Attributes.Any(a => a.ConstructorArguments[1].Value is INamedTypeSymbol);
+        var hasOmittedDatabase = ctx.Attributes.Any(a => a.ConstructorArguments[1].Value is not INamedTypeSymbol);
+        if (hasExplicitDatabase && hasOmittedDatabase) {
+            return [
+                (null, ImmutableArray.Create(Diagnostic.Create(MixedExplicitAndOmittedDatabaseDiagnostic, ctx.TargetNode.GetLocation(), rowType.Name)))
+            ];
+        }
+
+        var expanded = ImmutableArray.CreateBuilder<(AttributeData Attribute, string OwnerDatabaseFullName)>();
+        foreach (var attribute in ctx.Attributes) {
+            if (attribute.ConstructorArguments[1].Value is INamedTypeSymbol explicitDatabaseType) {
+                expanded.Add((attribute, explicitDatabaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
+                continue;
+            }
+
+            if (declaredDatabaseFullNames.Length == 0) {
+                return [
+                    (null, ImmutableArray.Create(Diagnostic.Create(NoDatabaseFoundDiagnostic, Loc(attribute), rowType.Name)))
+                ];
+            }
+
+            foreach (var databaseFullName in declaredDatabaseFullNames)
+                expanded.Add((attribute, databaseFullName));
+        }
 
         var results = ImmutableArray.CreateBuilder<(TableModel? Model, ImmutableArray<Diagnostic> Diagnostics)>();
-        foreach (var attribute in ctx.Attributes) {
+        foreach (var (attribute, ownerDatabaseFullName) in expanded) {
             var attrDiagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
             var kind = (TableKind)(int)attribute.ConstructorArguments[0].Value!;
-            var explicitDatabaseType = attribute.ConstructorArguments[1].Value as INamedTypeSymbol;
-
-            string ownerDatabaseFullName;
-            if (explicitDatabaseType is not null) {
-                ownerDatabaseFullName = explicitDatabaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            } else if (declaredDatabaseFullNames.Length == 1) {
-                ownerDatabaseFullName = declaredDatabaseFullNames[0];
-            } else if (declaredDatabaseFullNames.Length == 0) {
-                results.Add((null, ImmutableArray.Create(Diagnostic.Create(NoDatabaseFoundDiagnostic, Loc(attribute), rowType.Name))));
-                continue;
-            } else {
-                results.Add((null, ImmutableArray.Create(Diagnostic.Create(
-                    AmbiguousDatabaseDiagnostic, Loc(attribute), rowType.Name,
-                    declaredDatabaseFullNames.Length, string.Join(", ", declaredDatabaseFullNames)))));
-                continue;
-            }
 
             var (tableAccessorProvided, tableAccessorValue) = StringNamedArg(attribute, "Accessor");
             if (tableAccessorProvided && tableAccessorValue == "")
@@ -686,17 +696,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
             results.Add((model, ImmutableArray<Diagnostic>.Empty));
         }
         return results.ToImmutable();
-    }
-
-    static private DatabaseModel ToDatabaseModel(GeneratorAttributeSyntaxContext ctx) {
-        var databaseType = (INamedTypeSymbol)ctx.TargetSymbol;
-        var invalidGenerations = IntArrayNamedArg(ctx.Attributes[0], "InvalidGenerations");
-        return new DatabaseModel(
-            databaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            databaseType.Name,
-            databaseType.ContainingNamespace.IsGlobalNamespace ? null : databaseType.ContainingNamespace.ToDisplayString(),
-            invalidGenerations
-        );
     }
 
     static private void Emit(
@@ -2278,13 +2277,6 @@ public sealed class TableGenerator : IIncrementalGenerator {
     private sealed class IndexFieldModel(string fieldName, string fieldTypeFullName) {
         public string FieldName { get; } = fieldName;
         public string FieldTypeFullName { get; } = fieldTypeFullName;
-    }
-
-    private sealed class DatabaseModel(string fullName, string simpleName, string? @namespace, ImmutableArray<int> invalidGenerations) {
-        public string FullName { get; } = fullName;
-        public string SimpleName { get; } = simpleName;
-        public string? Namespace { get; } = @namespace;
-        public ImmutableArray<int> InvalidGenerations { get; } = invalidGenerations;
     }
 
 }

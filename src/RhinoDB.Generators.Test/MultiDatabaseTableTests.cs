@@ -148,7 +148,9 @@ public class MultiDatabaseTableTests {
     }
 
     [Test]
-    public void TwoDatabasesInCompilation_TableOmittingDatabase_ReportsRHINO028() {
+    public void TwoDatabasesInCompilation_TableOmittingDatabase_BroadcastsToBothDatabases() {
+        // Omitting typeof(...) means "build this table for every declared [Database]" - two
+        // databases and no explicit type is no longer ambiguous, it's the broadcast case.
         const string source = """
             using MemoryPack;
             using MessagePack;
@@ -171,9 +173,10 @@ public class MultiDatabaseTableTests {
                 [property: MemoryPackOrder(1)] [property: Key(1)] string Name);
             """;
 
-        var ex = Assert.Throws<InvalidOperationException>(() => GeneratorTestHost.CompileAndLoad(source));
-        Assert.That(ex!.Message, Does.Contain("RHINO028"),
-            "two [Database] types and no explicit typeof(...) is genuinely ambiguous - must fail loudly.");
+        var (asm, _) = GeneratorTestHost.CompileAndLoad(source);
+
+        Assert.That(asm.GetType("TestNs.FirstDbPlayerOps"), Is.Not.Null);
+        Assert.That(asm.GetType("TestNs.SecondDbPlayerOps"), Is.Not.Null);
     }
 
     [Test]
@@ -199,9 +202,10 @@ public class MultiDatabaseTableTests {
     }
 
     [Test]
-    public void TwoDatabasesInCompilation_OneTableExplicitOneOmitted_TheOmittedOneStillReportsRHINO028() {
-        // Explicit typeof(...) on one [Table] attribute must not make a sibling attribute's omission
-        // on the SAME row type magically resolve - each attribute instance is judged independently.
+    public void TwoDatabasesInCompilation_OneTableExplicitOneOmitted_ReportsRHINO028() {
+        // Omitting typeof(...) means "build for every declared database" - mixing that with a
+        // sibling attribute that pins one specific database on the SAME row is a contradiction,
+        // not something to resolve by letting the explicit one "win."
         const string source = """
             using MemoryPack;
             using MessagePack;

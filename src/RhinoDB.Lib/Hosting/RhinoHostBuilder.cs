@@ -1,13 +1,17 @@
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Execution;
+using RhinoDB.Lib.Realtime;
 
 namespace RhinoDB.Lib.Hosting;
+
+public delegate Task<Result<ReadOnlyMemory<byte>>> RpcCommandHandler(RhinoHost host, ReadOnlyMemory<byte> body, CancellationToken ct);
 
 public sealed class RhinoHostBuilder {
     private readonly string configDirectory;
     private IDatabaseRegistration? registration;
     private readonly Dictionary<Type, object> tableCompatAdapters = [];
+    private readonly Dictionary<uint, RpcCommandHandler> rpcCommands = [];
     public event Action<ArchiveRetentionRunReport>? OnRetentionRun;
 
     private RhinoHostBuilder(string configDirectory) {
@@ -36,6 +40,10 @@ public sealed class RhinoHostBuilder {
         return this;
     }
 
+    public RhinoHostBuilder AddRpcCommand(uint commandHash, RpcCommandHandler handler) {
+        return !rpcCommands.TryAdd(commandHash, handler) ? throw new ArgumentException($"An RPC command with hash {commandHash} is already registered.", nameof(commandHash)) : this;
+    }
+
     public async Task<Result<RhinoHost>> BuildAsync() {
         if (registration is not { } reg)
             return Result<RhinoHost>.Error(DbError.SystemFailure(
@@ -50,7 +58,7 @@ public sealed class RhinoHostBuilder {
         if (policy is not null)
             collector = reg.StartArchiveCollector(builtDb, policy, report => OnRetentionRun?.Invoke(report));
 
-        var host = new RhinoHost(builtDb, tableCompatAdapters, collector);
+        var host = new RhinoHost(builtDb, tableCompatAdapters, rpcCommands, collector);
 
         TryLoadNetworkHostProvider();
         if (reg.HttpEnabled && RhinoNetworkHostProvider.Factory is { } factory) {
@@ -108,8 +116,6 @@ public sealed class RhinoHostBuilder {
             parsedOptions = parsed;
 
             switch (parsed.Mode) {
-                case RhinoRunMode.Run when options.LoadAsync is null:
-                    return Result<object>.Error(MissingConfig(nameof(options.LoadAsync), because: "RhinoRunMode.Run needs it"));
                 case RhinoRunMode.Replay when options.LoadFromGenesis is null:
                     return Result<object>.Error(MissingConfig(nameof(options.LoadFromGenesis), because: "RhinoRunMode.Replay needs it"));
                 case RhinoRunMode.Migrate when options.RunMigration is null:
@@ -120,8 +126,8 @@ public sealed class RhinoHostBuilder {
                     return Result<object>.Error(MissingConfig(nameof(options.MigrateWalArchive), because: "RhinoRunMode.WalMigrate needs it"));
             }
 
-            var runResult = await RunOne(
-                parsed, createDb, options.LoadAsync, options.LoadFromGenesis,
+            var runResult = await RunOne<TDb, TTx>(
+                parsed, createDb, options.LoadFromGenesis,
                 options.RunMigration, options.GBinary, options.IsGenerationInvalid, options.MigrateWalArchive);
             if (runResult.IsError()) return runResult.Void();
 
@@ -140,21 +146,28 @@ public sealed class RhinoHostBuilder {
             );
     }
 
-    static private async Task<Result<TDb>> RunOne<TDb>(
+    static private async Task<Result<TDb>> RunOne<TDb, TTx>(
         RhinoHostOptions options,
         Func<ColdStore, TDb> createDb,
-        Func<TDb, Task>? loadAsync,
         Func<TDb, ColdStore, ulong?, Result>? loadFromGenesis,
         Func<TDb, Result>? runMigration,
         int? binaryGeneration,
         Func<int, bool>? isGenerationInvalid,
         Func<TDb, Result>? migrateWalArchive
-    ) where TDb : notnull {
+    ) where TDb : DbContext<TTx> where TTx : ITransaction {
         var coldResult = ColdStore.Open(options.ColdPath);
         if (coldResult.IsError()) return coldResult.Void();
         var cold = coldResult.Unwrap();
 
         var db = createDb(cold);
+
+        if (cold.WasFreshlyCreated) {
+            var initResult = await db.OnInitAsync();
+            if (initResult.IsError()) {
+                cold.Dispose();
+                return initResult;
+            }
+        }
 
         switch (options.Mode) {
             case RhinoRunMode.Run: {
@@ -188,7 +201,11 @@ public sealed class RhinoHostBuilder {
                     cold.Dispose();
                     return recoveryResult;
                 }
-                await loadAsync!(db);
+                var startResult = await db.OnStartAsync();
+                if (startResult.IsError()) {
+                    cold.Dispose();
+                    return startResult;
+                }
                 break;
             }
             case RhinoRunMode.Replay: {
@@ -234,13 +251,17 @@ public sealed class RhinoHostBuilder {
 public sealed class RhinoHost : IDisposable {
     private readonly object database;
     private readonly IReadOnlyDictionary<Type, object> tableCompatAdapters;
+    private readonly IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands;
     private readonly IDisposable? collector;
     private IRhinoNetworkHost? networkHost;
     private bool disposed;
 
-    internal RhinoHost(object database, IReadOnlyDictionary<Type, object> tableCompatAdapters, IDisposable? collector) {
+    internal RhinoHost(
+        object database, IReadOnlyDictionary<Type, object> tableCompatAdapters,
+        IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands, IDisposable? collector) {
         this.database = database;
         this.tableCompatAdapters = tableCompatAdapters;
+        this.rpcCommands = rpcCommands;
         this.collector = collector;
     }
 
@@ -250,6 +271,16 @@ public sealed class RhinoHost : IDisposable {
         tableCompatAdapters.TryGetValue(typeof(TRow), out var options)
             ? (TableCompatOptions<TRow>)options
             : null;
+
+    public async Task<Result<ReadOnlyMemory<byte>>> DispatchRpcAsync(uint commandHash, ReadOnlyMemory<byte> body, CancellationToken ct) {
+        if (!rpcCommands.TryGetValue(commandHash, out var handler))
+            return Result<ReadOnlyMemory<byte>>.Error(DbError.UnknownRpcCommand());
+        return await handler(this, body, ct);
+    }
+
+    public Task<Result> DispatchClientConnectAsync(Session session) => ((IRhinoClientLifecycle)database).OnClientConnectAsync(session);
+
+    public Task<Result> DispatchClientDisconnectAsync(Session session) => ((IRhinoClientLifecycle)database).OnClientDisconnectAsync(session);
 
     public int ArchiveCollectorCount => collector is null ? 0 : 1;
 

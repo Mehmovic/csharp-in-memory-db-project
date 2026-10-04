@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 using RhinoDB.Core;
 using RhinoDB.Lib.Hosting;
+using RhinoDB.Lib.Server.Realtime;
 
 namespace RhinoDB.Lib.Server;
 
@@ -29,6 +30,17 @@ internal sealed class NetworkHostFactory : IRhinoNetworkHostFactory {
 
             var app = builder.Build();
             app.MapGet("/health", () => Results.Ok());
+
+            var transport = new WsTransport(host);
+            app.UseWebSockets();
+            app.Map("/rt", async (HttpContext context) => {
+                if (!context.WebSockets.IsWebSocketRequest) {
+                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    return;
+                }
+                var socket = await context.WebSockets.AcceptWebSocketAsync();
+                await transport.AcceptConnectionAsync(socket, context.RequestAborted);
+            });
 
             await app.StartAsync(ct);
 
