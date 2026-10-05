@@ -28,6 +28,8 @@ internal interface IChildDatabaseRegistry {
     Task<Result> ActivateSingletonAsync();
     void AttachRootColdPath(string rootColdPath);
     void AttachChainLog(ChainLog chainLog);
+    void AttachUnrecoverableErrorHandler(UnrecoverableErrorHandler handler);
+    IEnumerable<ColdStore> ActiveColdStores();
     string ParticipantIdFor(object key);
     void CloseAllBestEffort();
 }
@@ -41,6 +43,7 @@ internal sealed class ChildDatabaseRegistry<TChildDb, TTx, TKey>(ChildDatabaseOp
     private readonly SemaphoreSlim lifecycleGate = new SemaphoreSlim(1, 1);
     private string? baseDirectory;
     private ChainLog? chainLog;
+    private UnrecoverableErrorHandler? unrecoverableErrorHandler;
 
     public bool IsSingleton => isSingleton;
 
@@ -51,6 +54,10 @@ internal sealed class ChildDatabaseRegistry<TChildDb, TTx, TKey>(ChildDatabaseOp
         baseDirectory = Path.Combine(rootColdPath, ChildrenDirectoryName, typeof(TChildDb).Name);
 
     public void AttachChainLog(ChainLog log) => chainLog = log;
+
+    public void AttachUnrecoverableErrorHandler(UnrecoverableErrorHandler handler) => unrecoverableErrorHandler = handler;
+
+    public IEnumerable<ColdStore> ActiveColdStores() => active.Values.Select(db => db.Cold).OfType<ColdStore>();
 
     public string ParticipantIdFor(object key) => $"{ChildrenDirectoryName}/{typeof(TChildDb).Name}/{DirectoryNameFor((TKey)key)}";
 
@@ -79,6 +86,10 @@ internal sealed class ChildDatabaseRegistry<TChildDb, TTx, TKey>(ChildDatabaseOp
         if (chainLog is not null) cold.AttachChainResolver(chainLog.ResolverFor(ParticipantIdFor(key)));
 
         var db = createDb(cold);
+        if (unrecoverableErrorHandler is { } handler) {
+            var name = $"{typeof(TChildDb).Name}[{DirectoryNameFor(key)}]";
+            ((IHostedDatabase)db).OnPoisoned = error => handler.Trigger(name, error);
+        }
         if (cold.WasFreshlyCreated) {
             var initResult = await db.OnInitAsync();
             if (initResult.IsError()) { cold.Dispose(); return initResult; }

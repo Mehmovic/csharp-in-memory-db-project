@@ -116,6 +116,11 @@ means sweep every production file touched in the session and move rationale to `
   (new kinds: a `[GenerateDbError]` exception class in `src/RhinoDB.Core/Exceptions/`
   generates `DbError.X()` + `ErrorKind.X`). Throw only from members that can't return a
   Result (fluent `Add`, `void Rollback`, property getters).
+- **Unrecoverable = exit.** A poisoned database (WAL write/fsync failure, unknown multi-db outcome, failed undo) makes a
+  hosted engine exit 74 (disk) / 70 (engine bug) after a bounded shutdown; the supervisor restarts it
+  (`docs/manual/operations.md`). **Any test that poisons through a `RhinoHostBuilder` host must set
+  `.OnUnrecoverableError(UnrecoverableErrorPolicy.Callback(...))`**, or the default kills the test runner. A `DbContext`
+  without a host has no handler. The real exit is covered by `ProcessExitTests` + `RhinoDB.Lib.Test.ExitFixture`.
 - **One Root per host** (`AddDatabase`). **Hooks are Root-only** (`[OnInit<ChildDb>]` → RHINO039).
 - **Children**: keyed `[ChildDatabase<TRoot,TKey>]` (lazy, disposable) and singleton
   `[ChildDatabase<TRoot>]` (key `SingletonChild.Key = "singleton"`, activated at build in Run

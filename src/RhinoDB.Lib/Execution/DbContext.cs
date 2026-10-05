@@ -5,13 +5,24 @@ using RhinoDB.Lib.Realtime;
 
 namespace RhinoDB.Lib.Execution;
 
-public class DbContext<TTx> : IRhinoClientLifecycle where TTx : ITransaction {
+internal interface IHostedDatabase {
+    ColdStore? Cold { get; }
+    Action<DbError>? OnPoisoned { set; }
+}
+
+public class DbContext<TTx> : IRhinoClientLifecycle, IHostedDatabase where TTx : ITransaction {
     private readonly DbExecutionLoop<TTx> executionLoop;
+    private object? poison;
 
     public CleanupCollector Cleanup { get; private init; }
     internal ColdStore? Cold { get; }
-    internal DbError? Poison { get; private set; }
-    public bool IsPoisoned => Poison is not null;
+    internal DbError? Poison => poison is DbError error ? error : null;
+    public bool IsPoisoned => poison is not null;
+
+    internal Action<DbError>? OnPoisoned { get; set; }
+
+    ColdStore? IHostedDatabase.Cold => Cold;
+    Action<DbError>? IHostedDatabase.OnPoisoned { set => OnPoisoned = value; }
 
     protected DbContext(bool startPaused = false, CleanupCollector? cleanupCollector = null) {
         executionLoop = new DbExecutionLoop<TTx>(this, startPaused);
@@ -24,7 +35,10 @@ public class DbContext<TTx> : IRhinoClientLifecycle where TTx : ITransaction {
         Cleanup = cleanupCollector ?? new CleanupCollector(CleanupTrigger.PerTime);
     }
     
-    internal void PoisonDatabase(DbError error) => Poison ??= error;
+    internal void PoisonDatabase(DbError error) {
+        if (Interlocked.CompareExchange(ref poison, error, null) is not null) return;
+        OnPoisoned?.Invoke(error);
+    }
 
     protected internal void ResumeExecution() => executionLoop.Resume();
 

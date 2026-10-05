@@ -782,6 +782,15 @@ over.
 
 ## Restart & recovery
 
+**Unrecoverable errors exit the process (added 2026-10-05).** A poisoned database (a WAL
+write/fsync failure, an unknown multi-database outcome, or a failed undo) triggers a
+once-only exit with code 74 (disk) or 70 (engine bug), after a bounded best-effort
+shutdown. Restarting is the supervisor's job. Recovery below then rebuilds everything
+Persistent. Code: `DbContext.PoisonDatabase` → `OnPoisoned` → `UnrecoverableErrorHandler`
+(`RhinoDB.Lib/Hosting/UnrecoverableError.cs`), configurable with
+`RhinoHostBuilder.OnUnrecoverableError`. Operator guide (exit codes, supervisor setup,
+what a restart keeps): [manual/operations.md](manual/operations.md).
+
 **Recovery is "reopen the environment," not "replay a log."** libmdbx's own
 copy-on-write commit model (see Cold storage above) already guarantees cold
 storage reflects some prior, fully-committed state after any crash — RhinoDB

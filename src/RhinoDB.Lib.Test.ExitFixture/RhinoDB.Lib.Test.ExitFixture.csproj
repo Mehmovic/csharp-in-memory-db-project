@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Test fixture, not shipped: a minimal real host that hits a WAL fsync failure, so RhinoDB.Lib.Test can assert the
+         process really exits with the unrecoverable-error code under the default ExitProcess policy. -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net11.0</TargetFramework>
+        <LangVersion>latest</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\RhinoDB.Core\RhinoDB.Core.csproj" />
+        <ProjectReference Include="..\RhinoDB.Lib\RhinoDB.Lib.csproj" />
+    </ItemGroup>
+
+</Project>

@@ -140,6 +140,8 @@ public sealed class WriteAheadLog : IDisposable {
         if (startFlusher) StartFlusher();
     }
 
+    internal Task<DbError?> FlushAsync() => RequestFlush();
+
     private Task<DbError?> RequestFlush() {
         Task<DbError?> durable;
         bool startFlusher;

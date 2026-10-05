@@ -25,6 +25,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\RhinoDB.Lib\RhinoDB.Lib.csproj" />
+      <ProjectReference Include="..\RhinoDB.Lib.Test.ExitFixture\RhinoDB.Lib.Test.ExitFixture.csproj" ReferenceOutputAssembly="false" />
     </ItemGroup>
 
 </Project>

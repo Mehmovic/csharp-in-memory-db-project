@@ -21,6 +21,7 @@ public sealed class RhinoHostBuilder {
     private readonly Dictionary<(string Method, string Route), RestCommandHandler> restCommands = [];
     private readonly Dictionary<Type, IChildDatabaseRegistry> childRegistrations = [];
     private Func<uint, bool>? isAppVersionInvalid;
+    private UnrecoverableErrorPolicy unrecoverableErrorPolicy = UnrecoverableErrorPolicy.ExitProcess;
     public event Action<ArchiveRetentionRunReport>? OnRetentionRun;
 
     private RhinoHostBuilder(string configDirectory) {
@@ -59,6 +60,11 @@ public sealed class RhinoHostBuilder {
             : this;
     }
 
+    public RhinoHostBuilder OnUnrecoverableError(UnrecoverableErrorPolicy policy) {
+        unrecoverableErrorPolicy = policy;
+        return this;
+    }
+
     public RhinoHostBuilder SetAppVersionValidator(Func<uint, bool> validator) {
         isAppVersionInvalid = validator;
         return this;
@@ -95,9 +101,14 @@ public sealed class RhinoHostBuilder {
         if (result.IsError()) return result.Void();
         var builtDb = result.Unwrap();
 
+        var unrecoverableErrorHandler = new UnrecoverableErrorHandler(unrecoverableErrorPolicy);
+        var rootName = $"{builtDb.GetType().Name} (Root)";
+        ((IHostedDatabase)builtDb).OnPoisoned = error => unrecoverableErrorHandler.Trigger(rootName, error);
+
         foreach (var childRegistration in childRegistrations.Values) {
             childRegistration.AttachRootColdPath(reg.ColdPath);
             if (reg.ChainLog is { } chainLog) childRegistration.AttachChainLog(chainLog);
+            childRegistration.AttachUnrecoverableErrorHandler(unrecoverableErrorHandler);
         }
 
         // Singletons live like the Root: recovered and started with it, so no request ever pays for activation.
@@ -117,6 +128,7 @@ public sealed class RhinoHostBuilder {
             collector = reg.StartArchiveCollector(builtDb, policy, report => OnRetentionRun?.Invoke(report));
 
         var host = new RhinoHost(builtDb, tableCompatAdapters, rpcCommands, restCommands, childRegistrations, isAppVersionInvalid ?? (_ => false), reg.ServerVersion, reg.ChainLog, collector);
+        unrecoverableErrorHandler.Shutdown = host.ShutdownForUnrecoverableErrorAsync;
 
         TryLoadNetworkHostProvider();
         if (reg.HttpEnabled && RhinoNetworkHostProvider.Factory is { } factory) {
@@ -407,6 +419,22 @@ public sealed class RhinoHost : IDisposable {
     public int? NetworkPort => networkHost?.Port;
 
     internal void AttachNetworkHost(IRhinoNetworkHost host) => networkHost = host;
+
+    internal async Task ShutdownForUnrecoverableErrorAsync() {
+        if (networkHost is { } network) {
+            try { await network.DisposeAsync(); } catch { /* best effort */ }
+        }
+
+        var colds = new List<ColdStore>();
+        if (((IHostedDatabase)database).Cold is { } rootCold) colds.Add(rootCold);
+        foreach (var registry in childRegistrations.Values) colds.AddRange(registry.ActiveColdStores());
+
+        var flushes = new List<Task>();
+        foreach (var cold in colds) {
+            try { flushes.Add(cold.Wal.FlushAsync()); } catch { /* best effort */ }
+        }
+        try { await Task.WhenAll(flushes); } catch { /* best effort */ }
+    }
 
     public void Dispose() {
         if (disposed) return;

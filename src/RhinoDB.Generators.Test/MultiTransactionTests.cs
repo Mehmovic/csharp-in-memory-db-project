@@ -55,6 +55,7 @@ public class MultiTransactionTests {
             public static async Task<RhinoHost> Build(string dir) {
                 var host = (await RhinoHostBuilder.Create(dir)
                     .AddGeneratedChildDatabases()
+                    .OnUnrecoverableError(UnrecoverableErrorPolicy.Callback(static _ => { }))
                     .AddDatabase<RootDb, RootDbTransaction>(o => o.CreateDb = cold => new RootDb(cold))
                     .BuildAsync()).Unwrap();
                 await new RootDbLoader().LoadAsync(host.GetDatabase<RootDb>());
@@ -66,6 +67,7 @@ public class MultiTransactionTests {
             public static async Task<RhinoHost> BuildReplay(string dir) =>
                 (await RhinoHostBuilder.Create(dir)
                     .AddGeneratedChildDatabases()
+                    .OnUnrecoverableError(UnrecoverableErrorPolicy.Callback(static _ => { }))
                     .AddDatabase<RootDb, RootDbTransaction>(o => {
                         o.CreateDb = cold => new RootDb(cold);
                         o.LoadFromGenesis = (db, cold, upToLsn) => new RootDbLoader().LoadFromGenesis(db, cold, upToLsn);
@@ -415,6 +417,7 @@ public class MultiTransactionTests {
             public static async Task<RhinoHost> BuildRootOnly(string dir) {
                 var host = (await RhinoHostBuilder.Create(dir)
                     .AddGeneratedChildDatabases()
+                    .OnUnrecoverableError(UnrecoverableErrorPolicy.Callback(static _ => { }))
                     .AddDatabase<RootDb, RootDbTransaction>(o => o.CreateDb = cold => new RootDb(cold))
                     .BuildAsync()).Unwrap();
                 await new RootDbLoader().LoadAsync(host.GetDatabase<RootDb>());
