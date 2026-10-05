@@ -117,17 +117,21 @@ type argument:
 
 | Form | Meaning |
 |---|---|
-| `Add(static (db, tx) => ...)` | a Root step |
-| `Add(static (db, tx, args) => ..., args)` | a Root step with arguments |
+| `Add(static (db, tx) => ...)` | a Root step, or a singleton Child step (the body picks which) |
+| `Add(static (db, tx, args) => ..., args)` | the same, with arguments |
 | `Add(key, static (db, tx) => ...)` | a Child step (`key` picks the Child) |
 | `Add(key, static (db, tx, args) => ..., args)` | a Child step with arguments |
+
+A **singleton Child** (`[ChildDatabase<TRoot>]`, one instance and no key) uses the keyless
+forms, just like the Root, and is declared keyless too: `LockMultiTx(p => p.RootDb().MarketDb())`.
 
 `Run` on a `LockedMultiTx` has the same four shapes. A body returning `Result` gives you
 back the transaction (Planned, so you can chain) or a `Result` (Locked). A body returning
 `Result<T>` gives you a `TxValue<T>` (Planned) or a `Result<T>` (Locked).
 
-**One known ambiguity:** two Child database types with the **same key type**, and a
-body that compiles for both (for example, it touches no table). Then the compiler can't
+**One known ambiguity:** two databases called the same way (two Children with the
+**same key type**, or the Root and a singleton Child, which are both keyless) and a body
+that compiles for both (for example, it touches no table). Then the compiler can't
 pick one (`CS0121`). Annotate the lambda parameters
 (`static (SessionDb db, SessionDbTransaction tx) => ...`). A body that touches a table only
 one of them has resolves on its own.

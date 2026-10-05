@@ -18,7 +18,7 @@ public class DbContext<TTx> : IRhinoClientLifecycle where TTx : ITransaction {
         Cleanup = cleanupCollector ?? new CleanupCollector(CleanupTrigger.PerTime);
     }
 
-    protected DbContext(ColdStore cold, bool startPaused = false, CleanupCollector? cleanupCollector = null) {
+    protected DbContext(ColdStore? cold, bool startPaused = false, CleanupCollector? cleanupCollector = null) {
         Cold = cold;
         executionLoop = new DbExecutionLoop<TTx>(this, startPaused);
         Cleanup = cleanupCollector ?? new CleanupCollector(CleanupTrigger.PerTime);
@@ -37,6 +37,8 @@ public class DbContext<TTx> : IRhinoClientLifecycle where TTx : ITransaction {
     protected internal virtual TTx CreateTransaction() => default!;
 
     protected internal virtual ArchiveRetentionPolicy? ConfiguredArchiveRetention => null;
+
+    protected internal virtual Task LoadFromColdAsync() => Task.CompletedTask;
 
     protected internal virtual Task<Result> OnInitAsync() => Task.FromResult(Result.Ok());
 

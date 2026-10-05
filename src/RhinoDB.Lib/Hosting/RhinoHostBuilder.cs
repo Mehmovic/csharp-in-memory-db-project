@@ -75,6 +75,17 @@ public sealed class RhinoHostBuilder {
             : this;
     }
 
+    public RhinoHostBuilder AddSingletonChildDatabase<TChildDb, TTx>(Action<SingletonChildDatabaseOptions<TChildDb, TTx>> configure)
+        where TChildDb : DbContext<TTx>
+        where TTx : ITransaction {
+        var options = new SingletonChildDatabaseOptions<TChildDb, TTx>();
+        configure(options);
+        var keyed = new ChildDatabaseOptions<TChildDb, TTx, string> { CreateDb = options.CreateDb, Load = options.Load };
+        return !childRegistrations.TryAdd(typeof(TChildDb), new ChildDatabaseRegistry<TChildDb, TTx, string>(keyed, isSingleton: true))
+            ? throw new ArgumentException($"AddSingletonChildDatabase<{typeof(TChildDb).Name}> was already called - each child database type can only be registered once.", nameof(TChildDb))
+            : this;
+    }
+
     public async Task<Result<RhinoHost>> BuildAsync() {
         if (registration is not { } reg)
             return Result<RhinoHost>.Error(DbError.SystemFailure(
@@ -87,6 +98,17 @@ public sealed class RhinoHostBuilder {
         foreach (var childRegistration in childRegistrations.Values) {
             childRegistration.AttachRootColdPath(reg.ColdPath);
             if (reg.ChainLog is { } chainLog) childRegistration.AttachChainLog(chainLog);
+        }
+
+        // Singletons live like the Root: recovered and started with it, so no request ever pays for activation.
+        if (reg.Mode == RhinoRunMode.Run) {
+            foreach (var singleton in childRegistrations.Values.Where(r => r.IsSingleton)) {
+                var activated = await singleton.ActivateSingletonAsync();
+                if (activated.IsError()) {
+                    foreach (var childRegistration in childRegistrations.Values) childRegistration.CloseAllBestEffort();
+                    return Result<RhinoHost>.Error(activated.GetError());
+                }
+            }
         }
 
         IDisposable? collector = null;
@@ -125,6 +147,7 @@ public sealed class RhinoHostBuilder {
         bool HttpEnabled { get; }
         int HttpPort { get; }
         string ColdPath { get; }
+        RhinoRunMode Mode { get; }
         uint ServerVersion { get; }
         ChainLog? ChainLog { get; }
     }
@@ -139,6 +162,7 @@ public sealed class RhinoHostBuilder {
         public bool HttpEnabled => parsedOptions?.HttpEnabled ?? false;
         public int HttpPort => parsedOptions?.HttpPort ?? 0;
         public uint ServerVersion => parsedOptions?.ServerVersion ?? 0;
+        public RhinoRunMode Mode => parsedOptions?.Mode ?? RhinoRunMode.Run;
         public ChainLog? ChainLog { get; private set; }
         public string ColdPath => parsedOptions?.ColdPath ?? throw new InvalidOperationException("ColdPath was read before RunAsync resolved it.");
 

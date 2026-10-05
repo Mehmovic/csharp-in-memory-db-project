@@ -294,12 +294,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         var declaredDatabaseFullNames = databases.Collect()
             .Select(static (dbs, _) => dbs.Select(d => d.FullName).ToImmutableArray());
 
-        var childDatabases = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                DatabaseDiscovery.ChildDatabaseAttributeFullName,
-                predicate: static (node, _) => node is ClassDeclarationSyntax,
-                transform: static (ctx, _) => DatabaseDiscovery.ToDatabaseModel(ctx)
-            );
+        var childDatabases = DatabaseDiscovery.ChildDatabases(context, static (ctx, _) => DatabaseDiscovery.ToDatabaseModel(ctx));
 
         var emitTargetDatabases = databases.Collect()
             .Combine(childDatabases.Collect())
@@ -2107,9 +2102,13 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    private readonly {txName} cachedTransaction;");
         sb.AppendLine();
 
+        if (persistentTables.Length == 0) {
+            sb.AppendLine($"    public {database.SimpleName}() : this(null) {{ }}");
+            sb.AppendLine();
+        }
         var ctorSignature = persistentTables.Length > 0
             ? $"    public {database.SimpleName}(ColdStore cold) : base(cold) {{"
-            : $"    public {database.SimpleName}() {{";
+            : $"    public {database.SimpleName}(ColdStore? cold) : base(cold) {{";
         sb.AppendLine(ctorSignature);
         if (persistentTables.Length > 0) {
             sb.AppendLine("        this.cold = cold;");
@@ -2146,6 +2145,8 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    protected override {txName} CreateTransaction() => cachedTransaction;");
 
         if (persistentTables.Length > 0) sb.AppendLine($"    public {txName} CreateLoaderTransaction() => CreateTransaction();");
+
+        if (persistentTables.Length > 0) sb.AppendLine($"    protected override Task LoadFromColdAsync() => new {database.SimpleName}Loader().LoadAsync(this);");
 
         if (persistentTables.Length > 0) {
             sb.AppendLine();

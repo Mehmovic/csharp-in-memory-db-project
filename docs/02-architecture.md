@@ -1102,7 +1102,36 @@ Root's cold path:
 
 `{key}` is `key.ToString()` unless `ChildDatabaseOptions.KeyToDirectoryName` says
 otherwise. Activation recovers whatever the child's previous activation left in its
-WAL before `OnStart` runs, exactly like the Root does at startup.
+WAL, then **loads its Persistent tables from cold storage** (the generated `{TChildDb}Loader`,
+via `DbContext.LoadFromColdAsync`), then runs `OnStart`. Don't load a child yourself, because
+a second bulk load would insert every row twice. To load differently, set
+`ChildDatabaseOptions.Load` (or `SingletonChildDatabaseOptions.Load`), which replaces the
+generated loader. The Root is unchanged: you still call `new {RootDb}Loader().LoadAsync(...)`
+after `BuildAsync`. Every generated database also has a `(ColdStore)` constructor, even
+without Persistent tables, because the host opens a store for every child it activates.
+
+**Singleton children (added 2026-10-05).** `[ChildDatabase<TRoot>]`, with no key type,
+declares a Child with exactly one instance that lives like the Root. It has its own loop
+and WAL, so a busy area (a market, chat, a leaderboard) stops competing with the Root,
+and multi-database transactions still make it atomic with the Root. It differs from a
+keyed child in four ways:
+
+- **Registration.** It is registered with `AddSingletonChildDatabase<TChildDb,TTx>`
+  (generated). Underneath, it is a keyed child with the fixed key
+  key `SingletonChild.Key` (`"singleton"`), stored at `Children/{TChildDb}/singleton/`. The
+  registry, multi-transaction participant ids, `chains.log` and recovery are therefore
+  unchanged.
+- **Eager activation.** In Run mode it is activated when the host is built, so its WAL
+  is recovered at startup and no request waits for activation. Other modes don't open it.
+- **Never disposed.** `DisposeChildAsync`, or activation under any other key, returns
+  `ChildDatabaseIsSingleton`.
+- **Keyless sugar.** It gets keyless short forms: `ctx.BeginTx(...)`, `PlanMultiTx().Add(...)`,
+  `LockMultiTx(p => p.MarketDb())` and `LockedMultiTx.Run(...)`. The lambda body picks
+  the database. A body that compiles for both the Root and a singleton (it touches no
+  table unique to one) is a `CS0121` error and needs typed lambda parameters.
+
+Hooks stay Root-only (RHINO039).
+
 
 ### Multi-database transactions
 

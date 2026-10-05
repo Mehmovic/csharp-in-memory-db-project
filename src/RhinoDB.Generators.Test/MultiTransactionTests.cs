@@ -58,8 +58,7 @@ public class MultiTransactionTests {
                     .AddDatabase<RootDb, RootDbTransaction>(o => o.CreateDb = cold => new RootDb(cold))
                     .BuildAsync()).Unwrap();
                 await new RootDbLoader().LoadAsync(host.GetDatabase<RootDb>());
-                var child = (await host.GetOrActivateChildAsync<SessionDb, SessionDbTransaction, string>(Session)).Unwrap();
-                await new SessionDbLoader().LoadAsync(child);
+                (await host.GetOrActivateChildAsync<SessionDb, SessionDbTransaction, string>(Session)).ThrowIfError();
                 return host;
             }
 

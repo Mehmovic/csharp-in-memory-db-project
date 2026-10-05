@@ -10,27 +10,42 @@ public sealed class ChildDatabaseOptions<TChildDb, TTx, TKey>
     where TChildDb : DbContext<TTx> where TTx : ITransaction where TKey : notnull {
     public Func<ColdStore, TChildDb>? CreateDb { get; set; }
     public Func<TKey, string>? KeyToDirectoryName { get; set; }
+    public Func<TChildDb, Task>? Load { get; set; }
+}
+
+public sealed class SingletonChildDatabaseOptions<TChildDb, TTx>
+    where TChildDb : DbContext<TTx> where TTx : ITransaction {
+    public Func<ColdStore, TChildDb>? CreateDb { get; set; }
+    public Func<TChildDb, Task>? Load { get; set; }
+}
+
+static public class SingletonChild {
+    public const string Key = "singleton";
 }
 
 internal interface IChildDatabaseRegistry {
+    bool IsSingleton { get; }
+    Task<Result> ActivateSingletonAsync();
     void AttachRootColdPath(string rootColdPath);
     void AttachChainLog(ChainLog chainLog);
     string ParticipantIdFor(object key);
     void CloseAllBestEffort();
 }
 
-internal sealed class ChildDatabaseRegistry<TChildDb, TTx, TKey>(ChildDatabaseOptions<TChildDb, TTx, TKey> options)
+internal sealed class ChildDatabaseRegistry<TChildDb, TTx, TKey>(ChildDatabaseOptions<TChildDb, TTx, TKey> options, bool isSingleton = false)
     : IChildDatabaseRegistry
     where TChildDb : DbContext<TTx> where TTx : ITransaction where TKey : notnull {
     private const string ChildrenDirectoryName = "Children";
 
     private readonly ConcurrentDictionary<TKey, TChildDb> active = new ConcurrentDictionary<TKey, TChildDb>();
-    // Serializes opening a child's directory against deleting one: without it, disposing an inactive child could
-    // delete its directory while a concurrent activation is opening it, and two activations of one key could
-    // both open it. Draining an active child stays outside, so a slow drain never blocks other activations.
     private readonly SemaphoreSlim lifecycleGate = new SemaphoreSlim(1, 1);
     private string? baseDirectory;
     private ChainLog? chainLog;
+
+    public bool IsSingleton => isSingleton;
+
+    public async Task<Result> ActivateSingletonAsync() =>
+        (await GetOrActivateAsync((TKey)(object)SingletonChild.Key, CancellationToken.None)).Void();
 
     public void AttachRootColdPath(string rootColdPath) =>
         baseDirectory = Path.Combine(rootColdPath, ChildrenDirectoryName, typeof(TChildDb).Name);
@@ -41,6 +56,7 @@ internal sealed class ChildDatabaseRegistry<TChildDb, TTx, TKey>(ChildDatabaseOp
 
     public async Task<Result<TChildDb>> GetOrActivateAsync(TKey key, CancellationToken ct) {
         if (active.TryGetValue(key, out var existing)) return existing;
+        if (isSingleton && !Equals(key, SingletonChild.Key)) return Result<TChildDb>.Error(DbError.ChildDatabaseIsSingleton());
         if (options.CreateDb is not { } createDb)
             return Result<TChildDb>.Error(DbError.SystemFailure(new InvalidOperationException(
                 $"AddChildDatabase<{typeof(TChildDb).Name}>: CreateDb was not configured.")));
@@ -71,6 +87,13 @@ internal sealed class ChildDatabaseRegistry<TChildDb, TTx, TKey>(ChildDatabaseOp
         var recoveryResult = await cold.CompleteRecoveryAsync();
         if (recoveryResult.IsError()) { cold.Dispose(); return recoveryResult; }
 
+        try {
+            await (options.Load is { } load ? load(db) : db.LoadFromColdAsync());
+        } catch (Exception ex) {
+            cold.Dispose();
+            return Result<TChildDb>.Error(DbError.SystemFailure(ex));
+        }
+
         var startResult = await db.OnStartAsync();
         if (startResult.IsError()) { cold.Dispose(); return startResult; }
 
@@ -82,6 +105,7 @@ internal sealed class ChildDatabaseRegistry<TChildDb, TTx, TKey>(ChildDatabaseOp
     // anything touches it again, and disposing it must still delete it. An inactive child is never activated just
     // to be deleted - no recovery, OnInit or OnStart for data that's about to go.
     public async Task<Result> DisposeAsync(TKey key, CancellationToken drainCt) {
+        if (isSingleton) return Result.Error(DbError.ChildDatabaseIsSingleton());
         while (true) {
             TChildDb? drained = null;
             if (active.TryGetValue(key, out var db)) {

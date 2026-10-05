@@ -1,12 +1,23 @@
 using System.Collections.Immutable;
 
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace RhinoDB.SchemaContracts;
 
 static public class DatabaseDiscovery {
     public const string DatabaseAttributeFullName = "RhinoDB.Core.Tables.DatabaseAttribute";
     public const string ChildDatabaseAttributeFullName = "RhinoDB.Core.Tables.ChildDatabaseAttribute`2";
+    public const string SingletonChildDatabaseAttributeFullName = "RhinoDB.Core.Tables.ChildDatabaseAttribute`1";
+
+    static public IncrementalValuesProvider<T> ChildDatabases<T>(
+        IncrementalGeneratorInitializationContext context, Func<GeneratorAttributeSyntaxContext, CancellationToken, T> transform) {
+        var keyed = context.SyntaxProvider.ForAttributeWithMetadataName(
+            ChildDatabaseAttributeFullName, static (node, _) => node is ClassDeclarationSyntax, transform);
+        var singleton = context.SyntaxProvider.ForAttributeWithMetadataName(
+            SingletonChildDatabaseAttributeFullName, static (node, _) => node is ClassDeclarationSyntax, transform);
+        return keyed.Collect().Combine(singleton.Collect()).SelectMany(static (pair, _) => pair.Left.AddRange(pair.Right));
+    }
 
     static public DatabaseModel ToDatabaseModel(GeneratorAttributeSyntaxContext ctx) {
         var databaseType = (INamedTypeSymbol)ctx.TargetSymbol;
@@ -19,11 +30,12 @@ static public class DatabaseDiscovery {
         );
     }
 
-    static public (string RootFullName, string KeyFullName) ToChildDatabaseTypeArgs(GeneratorAttributeSyntaxContext ctx) {
+    // KeyFullName is null for a singleton Child.
+    static public (string RootFullName, string? KeyFullName) ToChildDatabaseTypeArgs(GeneratorAttributeSyntaxContext ctx) {
         var attributeClass = (INamedTypeSymbol)ctx.Attributes[0].AttributeClass!;
         return (
             attributeClass.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            attributeClass.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            attributeClass.TypeArguments.Length > 1 ? attributeClass.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) : null
         );
     }
 

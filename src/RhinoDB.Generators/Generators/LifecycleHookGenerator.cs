@@ -103,11 +103,8 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
 
         var declaredRootFullNames = rootDatabases.Select(static (dbs, _) => dbs.Select(d => d.FullName).ToImmutableArray());
 
-        var declaredChildFullNames = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                DatabaseDiscovery.ChildDatabaseAttributeFullName,
-                predicate: static (node, _) => node is ClassDeclarationSyntax,
-                transform: static (ctx, _) => DatabaseDiscovery.ToDatabaseModel(ctx))
+        var declaredChildFullNames = DatabaseDiscovery
+            .ChildDatabases(context, static (ctx, _) => DatabaseDiscovery.ToDatabaseModel(ctx))
             .Collect()
             .Select(static (dbs, _) => dbs.Select(d => d.FullName).ToImmutableArray());
 
