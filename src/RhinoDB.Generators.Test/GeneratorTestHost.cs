@@ -162,8 +162,8 @@ static internal class GeneratorTestHost {
     // DLLs live under the NuGet global-packages cache's analyzers/ folder, not among the runtime
     // dependencies TRUSTED_PLATFORM_ASSEMBLIES surfaces, so they need an explicit Assembly.LoadFrom.
     static private ImmutableArray<IIncrementalGenerator> BuildSerializationGenerators() {
-        var memoryPackAsm = Assembly.LoadFrom(FindAnalyzerDll("memorypack.generator", "1.21.4", @"analyzers\dotnet\cs\MemoryPack.Generator.dll"));
-        var messagePackAsm = Assembly.LoadFrom(FindAnalyzerDll("messagepackanalyzer", "3.1.9", @"analyzers\roslyn4.3\cs\MessagePack.SourceGenerator.dll"));
+        var memoryPackAsm = Assembly.LoadFrom(FindAnalyzerDll("memorypack.generator", "1.21.4", Path.Combine("analyzers", "dotnet", "cs", "MemoryPack.Generator.dll")));
+        var messagePackAsm = Assembly.LoadFrom(FindAnalyzerDll("messagepackanalyzer", "3.1.9", Path.Combine("analyzers", "roslyn4.3", "cs", "MessagePack.SourceGenerator.dll")));
 
         var memoryPackGeneratorType = memoryPackAsm.GetType("MemoryPack.Generator.MemoryPackGenerator")
             ?? throw new InvalidOperationException("MemoryPack.Generator.MemoryPackGenerator not found - package layout may have changed.");

@@ -33,7 +33,10 @@ static public class CompilationWalker {
 
             foreach (var attribute in tableAttributes) {
                 if (ExplicitDatabaseType(attribute) is not { } databaseType) continue;
-                var kind = (int)attribute.ConstructorArguments[0].Value! == 0 ? "Instant" : "Persistent";
+                if (attribute.ConstructorArguments.Length == 0 || attribute.ConstructorArguments[0].Value is not int tableKind)
+                    throw new InvalidOperationException(
+                        $"[Table] on '{type.ToDisplayString()}' didn't bind (missing reference to RhinoDB.Core/RhinoDB.SchemaContracts?) - its schema can't be read.");
+                var kind = tableKind == 0 ? "Instant" : "Persistent";
                 var accessor = StringNamedArg(attribute, "Accessor") is { Length: > 0 } explicitAccessor ? explicitAccessor : type.Name;
 
                 tables.Add(DescriptorBuilder.BuildTable(

@@ -21,6 +21,7 @@ static public class MigrationStatusCommand {
             Console.Error.WriteLine($"'{projectPath}' did not produce a compilation - is it a C# project?");
             return 1;
         }
+        if (CompilationErrors.Report(compilation, projectPath!)) return 1;
 
         var newDescriptor = CompilationWalker.BuildDescriptor(compilation);
 

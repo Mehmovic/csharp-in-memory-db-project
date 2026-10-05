@@ -49,6 +49,11 @@ Generators, PreBuild, SchemaContracts, Tools.Contract, Tools.Dev, Tools.Migratio
 Full suite as of 2026-10-05: **1,308 passed, 2 skipped**. Never let two stages go red at
 once — full-solution green is the gate before the next slice.
 
+**Linux (WSL Ubuntu-24.04):** SDK at `/root/.dotnet/dotnet` (not on PATH; set `DOTNET_ROOT`). `rsync` the repo to
+`~/rhinodb-linux` without bin/obj/.git, put the commands in a scratchpad `.sh` (strip CRs) and run
+`MSYS_NO_PATHCONV=1 wsl.exe -- bash /mnt/c/.../script.sh`. The full suite is green on Linux too (since 2026-10-05) - keep it that way. Full recipe: memory
+`rhinodb-wsl-linux-testing`. Keep test code path-portable (`Path.Combine`, no `C:\` literals).
+
 ## Project layout
 
 ```
