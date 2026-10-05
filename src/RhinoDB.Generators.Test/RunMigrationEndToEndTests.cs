@@ -73,7 +73,7 @@ public class RunMigrationEndToEndTests {
                 var oldRowBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeRow", oldRow)!;
 
                 seedCold.BeginScope();
-                seedCold.Stage(TableIdHash.Compute("Account"), ChangeKind.Insert, oldKeyBytes, oldRowBytes);
+                seedCold.Stage(NameHash.Compute("Account"), ChangeKind.Insert, oldKeyBytes, oldRowBytes);
                 await seedCold.EndScope(commit: true, PropagationMode.Confirmed, lsn: 1);
             }
 
@@ -123,7 +123,7 @@ public class RunMigrationEndToEndTests {
                                                       "Accessor": "Legacy",
                                                       "RowTypeFullName": "global::TestNs.Legacy",
                                                       "Kind": "Persistent",
-                                                      "TableIdHash": 0,
+                                                      "NameHash": 0,
                                                       "Revision": 0,
                                                       "PrimaryKey": { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" },
                                                       "Fields": [ { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" } ],
@@ -173,7 +173,7 @@ public class RunMigrationEndToEndTests {
                 Assert.That(seedCold.RunMigration(1, []).IsOk(), Is.True);
 
                 seedCold.BeginScope();
-                seedCold.Stage(TableIdHash.Compute("Legacy"), ChangeKind.Insert, MemoryPackSerializer.Serialize(1), MemoryPackSerializer.Serialize(42));
+                seedCold.Stage(NameHash.Compute("Legacy"), ChangeKind.Insert, MemoryPackSerializer.Serialize(1), MemoryPackSerializer.Serialize(42));
                 await seedCold.EndScope(commit: true, PropagationMode.Confirmed, lsn: 1);
                 Assert.That(seedCold.ScanAll(legacy).ToList(), Has.Count.EqualTo(0), "not yet committed to mdbx within this same session (no live checkpointing).");
             }

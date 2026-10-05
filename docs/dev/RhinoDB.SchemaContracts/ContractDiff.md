@@ -3,7 +3,7 @@
 ## File header
 
 Classifies a schema change between two versions of the SAME table (already matched by identity -
-Accessor/TableIdHash - by whatever calls this; an Accessor rename deliberately makes tableId AND the mdbx
+Accessor/NameHash - by whatever calls this; an Accessor rename deliberately makes tableId AND the mdbx
 sub-db name both change, so it looks exactly like "new empty table + orphan" to any identity-based
 matching - per `Docs/06-schema-migration.md` §6, that requires an explicit rename step the caller supplies,
 not something `Diff` can infer from two descriptors that no longer share an identity to correlate by).

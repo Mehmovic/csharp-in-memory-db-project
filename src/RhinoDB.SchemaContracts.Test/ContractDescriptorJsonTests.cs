@@ -21,7 +21,7 @@ public class ContractDescriptorJsonTests {
             Accessor = "Player",
             RowTypeFullName = "TestNs.Player",
             Kind = "Persistent",
-            TableIdHash = 123456789u,
+            NameHash = 123456789u,
             Revision = 2,
             PrimaryKey = new FieldDescriptor { Path = "Id", TypeFullName = "System.Int32", Kind = RowFieldKind.Unmanaged },
             Fields = {
@@ -59,7 +59,7 @@ public class ContractDescriptorJsonTests {
         Assert.That(table.Accessor, Is.EqualTo("Player"));
         Assert.That(table.RowTypeFullName, Is.EqualTo("TestNs.Player"));
         Assert.That(table.Kind, Is.EqualTo("Persistent"));
-        Assert.That(table.TableIdHash, Is.EqualTo(123456789u));
+        Assert.That(table.NameHash, Is.EqualTo(123456789u));
         Assert.That(table.Revision, Is.EqualTo(2));
         Assert.That(table.PrimaryKey.Path, Is.EqualTo("Id"));
         Assert.That(table.Fields.Select(f => f.Path), Is.EqualTo(new[] { "Id", "Name", "Loadout.WeaponId" }));

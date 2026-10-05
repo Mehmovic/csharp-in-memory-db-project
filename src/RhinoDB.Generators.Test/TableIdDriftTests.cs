@@ -3,7 +3,7 @@ using RhinoDB.SchemaContracts;
 namespace RhinoDB.Generators.Test;
 
 // The generator emits `private const uint TableId = <FNV-1a of Accessor>` (computed at compile time),
-// while the runtime computes TableIdHash.Compute(accessor) from the accessor string handed to
+// while the runtime computes NameHash.Compute(accessor) from the accessor string handed to
 // ColdStore.OpenTable. That is two implementations of one hash: if they ever drift apart, WAL
 // entries would carry a tableId that cold storage does not recognise and every recovery would
 // refuse. This pins them together by reading the emitted constant back out of the generated Ops
@@ -40,7 +40,7 @@ public class TableIdDriftTests {
         Assert.That(field, Is.Not.Null, "The generated Ops type must carry the private const TableId.");
 
         var emitted = (uint)field!.GetRawConstantValue()!;
-        Assert.That(emitted, Is.EqualTo(TableIdHash.Compute("Accounts")),
-            "The generated TableId const and TableIdHash.Compute must agree, or the WAL and cold storage would disagree about which table a change belongs to.");
+        Assert.That(emitted, Is.EqualTo(NameHash.Compute("Accounts")),
+            "The generated TableId const and NameHash.Compute must agree, or the WAL and cold storage would disagree about which table a change belongs to.");
     }
 }

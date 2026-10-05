@@ -99,7 +99,7 @@ public class DescriptorWiringTests {
                                                       "Accessor": "Account",
                                                       "RowTypeFullName": "global::TestNs.Account",
                                                       "Kind": "Persistent",
-                                                      "TableIdHash": 0,
+                                                      "NameHash": 0,
                                                       "Revision": 0,
                                                       "PrimaryKey": { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" },
                                                       "Fields": [

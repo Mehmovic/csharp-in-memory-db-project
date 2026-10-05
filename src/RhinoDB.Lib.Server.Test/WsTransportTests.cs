@@ -115,7 +115,7 @@ public class WsTransportTests {
 
     [Test]
     public async Task RpcFrame_ForARegisteredCommand_DispatchesAndEchoesTheBodyBack() {
-        var commandHash = RpcCommandHash.Compute("Echo");
+        var commandHash = NameHash.Compute("Echo");
         var builder = RhinoHostBuilder.Create(dir)
             .AddRpcCommand(commandHash, (_, body, _) => Task.FromResult(Result<ReadOnlyMemory<byte>>.Ok(body)));
 

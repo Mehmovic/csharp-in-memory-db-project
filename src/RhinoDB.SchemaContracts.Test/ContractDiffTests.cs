@@ -15,7 +15,7 @@ public class ContractDiffTests {
         Accessor = accessor,
         RowTypeFullName = "global::TestNs.Player",
         Kind = kind,
-        TableIdHash = 1,
+        NameHash = 1,
         Revision = 0,
         PrimaryKey = Field("Id", pkType),
         Fields = [.. fields],

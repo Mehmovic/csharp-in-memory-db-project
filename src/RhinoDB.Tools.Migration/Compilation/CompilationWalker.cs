@@ -72,7 +72,7 @@ static public class CompilationWalker {
         return null;
     }
 
-    static private uint ComputeTableId(string accessor) => TableIdHash.Compute(accessor);
+    static private uint ComputeTableId(string accessor) => NameHash.Compute(accessor);
 
     static private bool IsTableAttributeClass(INamedTypeSymbol? attributeClass) =>
         attributeClass is { Name: "TableAttribute" } && attributeClass.ContainingNamespace.ToDisplayString() == "RhinoDB.Core.Tables";

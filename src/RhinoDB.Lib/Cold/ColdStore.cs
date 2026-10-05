@@ -379,7 +379,7 @@ public sealed class ColdStore : IDisposable {
 
         var table = new ColdTable<TKey, TRow>(dbi, serializeKey, deserializeKey, deserializeRow);
         tables[name] = table;
-        tableDbisById[TableIdHash.Compute(name)] = dbi;
+        tableDbisById[NameHash.Compute(name)] = dbi;
         return table;
     }
 
@@ -490,7 +490,7 @@ public sealed class ColdStore : IDisposable {
         var rcDrop = txn.Drop(dbi, del: true);
         if (rcDrop != 0) return Result.Error(MdbxErrorMapper.Map(rcDrop));
 
-        tableDbisById.Remove(TableIdHash.Compute(tableName));
+        tableDbisById.Remove(NameHash.Compute(tableName));
         tables.Remove(tableName);
         return Result.Ok();
     }
@@ -519,7 +519,7 @@ public sealed class ColdStore : IDisposable {
         var rcDropScratch = txn.Drop(scratchDbi, del: true);
         if (rcDropScratch != 0) return Result.Error(MdbxErrorMapper.Map(rcDropScratch));
 
-        tableDbisById[TableIdHash.Compute(tableName)] = newDbi;
+        tableDbisById[NameHash.Compute(tableName)] = newDbi;
         if (tables.TryGetValue(tableName, out var cached) && cached is IColdTableDbiHandle handle) handle.UpdateDbi(newDbi);
 
         return Result.Ok();

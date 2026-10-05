@@ -39,7 +39,7 @@ public class MultiTransactionRecoveryTests {
         using var store = ColdStore.Open(dir).Unwrap();
         store.OpenTable<int, Account>(Table);
         store.BeginScope();
-        store.Stage(TableIdHash.Compute(Table), ChangeKind.Insert, MemoryPackSerializer.Serialize(key),
+        store.Stage(NameHash.Compute(Table), ChangeKind.Insert, MemoryPackSerializer.Serialize(key),
             MemoryPackSerializer.Serialize(new Account(key, $"owner-{key}", 10m)));
 
         var error = await store.AppendChainPrepare(lsn: (ulong)key, chainId, BothParticipants, dependsOn: []);
@@ -230,7 +230,7 @@ public class MultiTransactionRecoveryTests {
         using (var store = ColdStore.Open(rootDir).Unwrap()) {
             store.OpenTable<int, Account>(Table);
             store.BeginScope();
-            store.Stage(TableIdHash.Compute(Table), ChangeKind.Insert, MemoryPackSerializer.Serialize(5), MemoryPackSerializer.Serialize(new Account(5, "o", 1m)));
+            store.Stage(NameHash.Compute(Table), ChangeKind.Insert, MemoryPackSerializer.Serialize(5), MemoryPackSerializer.Serialize(new Account(5, "o", 1m)));
             Assert.That(await store.EndScope(commit: true, PropagationMode.Confirmed, lsn: 5), Is.Null);
         }
         await Prepare(rootDir, Guid.NewGuid(), key: 3, marker: true);

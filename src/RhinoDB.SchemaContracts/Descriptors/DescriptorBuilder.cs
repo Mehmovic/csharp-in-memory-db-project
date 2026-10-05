@@ -20,7 +20,7 @@ static public class DescriptorBuilder {
         Accessor = accessor,
         RowTypeFullName = rowType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
         Kind = kind,
-        TableIdHash = tableIdHash,
+        NameHash = tableIdHash,
         Revision = revision,
         PrimaryKey = BuildFieldDescriptor(primaryKeyParam),
         Fields = FlattenFields(primaryCtorParams),

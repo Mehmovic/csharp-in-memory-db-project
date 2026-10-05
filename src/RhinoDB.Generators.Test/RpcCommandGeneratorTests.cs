@@ -12,7 +12,7 @@ namespace RhinoDB.Generators.Test;
 
 // [RpcCommand] is discovered project-wide, exactly like [OnInit]/[OnStart] - this is Part G's
 // "start small" compile-time RPC codegen slice: a generated const uint hash (matching the runtime
-// RpcCommandHash.Compute formula exactly) and a generated AddGeneratedRpcCommands registration
+// NameHash.Compute formula exactly - one hash for every name, tables and commands alike) and a generated AddGeneratedRpcCommands registration
 // extension, nothing more (no typed request/response binding, no client-binding codegen - those need
 // their own infrastructure, deliberately deferred). TestDb/DefaultTransaction are real, statically
 // available types from RhinoDB.Lib - only the [RpcCommand] method and the generated registration
@@ -60,7 +60,7 @@ public class RpcCommandGeneratorTests {
         var generated = asm.GetType("RhinoDB.Lib.Hosting.GeneratedRpcCommands")!;
         var hash = (uint)generated.GetField("TestNs_Commands_EchoCommandHash")!.GetValue(null)!;
 
-        Assert.That(hash, Is.EqualTo(RpcCommandHash.Compute("Echo")), "the generator's compile-time hash must match the runtime formula exactly.");
+        Assert.That(hash, Is.EqualTo(NameHash.Compute("Echo")), "the generator's compile-time hash must match the runtime formula exactly.");
 
         var builder = RhinoHostBuilder.Create(dir);
         generated.GetMethod("AddGeneratedRpcCommands")!.Invoke(null, [builder]);
@@ -98,8 +98,8 @@ public class RpcCommandGeneratorTests {
         var generated = asm.GetType("RhinoDB.Lib.Hosting.GeneratedRpcCommands")!;
         var hash = (uint)generated.GetField("TestNs_Commands_GreetCommandHash")!.GetValue(null)!;
 
-        Assert.That(hash, Is.EqualTo(RpcCommandHash.Compute("Say.Hello")));
-        Assert.That(hash, Is.Not.EqualTo(RpcCommandHash.Compute("Greet")));
+        Assert.That(hash, Is.EqualTo(NameHash.Compute("Say.Hello")));
+        Assert.That(hash, Is.Not.EqualTo(NameHash.Compute("Greet")));
     }
 
     [Test]

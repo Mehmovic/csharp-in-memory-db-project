@@ -48,7 +48,7 @@ public class RealBreakingChangeDryRunTests {
                 _ = new LeagueDb(seedCold);
                 seedCold.BeginScope();
                 foreach (var (key, row) in entries)
-                    seedCold.Stage(TableIdHash.Compute("Player"), ChangeKind.Insert, key, row);
+                    seedCold.Stage(NameHash.Compute("Player"), ChangeKind.Insert, key, row);
                 Assert.That(await seedCold.EndScope(commit: true, PropagationMode.Confirmed, lsn: 1), Is.Null);
             }
 

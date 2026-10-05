@@ -6,7 +6,7 @@ public sealed class TableDescriptor {
     public string Accessor { get; set; } = "";
     public string RowTypeFullName { get; set; } = "";
     public string Kind { get; set; } = "";
-    public uint TableIdHash { get; set; }
+    public uint NameHash { get; set; }
 
     public int Revision { get; set; }
 

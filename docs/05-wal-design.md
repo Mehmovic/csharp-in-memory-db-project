@@ -1004,7 +1004,7 @@ the CLI and `--X.mode=prune` can never disagree about what a bare `08:00` meant.
 
 **The command does not implement pruning.** It calls `ColdStore.PruneArchiveOlderThan` /
 `PruneArchiveOlderThanGeneration` - the same two methods the host's Prune mode calls, and that
-the online GC will call. That is the same reasoning that collapsed the three `TableIdHash`
+the online GC will call. That is the same reasoning that collapsed the three `NameHash`
 copies: a destructive rule written twice eventually disagrees with itself, and the two copies
 then delete different histories. This is why `RhinoDB.Tools.Dev` now references
 `RhinoDB.Lib` - to call the real thing rather than re-derive it.

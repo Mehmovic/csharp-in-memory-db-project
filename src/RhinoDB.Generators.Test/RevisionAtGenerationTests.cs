@@ -17,7 +17,7 @@ public class RevisionAtGenerationTests {
                                                                "Accessor": "Account",
                                                                "RowTypeFullName": "global::TestNs.Account",
                                                                "Kind": "Persistent",
-                                                               "TableIdHash": 0,
+                                                               "NameHash": 0,
                                                                "Revision": 2,
                                                                "PrimaryKey": { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" },
                                                                "Fields": [ { "Path": "Id", "TypeFullName": "int", "Kind": "Unmanaged" } ],

@@ -902,7 +902,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             ? KeyExpr("inserted", idx)
             : $"{KeyExpr("inserted", idx)}, i";
 
-    static private uint ComputeTableId(string accessor) => TableIdHash.Compute(accessor);
+    static private uint ComputeTableId(string accessor) => NameHash.Compute(accessor);
 
     static private bool IsTableAttributeClass(AttributeData attribute) =>
         attribute.AttributeClass is { Name: "TableAttribute" } attributeClass

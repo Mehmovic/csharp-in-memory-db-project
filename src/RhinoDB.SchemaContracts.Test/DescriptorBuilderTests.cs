@@ -135,7 +135,7 @@ public class DescriptorBuilderTests {
         Assert.That(table.Accessor, Is.EqualTo("Club"));
         Assert.That(table.RowTypeFullName, Is.EqualTo("global::TestNs.Club"));
         Assert.That(table.Kind, Is.EqualTo("Persistent"));
-        Assert.That(table.TableIdHash, Is.EqualTo(999u));
+        Assert.That(table.NameHash, Is.EqualTo(999u));
         Assert.That(table.Revision, Is.EqualTo(3));
         Assert.That(table.PrimaryKey.Path, Is.EqualTo("Id"));
         Assert.That(table.Fields.Select(f => f.Path), Is.EqualTo(new[] { "Id", "Rating" }));

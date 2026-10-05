@@ -68,17 +68,17 @@ public class BTreeVectorSearchTests {
     [TestCase(16)]
     [TestCase(256)]
     public void IntKeys_IncludingNegatives_AgreeWithTheModel(int chunkSize)
-        => RunAgainstModel(r => (int)r % 5_000, [int.MinValue, int.MinValue + 1, -1, 0, 1, int.MaxValue - 1, int.MaxValue], chunkSize);
+        => RunAgainstModel(r => unchecked((int)r) % 5_000, [int.MinValue, int.MinValue + 1, -1, 0, 1, int.MaxValue - 1, int.MaxValue], chunkSize);
 
     [TestCase(16)]
     [TestCase(256)]
     public void LongKeys_IncludingNegatives_AgreeWithTheModel(int chunkSize)
-        => RunAgainstModel(r => (long)r % 50_000L * 1_000_000_007L, [long.MinValue, long.MinValue + 1, -1L, 0L, 1L, long.MaxValue - 1, long.MaxValue], chunkSize);
+        => RunAgainstModel(r => unchecked((long)r) % 50_000L * 1_000_000_007L, [long.MinValue, long.MinValue + 1, -1L, 0L, 1L, long.MaxValue - 1, long.MaxValue], chunkSize);
 
     [TestCase(16)]
     [TestCase(256)]
     public void UIntKeys_AboveIntMaxValue_AgreeWithTheModel(int chunkSize)
-        => RunAgainstModel(r => (uint)(r % 5_000) * 900_001u, [0u, 1u, (uint)int.MaxValue, (uint)int.MaxValue + 1, uint.MaxValue - 1, uint.MaxValue], chunkSize);
+        => RunAgainstModel(r => unchecked((uint)(r % 5_000) * 900_001u), [0u, 1u, (uint)int.MaxValue, (uint)int.MaxValue + 1, uint.MaxValue - 1, uint.MaxValue], chunkSize);
 
     [TestCase(16)]
     [TestCase(256)]

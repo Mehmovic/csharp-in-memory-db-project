@@ -67,7 +67,7 @@ public sealed class RpcCommandGenerator : IIncrementalGenerator {
             return new CommandModel(name, 0, "", Diagnostic.Create(InvalidRpcCommandSignatureDiagnostic, location, method.ToDisplayString()));
         }
 
-        var hash = TableIdHash.Compute(name);
+        var hash = NameHash.Compute(name);
         var methodReference = method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + method.Name;
         return new CommandModel(name, hash, methodReference, null);
     }

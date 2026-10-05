@@ -64,7 +64,7 @@ src/RhinoDB.Lib             — the engine: Storage/, Indexing/, Tables/, Execut
 src/RhinoDB.Lib.Server      — network host (loaded by reflection if referenced)
 src/RhinoDB.Native          — raw P/Invoke to vendored libmdbx; the ONLY project with AllowUnsafeBlocks
 src/RhinoDB.Generators      — Roslyn source generators (netstandard2.0), referenced as an Analyzer
-src/RhinoDB.SchemaContracts — shared by generators + tools (DatabaseDiscovery, TableIdHash, config/descriptors)
+src/RhinoDB.SchemaContracts — shared by generators + tools (DatabaseDiscovery, NameHash, config/descriptors)
 src/RhinoDB.PreBuild        — MSBuild pre-build step (.props/.targets imported by consumers)
 src/RhinoDB.Tools.*         — Contract / Dev / Migration / Wal CLIs
 src/RhinoDB.Run.Cli         — CLI host
@@ -116,11 +116,17 @@ means sweep every production file touched in the session and move rationale to `
   (new kinds: a `[GenerateDbError]` exception class in `src/RhinoDB.Core/Exceptions/`
   generates `DbError.X()` + `ErrorKind.X`). Throw only from members that can't return a
   Result (fluent `Add`, `void Rollback`, property getters).
+  The reverse doesn't hold: a member that can't fail returns its plain value, not a `Result`. `RhinoRandom`, where every
+  member returns `Result`, is a deliberate one-off for that API's uniformity, not a precedent.
 - **Unrecoverable = exit.** A poisoned database (WAL write/fsync failure, unknown multi-db outcome, failed undo) makes a
   hosted engine exit 74 (disk) / 70 (engine bug) after a bounded shutdown; the supervisor restarts it
   (`docs/manual/operations.md`). **Any test that poisons through a `RhinoHostBuilder` host must set
   `.OnUnrecoverableError(UnrecoverableErrorPolicy.Callback(...))`**, or the default kills the test runner. A `DbContext`
   without a host has no handler. The real exit is covered by `ProcessExitTests` + `RhinoDB.Lib.Test.ExitFixture`.
+- **Checked-build clean.** Arithmetic that wraps on purpose (hashes, RNG, truncating casts) must be explicit - `unchecked(...)`
+  or a mask - so the code behaves the same under `CheckForOverflowUnderflow`. Sweep: `dotnet build --no-incremental
+  -p:CheckForOverflowUnderflow=true` + `dotnet test --no-build`, grep for `OverflowException`, then **rebuild with
+  `--no-incremental`** (an incremental build keeps the checked binaries). One name hash for everything: `NameHash` (FNV-1a).
 - **One Root per host** (`AddDatabase`). **Hooks are Root-only** (`[OnInit<ChildDb>]` → RHINO039).
 - **Children**: keyed `[ChildDatabase<TRoot,TKey>]` (lazy, disposable) and singleton
   `[ChildDatabase<TRoot>]` (key `SingletonChild.Key = "singleton"`, activated at build in Run

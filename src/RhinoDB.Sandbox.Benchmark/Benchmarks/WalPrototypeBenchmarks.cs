@@ -104,7 +104,7 @@ public class WalPrototypeBenchmarks {
 
     static private uint Fnv1A(ReadOnlySpan<byte> data) {
         var hash = 2166136261u;
-        foreach (var b in data) hash = (hash ^ b) * 16777619u;
+        foreach (var b in data) hash = unchecked((hash ^ b) * 16777619u);
         return hash;
     }
 }

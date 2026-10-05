@@ -71,7 +71,7 @@ public class GenesisReplayGenerationAwareTests {
             var oldRowBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeRow", oldRow)!;
 
             var archiveDir = Path.Combine(dir, WalArchive.ArchiveDirectoryName);
-            var change = new WalChange(TableIdHash.Compute("Account"), ChangeKind.Insert, oldKeyBytes, oldRowBytes);
+            var change = new WalChange(NameHash.Compute("Account"), ChangeKind.Insert, oldKeyBytes, oldRowBytes);
             var entry = new DecodedWalEntry(0, WalEntryKind.Operation, [change]);
             var writeError = WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [entry], generation: 0);
             Assert.That(writeError, Is.Null, "seeding the archived segment itself must succeed.");
@@ -130,7 +130,7 @@ public class GenesisReplayGenerationAwareTests {
             var oldRowBytes = (byte[])GeneratorTestHost.InvokePrivateStaticHelper(asm, "TestNs.AccountV0FrozenSchemaOps", "SerializeRow", oldRow)!;
 
             var archiveDir = Path.Combine(dir, WalArchive.ArchiveDirectoryName);
-            var change = new WalChange(TableIdHash.Compute("Account"), ChangeKind.Insert, oldKeyBytes, oldRowBytes);
+            var change = new WalChange(NameHash.Compute("Account"), ChangeKind.Insert, oldKeyBytes, oldRowBytes);
             var entry = new DecodedWalEntry(0, WalEntryKind.Operation, [change]);
             WalArchive.WriteSegment(archiveDir, Guid.NewGuid(), [entry], generation: 0);
 
