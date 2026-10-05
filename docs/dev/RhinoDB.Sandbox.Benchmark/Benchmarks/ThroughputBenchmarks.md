@@ -133,3 +133,31 @@ awaiting each call individually (the common case) never pays it. Confirms
 `Docs/01-performance-principles.md`'s own framing: `ValueTask` gives the
 full allocation win for the dominant single-await shape, and fan-out costs
 `.AsTask()` explicitly, exactly where it's actually needed.
+
+## 2026-10-05 re-run — after multi-database transactions, per-step apply, Children
+
+Re-measured after the execution loop's apply path gained retained-undo scoping (`AppliedInOperation`
+guard, one LSN per scope), the orphan-queue change (allocate once, never null, `TrimExcess` past 1024),
+and the Child/`LoadFromColdAsync` hosting work. None of the new features are on these benchmarks' path
+except through the shared `PooledOperation` → `ApplyCore` → per-table `Apply` code, which is the point:
+checking the single-transaction hot path didn't pay for them.
+
+| Method | Mean (10k ops) | Throughput | Allocated | vs. 2026-09-20 |
+|---|---|---|---|---|
+| `InstantConcurrentInserts` | 3.313 ms (±0.114) | ~3.02M ops/sec | 2.29 MB | ~8% faster (3.589 ms) |
+| `InstantConcurrentUpdates` | 3.012 ms (±0.050) | ~3.32M ops/sec | 2.21 MB | ~10% faster (3.317 ms) |
+| `PersistentOptimisticConcurrentInserts` | 8.684 ms (±0.667) | ~1.15M ops/sec | 6.72 MB | ~5% faster (9.089 ms); allocation 10.21 → 6.72 MB |
+| `PersistentOptimisticConcurrentUpdates` | 8.755 ms (±0.926) | ~1.14M ops/sec | 6.64 MB | within noise (8.411 ms) |
+
+Same machine and SDK as the last run (Windows 11, .NET SDK 11.0.100-rc.1.26425.128, BenchmarkDotNet 0.14.0).
+The Instant gains are small and could partly be run-to-run variance; the Persistent rows' StdDev is ~8-10%
+of the mean, so only the allocation drop on Persistent inserts is clearly real. Conclusion: no regression
+from the new systems on the single-transaction path.
+
+Alongside: `ConfirmedCoalescingBenchmarks` (16 concurrent `Confirmed` writes, fsync-bound) measured
+1.071 ms / 1.039 ms per batch (~15k confirmed tx/sec) vs. the ~1.6-1.8 ms recorded in
+`ConfirmedCoalescingBenchmarks.md` at window 0; `SubmissionOverheadBenchmarks.PooledRunNoOp` (one
+awaited no-op round trip, cross-thread wake included) 3.07 µs and 32 B allocated.
+
+Not covered by any benchmark yet: multi-database transactions (planned/locked, 1 vs 2 durable
+participants) and Child activation/auto-load cost.

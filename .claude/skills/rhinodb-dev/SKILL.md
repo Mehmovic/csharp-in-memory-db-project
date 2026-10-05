@@ -156,7 +156,9 @@ dotnet run -c Release --project src/RhinoDB.Sandbox.Benchmark -- --filter "*Thro
 ```
 `ThroughputBenchmarks` = 10,000 concurrent single-row transactions per invocation
 (ops/s = 10,000 / mean). Also `SubmissionOverheadBenchmarks` (per-call cost) and
-`ConfirmedCoalescingBenchmarks` (Confirmed mode). Baselines and writeups live in
+`ConfirmedCoalescingBenchmarks` (Confirmed mode), `MultiDatabaseTransactionBenchmarks` (per-tx cost of
+planned/locked/2PC vs `BeginTx`), `ChildColdActivationBenchmarks`/`ChildLifecycleBenchmarks` (activation,
+auto-load, create/dispose) — the last three run a real `RhinoHost` via `BenchHost`. Baselines and writeups live in
 `docs/Dev/RhinoDB.Sandbox.Benchmark/Benchmarks/*.md` (last throughput baseline:
 2026-09-20, Instant ~2.8-3.0M ops/s, Persistent Optimistic ~1.10-1.19M ops/s). Runs take
 several minutes — run in the background; point `--artifacts` at a scratch dir, not the repo root.
