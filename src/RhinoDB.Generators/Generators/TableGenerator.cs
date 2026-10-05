@@ -969,8 +969,10 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("    private int undoJournalCount;");
         sb.AppendLine("    private int preApplyCount;");
         sb.AppendLine("    private ulong appliedLsn;");
-        sb.AppendLine("    private System.Collections.Generic.HashSet<int>? orphanOffsets;");
-        sb.AppendLine("    public int PendingStorageOrphanCount => orphanOffsets?.Count ?? 0;");
+        sb.AppendLine("    private const int OrphanTrimThreshold = 1024;");
+        sb.AppendLine("    private const int OrphanRetainedCapacity = 64;");
+        sb.AppendLine("    private readonly System.Collections.Generic.HashSet<int> orphanOffsets = new();");
+        sb.AppendLine("    public int PendingStorageOrphanCount => orphanOffsets.Count;");
         sb.AppendLine("    public bool AppliedInOperation { get; private set; }");
         sb.AppendLine("    #if DEBUG");
         sb.AppendLine("    public System.Action<int>? TestOnlyApplyFault { get; set; }");
@@ -1000,7 +1002,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    public QuerySet<{row}> Iter() {{");
         sb.AppendLine("        using var live = primaryIndex.GetOffsetsIter();");
         sb.AppendLine("        var buffer = live.Buffer();");
-        sb.AppendLine($"        if (orphanOffsets is null || orphanOffsets.Count == 0) return new QuerySet<{row}>(storage, live, rowMutator);");
+        sb.AppendLine($"        if (orphanOffsets.Count == 0) return new QuerySet<{row}>(storage, live, rowMutator);");
         sb.AppendLine("        using var builder = StackArrayPoolContainerBuilder<int>.Create(buffer.Length);");
         sb.AppendLine("        foreach (var offset in buffer)");
         sb.AppendLine("            if (!orphanOffsets.Contains(offset)) builder.Add(offset);");
@@ -1149,11 +1151,12 @@ public sealed class TableGenerator : IIncrementalGenerator {
     }
 
     static private void EmitUndoPreamble(StringBuilder sb, TableModel table) {
-        sb.AppendLine($"        AppliedInOperation = true;");
-        sb.AppendLine($"        appliedLsn = lsn;");
-        sb.AppendLine($"        preApplyCount = storage.Count;");
-        sb.AppendLine($"        undoJournalCount = 0;");
-        sb.AppendLine($"        orphanOffsets = null;");
+        sb.AppendLine($"        if (!AppliedInOperation) {{");
+        sb.AppendLine($"            AppliedInOperation = true;");
+        sb.AppendLine($"            appliedLsn = lsn;");
+        sb.AppendLine($"            preApplyCount = storage.Count;");
+        sb.AppendLine($"            undoJournalCount = 0;");
+        sb.AppendLine($"        }}");
         sb.AppendLine($"        undoJournal ??= ArrayPool<UndoRecord<{table.RowTypeFullName}>>.Shared.Rent(Math.Max(changes.Count, 1));");
     }
 
@@ -1174,9 +1177,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"    }}");
         sb.AppendLine();
         sb.AppendLine($"    public void ReleaseUndoJournal() {{");
+        sb.AppendLine($"        AppliedInOperation = false;");
         sb.AppendLine($"        if (undoJournal is null) return;");
         sb.AppendLine($"        ArrayPool<UndoRecord<{table.RowTypeFullName}>>.Shared.Return(undoJournal);");
-        sb.AppendLine($"        AppliedInOperation = false;");
         sb.AppendLine($"        undoJournal = null;");
         sb.AppendLine($"        undoJournalCount = 0;");
         sb.AppendLine($"    }}");
@@ -1202,7 +1205,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"                        break;");
         sb.AppendLine($"                    }}");
         sb.AppendLine($"                    default: {{");
-        sb.AppendLine("                        orphanOffsets?.Remove(step.Offset);");
+        sb.AppendLine("                        orphanOffsets.Remove(step.Offset);");
         sb.AppendLine($"                        storage.Set(step.Offset, step.Row);");
         sb.AppendLine($"                        primaryIndex.Insert(step.Row.{table.PrimaryKeyName}, step.Offset);");
         foreach (var idx in table.Indexes)
@@ -1591,7 +1594,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
             sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
         }
-        sb.AppendLine($"                    (orphanOffsets ??= new()).Add(offset);");
+        sb.AppendLine($"                    orphanOffsets.Add(offset);");
         EmitRingBufferRecordCall(sb, table, "Delete", "SerializeKey(c.Key)", "null");
         sb.AppendLine("                    break;");
         sb.AppendLine("                }");
@@ -1605,7 +1608,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
 
     static private void EmitSweepMethod(StringBuilder sb, TableModel table) {
         sb.AppendLine("    public void SweepDeleted() {");
-        sb.AppendLine("        if (orphanOffsets is null || orphanOffsets.Count == 0) return;");
+        sb.AppendLine("        if (orphanOffsets.Count == 0) return;");
         sb.AppendLine("        var orphans = orphanOffsets;");
         sb.AppendLine("        var rented = ArrayPool<int>.Shared.Rent(orphans.Count);");
         sb.AppendLine("        try {");
@@ -1613,6 +1616,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("            var n = 0;");
         sb.AppendLine("            foreach (var offset in orphans) targets[n++] = offset;");
         sb.AppendLine("            orphans.Clear();");
+        sb.AppendLine("            if (n > OrphanTrimThreshold) orphans.TrimExcess(OrphanRetainedCapacity);");
         sb.AppendLine("            using var relocations = storage.DeleteMany(targets);");
         sb.AppendLine("            foreach (var relocation in relocations) {");
         sb.AppendLine($"                var relocatedPk = relocation.Row.{table.PrimaryKeyName};");
@@ -1755,7 +1759,7 @@ public sealed class TableGenerator : IIncrementalGenerator {
             var deleteArgs = idx.Uniqueness == Uniqueness.Unique ? KeyExpr("oldRow", idx) : $"{KeyExpr("oldRow", idx)}, offset";
             sb.AppendLine($"                    {IndexFieldName(idx)}.Delete({deleteArgs});");
         }
-        sb.AppendLine($"                    (orphanOffsets ??= new()).Add(offset);");
+        sb.AppendLine($"                    orphanOffsets.Add(offset);");
         sb.AppendLine("                    var deleteKeyBytes = SerializeKey(c.Key);");
         sb.AppendLine("                    cold.Stage(TableId, ChangeKind.Delete, deleteKeyBytes, null);");
         EmitRingBufferRecordCall(sb, table, "Delete", "deleteKeyBytes", "null");
@@ -1992,29 +1996,44 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine("        this.lsnSequence = lsnSequence;");
         sb.AppendLine("    }");
         sb.AppendLine();
-        sb.AppendLine("    public Result Apply() {");
+        sb.AppendLine("    public Result Apply() => ApplyCore(retainUndo: false);");
+        sb.AppendLine();
+        sb.AppendLine("    public Result ApplyRetainingUndo() => ApplyCore(retainUndo: true);");
+        sb.AppendLine();
+        sb.AppendLine("    private Result ApplyCore(bool retainUndo) {");
         foreach (var table in tables)
             sb.AppendLine($"        if ({Camel(table.Accessor)}Ops.Dirty && !{Camel(table.Accessor)}Ops.Validate()) return Result.Error({Camel(table.Accessor)}Ops.LastError);");
         var anyDirtyExpr = tables.Length > 0 ? string.Join(" || ", tables.Select(t => $"{Camel(t.Accessor)}Ops.Dirty")) : "false";
         sb.AppendLine($"        var anyDirty = {anyDirtyExpr};");
-        sb.AppendLine("        LastLsn = anyDirty ? lsnSequence.Next() : null;");
+        var retainedExpr = tables.Length > 0 ? string.Join(" || ", tables.Select(t => $"{Camel(t.Accessor)}Ops.AppliedInOperation")) : "false";
+        sb.AppendLine($"        var retained = {retainedExpr};");
+        sb.AppendLine("        if (!retained) LastLsn = anyDirty ? lsnSequence.Next() : null;");
+        sb.AppendLine("        else if (anyDirty) LastLsn ??= lsnSequence.Next();");
         sb.AppendLine("        try {");
         foreach (var table in tables)
             sb.AppendLine($"            if ({Camel(table.Accessor)}Ops.Dirty) {Camel(table.Accessor)}Ops.Apply(LastLsn ?? 0UL);");
-        foreach (var table in tables)
-            sb.AppendLine($"            {Camel(table.Accessor)}Ops.ReleaseUndoJournal();");
+        sb.AppendLine("            if (!retainUndo) ReleaseRetainedUndo();");
         sb.AppendLine("        }");
         sb.AppendLine("        catch (Exception ex) {");
-        sb.AppendLine("            var reverted = true;");
-        foreach (var table in tables.Reverse()) {
-            sb.AppendLine($"            if ({Camel(table.Accessor)}Ops.AppliedInOperation && !{Camel(table.Accessor)}Ops.RevertUndo()) {{");
-            sb.AppendLine("                reverted = false;");
-            sb.AppendLine("            }");
-        }
-        sb.AppendLine("            if (!reverted) throw new ApplyFailedException(ex);");
+        sb.AppendLine("            if (!RevertRetainedUndo()) throw new ApplyFailedException(ex);");
         sb.AppendLine("            return Result.Error(DbError.ApplyFailedButRevertedSuccessfully(ex));");
         sb.AppendLine("        }");
         sb.AppendLine("        return Result.Ok();");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    public void ReleaseRetainedUndo() {");
+        foreach (var table in tables)
+            sb.AppendLine($"        {Camel(table.Accessor)}Ops.ReleaseUndoJournal();");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    public bool RevertRetainedUndo() {");
+        sb.AppendLine("        var reverted = true;");
+        foreach (var table in tables.Reverse()) {
+            sb.AppendLine($"        if ({Camel(table.Accessor)}Ops.AppliedInOperation && !{Camel(table.Accessor)}Ops.RevertUndo()) {{");
+            sb.AppendLine("            reverted = false;");
+            sb.AppendLine("        }");
+        }
+        sb.AppendLine("        return reverted;");
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine("    public int PendingStorageOrphanCount {");
@@ -2234,7 +2253,9 @@ public sealed class TableGenerator : IIncrementalGenerator {
         sb.AppendLine($"        if (oldestGenerationResult.Unwrap().TryGet(out var oldestGeneration) && oldestGeneration < {database.SimpleName}.RetainedFromGeneration)");
         sb.AppendLine("            return Result.Error(DbError.ArchiveOlderThanRetentionFloor());");
         sb.AppendLine();
-        sb.AppendLine("        var historyResult = WalArchive.ReadHistory(cold.DirectoryPath, cold.PendingWalTail, cold.WalGeneration);");
+        sb.AppendLine("        var tailResult = cold.ResolveReplayTail();");
+        sb.AppendLine("        if (tailResult.IsError()) return tailResult.Void();");
+        sb.AppendLine("        var historyResult = WalArchive.ReadHistory(cold.DirectoryPath, tailResult.Unwrap(), cold.WalGeneration);");
         sb.AppendLine("        if (historyResult.IsError()) return historyResult.Void();");
         sb.AppendLine();
         sb.AppendLine("        foreach (var (entry, generation) in historyResult.Unwrap()) {");

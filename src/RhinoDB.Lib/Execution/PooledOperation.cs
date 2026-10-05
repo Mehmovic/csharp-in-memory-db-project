@@ -10,6 +10,10 @@ internal interface IExecutionWorkItem {
     void Run();
 }
 
+internal interface IAsyncExecutionWorkItem : IExecutionWorkItem {
+    Task RunAsync();
+}
+
 internal sealed class PooledOperation<TTx, TValue, TArgs> : IValueTaskSource<TValue>, IExecutionWorkItem
     where TTx : ITransaction
     where TValue : struct, IResult<TValue> {

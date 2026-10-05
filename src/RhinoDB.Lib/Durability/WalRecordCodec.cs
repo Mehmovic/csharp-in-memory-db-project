@@ -4,9 +4,17 @@ using MemoryPack;
 
 namespace RhinoDB.Lib.Durability;
 
+[MemoryPackable]
+internal readonly partial struct WalChainPreparePayload(Guid chainId, string[] participants, WalChange[] changes) {
+    public Guid ChainId { get; } = chainId;
+    public string[] Participants { get; } = participants;
+    public WalChange[] Changes { get; } = changes;
+}
+
 static public class WalRecordCodec {
     public const int HeaderSize = 4 + 4 + 8 + 8 + 1;
     public const long Unstamped = 0;
+    private const int ChainIdSize = 16;
 
 
     static public byte[] Encode(ulong lsn, WalEntryKind kind, WalChange[] changes, ulong utcTicks = Unstamped) =>
@@ -14,6 +22,16 @@ static public class WalRecordCodec {
 
     static public byte[] Encode(ulong lsn, WalEntryKind kind, List<WalChange> changes, ulong utcTicks = Unstamped) =>
         BuildFrame(lsn, kind, changes.Count == 0 ? [] : MemoryPackSerializer.Serialize(changes), utcTicks);
+
+    static public byte[] EncodeChainPrepare(ulong lsn, Guid chainId, string[] participants, WalChange[] changes, ulong utcTicks = Unstamped) =>
+        BuildFrame(lsn, WalEntryKind.ChainPrepare,
+            MemoryPackSerializer.Serialize(new WalChainPreparePayload(chainId, participants, changes)), utcTicks);
+
+    static public byte[] EncodeChainMarker(WalEntryKind kind, Guid chainId, ulong utcTicks = Unstamped) {
+        if (kind is not (WalEntryKind.ChainCommit or WalEntryKind.ChainAbort))
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "Only ChainCommit/ChainAbort are chain markers.");
+        return BuildFrame(0, kind, chainId.ToByteArray(), utcTicks);
+    }
 
     static private byte[] BuildFrame(ulong lsn, WalEntryKind kind, byte[] payload, ulong utcTicks) {
         var frame = new byte[HeaderSize + payload.Length];
@@ -49,9 +67,25 @@ static public class WalRecordCodec {
         var utcTicks = BinaryPrimitives.ReadUInt64LittleEndian(buffer[16..24]);
         var kind = (WalEntryKind)buffer[24];
         var payload = buffer[25..frameSize];
-        var changes = payload.IsEmpty ? [] : MemoryPackSerializer.Deserialize<WalChange[]>(payload)!;
 
-        entry = new DecodedWalEntry(lsn, kind, changes, utcTicks);
+        switch (kind) {
+            case WalEntryKind.ChainPrepare: {
+                var prepare = MemoryPackSerializer.Deserialize<WalChainPreparePayload>(payload);
+                entry = new DecodedWalEntry(lsn, kind, prepare.Changes ?? [], utcTicks, prepare.ChainId, prepare.Participants);
+                break;
+            }
+            case WalEntryKind.ChainCommit or WalEntryKind.ChainAbort: {
+                if (payload.Length != ChainIdSize) return WalScanStatus.Corrupted;
+                entry = new DecodedWalEntry(lsn, kind, [], utcTicks, new Guid(payload));
+                break;
+            }
+            default: {
+                var changes = payload.IsEmpty ? [] : MemoryPackSerializer.Deserialize<WalChange[]>(payload)!;
+                entry = new DecodedWalEntry(lsn, kind, changes, utcTicks);
+                break;
+            }
+        }
+
         bytesConsumed = frameSize;
         return WalScanStatus.Clean;
     }

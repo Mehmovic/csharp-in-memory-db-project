@@ -84,15 +84,17 @@ public sealed class RhinoHostBuilder {
         if (result.IsError()) return result.Void();
         var builtDb = result.Unwrap();
 
-        foreach (var childRegistration in childRegistrations.Values)
+        foreach (var childRegistration in childRegistrations.Values) {
             childRegistration.AttachRootColdPath(reg.ColdPath);
+            if (reg.ChainLog is { } chainLog) childRegistration.AttachChainLog(chainLog);
+        }
 
         IDisposable? collector = null;
         var policy = reg.ArchiveRetentionOverride ?? reg.ConfiguredRetention();
         if (policy is not null)
             collector = reg.StartArchiveCollector(builtDb, policy, report => OnRetentionRun?.Invoke(report));
 
-        var host = new RhinoHost(builtDb, tableCompatAdapters, rpcCommands, restCommands, childRegistrations, isAppVersionInvalid ?? (_ => false), reg.ServerVersion, collector);
+        var host = new RhinoHost(builtDb, tableCompatAdapters, rpcCommands, restCommands, childRegistrations, isAppVersionInvalid ?? (_ => false), reg.ServerVersion, reg.ChainLog, collector);
 
         TryLoadNetworkHostProvider();
         if (reg.HttpEnabled && RhinoNetworkHostProvider.Factory is { } factory) {
@@ -124,6 +126,7 @@ public sealed class RhinoHostBuilder {
         int HttpPort { get; }
         string ColdPath { get; }
         uint ServerVersion { get; }
+        ChainLog? ChainLog { get; }
     }
 
     private sealed class DatabaseRegistration<TDb, TTx>(DatabaseOptions<TDb, TTx> options)
@@ -136,6 +139,7 @@ public sealed class RhinoHostBuilder {
         public bool HttpEnabled => parsedOptions?.HttpEnabled ?? false;
         public int HttpPort => parsedOptions?.HttpPort ?? 0;
         public uint ServerVersion => parsedOptions?.ServerVersion ?? 0;
+        public ChainLog? ChainLog { get; private set; }
         public string ColdPath => parsedOptions?.ColdPath ?? throw new InvalidOperationException("ColdPath was read before RunAsync resolved it.");
 
         public ArchiveRetentionPolicy? ConfiguredRetention() => builtDb?.ConfiguredArchiveRetention;
@@ -164,9 +168,14 @@ public sealed class RhinoHostBuilder {
                     return Result<object>.Error(MissingConfig(nameof(options.MigrateWalArchive), because: "RhinoRunMode.WalMigrate needs it"));
             }
 
+            var chainLogResult = ChainLog.Open(parsed.ColdPath);
+            if (chainLogResult.IsError()) return chainLogResult.Void();
+            ChainLog = chainLogResult.Unwrap();
+
             var runResult = await RunOne<TDb, TTx>(
                 parsed, createDb, options.LoadFromGenesis,
-                options.RunMigration, options.GBinary, options.IsGenerationInvalid, options.MigrateWalArchive);
+                options.RunMigration, options.GBinary, options.IsGenerationInvalid, options.MigrateWalArchive,
+                ChainLog.ResolverFor(ChainLog.RootParticipantId));
             if (runResult.IsError()) return runResult.Void();
 
             builtDb = runResult.Unwrap();
@@ -191,11 +200,13 @@ public sealed class RhinoHostBuilder {
         Func<TDb, Result>? runMigration,
         int? binaryGeneration,
         Func<int, bool>? isGenerationInvalid,
-        Func<TDb, Result>? migrateWalArchive
+        Func<TDb, Result>? migrateWalArchive,
+        IChainResolver chainResolver
     ) where TDb : DbContext<TTx> where TTx : ITransaction {
         var coldResult = ColdStore.Open(options.ColdPath);
         if (coldResult.IsError()) return coldResult.Void();
         var cold = coldResult.Unwrap();
+        cold.AttachChainResolver(chainResolver);
 
         var db = createDb(cold);
 
@@ -294,6 +305,7 @@ public sealed class RhinoHost : IDisposable {
     private readonly IReadOnlyDictionary<Type, IChildDatabaseRegistry> childRegistrations;
     private readonly Func<uint, bool> isAppVersionInvalid;
     private readonly uint serverVersion;
+    private readonly ChainLog? chainLog;
     private readonly IDisposable? collector;
     private IRhinoNetworkHost? networkHost;
     private bool disposed;
@@ -303,7 +315,7 @@ public sealed class RhinoHost : IDisposable {
         IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands,
         IReadOnlyDictionary<(string Method, string Route), RestCommandHandler> restCommands,
         IReadOnlyDictionary<Type, IChildDatabaseRegistry> childRegistrations, Func<uint, bool> isAppVersionInvalid,
-        uint serverVersion, IDisposable? collector) {
+        uint serverVersion, ChainLog? chainLog, IDisposable? collector) {
         this.database = database;
         this.tableCompatAdapters = tableCompatAdapters;
         this.rpcCommands = rpcCommands;
@@ -311,6 +323,7 @@ public sealed class RhinoHost : IDisposable {
         this.childRegistrations = childRegistrations;
         this.isAppVersionInvalid = isAppVersionInvalid;
         this.serverVersion = serverVersion;
+        this.chainLog = chainLog;
         this.collector = collector;
     }
 
@@ -319,6 +332,13 @@ public sealed class RhinoHost : IDisposable {
     public bool IsAppVersionInvalid(uint version) => isAppVersionInvalid(version);
 
     public uint ServerVersion => serverVersion;
+
+    internal ChainLog? ChainLog => chainLog;
+
+    internal string ChildParticipantId<TChildDb>(object key) =>
+        childRegistrations.TryGetValue(typeof(TChildDb), out var registry)
+            ? registry.ParticipantIdFor(key)
+            : throw new InvalidOperationException($"No child database of type '{typeof(TChildDb).Name}' was registered via AddChildDatabase.");
 
     public TableCompatOptions<TRow>? GetTableCompatAdapter<TRow>() =>
         tableCompatAdapters.TryGetValue(typeof(TRow), out var options)

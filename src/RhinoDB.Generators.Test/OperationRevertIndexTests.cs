@@ -1,5 +1,8 @@
+using System.Reflection;
+
 using RhinoDB.Core;
 using RhinoDB.Lib.Execution;
+using RhinoDB.Lib.Storage;
 
 namespace RhinoDB.Generators.Test;
 
@@ -145,6 +148,31 @@ public class OperationRevertIndexTests {
 
     static private object? Probe(System.Reflection.Assembly asm, string method, object tx, string accessor, params object?[] args)
         => GeneratorTestHost.InvokeHelper(asm, "TestNs.Probe", method, [T(tx, accessor), .. args]);
+
+    // Reads a table straight off the database, between operations - also the only way to look at a poisoned one.
+    // Never assert inside a Run body: the operation catches whatever the body throws (a failed Assert, a missing
+    // probe) and turns it into an error Result, so the test would pass without having checked anything.
+    static private object OpsOf(object db, string accessor) =>
+        db.GetType().GetField(char.ToLowerInvariant(accessor[0]) + accessor[1..] + "Ops", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(db)!;
+
+    static private object? ProbeOps(System.Reflection.Assembly asm, string method, object db, string accessor, params object?[] args)
+        => GeneratorTestHost.InvokeHelper(asm, "TestNs.Probe", method, [OpsOf(db, accessor), .. args]);
+
+    static private int PendingOrphans(object db, string accessor) => ((dynamic)OpsOf(db, accessor)).PendingStorageOrphanCount;
+
+    static private int StorageSlots(object db, string accessor) {
+        var ops = OpsOf(db, accessor);
+        var storage = ops.GetType().GetField("storage", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(ops)!;
+        return (int)storage.GetType().GetProperty("Count")!.GetValue(storage)!;
+    }
+
+    // Cleanup's init accessor is private to DbContext<TTx>, so only the declaring type's PropertyInfo can reach it.
+    // An operation hands back its result before its trailing sweep runs (PooledOperation.Run), so a read straight
+    // after Run races that sweep. A no-op operation queues behind it on the loop - once it returns, the table is still.
+    static private void Settle(object db, Type txType) => Run(db, txType, _ => Result.Ok());
+
+    static private void SetCleanup(object db, CleanupCollector cleanup) =>
+        db.GetType().GetProperty("Cleanup")!.DeclaringType!.GetProperty("Cleanup")!.SetValue(db, cleanup);
     // ---- Hash indexes ----
 
     [Test]
@@ -462,18 +490,17 @@ public class OperationRevertIndexTests {
         // The delete applies and queues its slot, then the fault reverts the operation. Undo
         // has to pull that slot back out of the queue, or the sweep would later delete a
         // row that is live again.
-        Run(db, txType, tx => {
+        var reverted = Run(db, txType, tx => {
             ((dynamic)tx).Instant.Pair.Delete(1);
             ((dynamic)tx).Instant.Pair.Delete(2);
             ArmFault(tx, "Pair", 1);
             return Result.Ok();
         });
-        Run(db, txType, tx => {
-            Assert.That((int)Probe(asm, "PairPendingOrphans", tx, "Pair")!, Is.EqualTo(0),
-                "a reverted delete must not leave its slot queued for reclamation");
-            Assert.That((bool)Probe(asm, "PairByAB", tx, "Pair", 5, 6)!, Is.True);
-            return Result.Ok();
-        });
+
+        Assert.That(reverted.GetError().Kind, Is.EqualTo(ErrorKind.ApplyFailedButRevertedSuccessfully), "precondition: the first delete applied, then reverted.");
+        Settle(db, txType);
+        Assert.That(PendingOrphans(db, "Pair"), Is.EqualTo(0), "a reverted delete must not leave its slot queued for reclamation");
+        Assert.That((bool)ProbeOps(asm, "PairByAB", db, "Pair", 5, 6)!, Is.True);
     }
     [Test]
     public void ARevertedOperation_StillLeavesEarlierOrphansAlone() {
@@ -488,48 +515,103 @@ public class OperationRevertIndexTests {
             ArmFault(tx, "Pair", 1);
             return Result.Ok();
         });
-        Run(db, txType, tx => {
-            Assert.That((int)Probe(asm, "PairPendingOrphans", tx, "Pair")!, Is.EqualTo(0));
-            Assert.That((int)Probe(asm, "PairCount", tx, "Pair")!, Is.EqualTo(3));
-            Assert.That((bool)Probe(asm, "PairByAB", tx, "Pair", 5, 6)!, Is.True);
-            return Result.Ok();
-        });
+
+        Settle(db, txType);
+        Assert.That(PendingOrphans(db, "Pair"), Is.EqualTo(0));
+        Assert.That((int)ProbeOps(asm, "PairCount", db, "Pair")!, Is.EqualTo(3));
+        Assert.That((bool)ProbeOps(asm, "PairByAB", db, "Pair", 5, 6)!, Is.True);
     }
     [Test]
     public void ASweepClearsTheQueueSoTheNextSweepIsANoOp() {
         var (db, txType, asm) = NewDb();
+        SetCleanup(db, new CleanupCollector(CleanupTrigger.PerOperation));
         Run(db, txType, tx => { ((dynamic)tx).Instant.Pair.Insert((dynamic)NewPair(asm, 1, 5, 6, 10)); return Result.Ok(); });
         Run(db, txType, tx => { ((dynamic)tx).Instant.Pair.Insert((dynamic)NewPair(asm, 2, 7, 8, 20)); return Result.Ok(); });
         Run(db, txType, tx => { ((dynamic)tx).Instant.Pair.Insert((dynamic)NewPair(asm, 3, 9, 10, 30)); return Result.Ok(); });
         Run(db, txType, tx => { ((dynamic)tx).Instant.Pair.Delete(2); return Result.Ok(); });
-        // Default is PerOperation, so the committed delete swept immediately: the queue must
-        // be empty afterwards and the surviving rows intact.
-        Run(db, txType, tx => {
-            Assert.That((int)Probe(asm, "PairPendingOrphans", tx, "Pair")!, Is.EqualTo(0),
-                "a completed sweep empties the queue");
-            Assert.That((int)Probe(asm, "PairCount", tx, "Pair")!, Is.EqualTo(2));
-            Assert.That((bool)Probe(asm, "PairByAB", tx, "Pair", 9, 10)!, Is.True, "the relocated row is still reachable");
-            Assert.That((bool)Probe(asm, "PairByAB", tx, "Pair", 7, 8)!, Is.True);
-            Assert.That((bool)Probe(asm, "PairByAB", tx, "Pair", 5, 6)!, Is.True);
-            return Result.Ok();
-        });
+
+        // PerOperation, so the committed delete swept immediately: the queue must be empty
+        // afterwards and the surviving rows intact.
+        Settle(db, txType);
+        Assert.That(PendingOrphans(db, "Pair"), Is.EqualTo(0), "a completed sweep empties the queue");
+        Assert.That(StorageSlots(db, "Pair"), Is.EqualTo(2), "and the slot was actually reclaimed");
+        Assert.That((int)ProbeOps(asm, "PairCount", db, "Pair")!, Is.EqualTo(2));
+        Assert.That((bool)ProbeOps(asm, "PairByAB", db, "Pair", 9, 10)!, Is.True, "the relocated row is still reachable");
+        Assert.That((bool)ProbeOps(asm, "PairByAB", db, "Pair", 7, 8)!, Is.False);
+        Assert.That((bool)ProbeOps(asm, "PairByAB", db, "Pair", 5, 6)!, Is.True);
     }
     [Test]
     public void RepeatedDeleteAndSweepCycles_LeaveEverySurvivorReachable() {
         var (db, txType, asm) = NewDb();
+        SetCleanup(db, new CleanupCollector(CleanupTrigger.PerOperation));
         for (var i = 1; i <= 6; i++)
             Run(db, txType, tx => { ((dynamic)tx).Instant.Pair.Insert((dynamic)NewPair(asm, i, i * 2, i * 3, i)); return Result.Ok(); });
         // Delete from the middle repeatedly, so each sweep relocates the tail and rewrites
         // index entries. A survivor that loses its index entry here would be unreachable.
         for (var i = 1; i <= 4; i += 2)
             Run(db, txType, tx => { ((dynamic)tx).Instant.Pair.Delete(i); return Result.Ok(); });
+
+        Settle(db, txType);
+        Assert.That(PendingOrphans(db, "Pair"), Is.EqualTo(0));
+        Assert.That(StorageSlots(db, "Pair"), Is.EqualTo(4));
+        Assert.That((int)ProbeOps(asm, "PairCount", db, "Pair")!, Is.EqualTo(4), "6 inserted, 2 deleted");
+        foreach (var i in new[] { 2, 4, 5, 6 })
+            Assert.That((bool)ProbeOps(asm, "PairByAB", db, "Pair", i * 2, i * 3)!, Is.True, $"row {i} must still resolve");
+    }
+    // ---- orphans must survive until a sweep actually reclaims them ----
+    [Test]
+    public void AnOrphanQueuedByOneOperation_SurvivesTheNextWriteToTheSameTable_UntilASweepReclaimsIt() {
+        // PerTime is the production default, so most operations don't sweep. An interval no
+        // clock reaches makes that "none" here - deterministic.
+        var (db, txType, asm) = NewDb();
+        SetCleanup(db, new CleanupCollector(CleanupTrigger.PerTime, TimeSpan.FromDays(36500)));
+        for (var i = 1; i <= 3; i++)
+            Run(db, txType, tx => { ((dynamic)tx).Instant.Pair.Insert((dynamic)NewPair(asm, i, i * 2, i * 3, i)); return Result.Ok(); });
+        Assert.That(Run(db, txType, tx => { ((dynamic)tx).Instant.Pair.Delete(2); return Result.Ok(); }).IsOk(), Is.True);
+        Settle(db, txType);
+        Assert.That(PendingOrphans(db, "Pair"), Is.EqualTo(1), "precondition: queued, not swept");
+        Assert.That(StorageSlots(db, "Pair"), Is.EqualTo(3));
+
+        Assert.That(Run(db, txType, tx => { ((dynamic)tx).Instant.Pair.Insert((dynamic)NewPair(asm, 4, 8, 12, 4)); return Result.Ok(); }).IsOk(), Is.True);
+
+        Assert.Multiple(() => {
+            Settle(db, txType);
+            Assert.That(PendingOrphans(db, "Pair"), Is.EqualTo(1), "the next write to the table must not forget a slot nobody has reclaimed yet");
+            Assert.That(StorageSlots(db, "Pair"), Is.EqualTo((int)ProbeOps(asm, "PairCount", db, "Pair")! + PendingOrphans(db, "Pair")),
+                "every storage slot is either a live row or queued for reclamation - none silently dead");
+
+            Assert.That(Run(db, txType, tx => { ((dynamic)T(tx, "Pair")).SweepDeleted(); return Result.Ok(); }).IsOk(), Is.True);
+
+            Settle(db, txType);
+            Assert.That(PendingOrphans(db, "Pair"), Is.EqualTo(0));
+            Assert.That(StorageSlots(db, "Pair"), Is.EqualTo(3), "the sweep reclaimed the dead slot");
+            foreach (var i in new[] { 1, 3, 4 })
+                Assert.That((bool)ProbeOps(asm, "PairByAB", db, "Pair", i * 2, i * 3)!, Is.True, $"row {i} must still resolve");
+        });
+    }
+    [Test]
+    public void ASweepOfAnUnusuallyLargeBatch_GivesTheQueuesCapacityBack_AndASmallOneKeepsIt() {
+        var (db, txType, asm) = NewDb();
+        SetCleanup(db, new CleanupCollector(CleanupTrigger.PerOperation));
         Run(db, txType, tx => {
-            Assert.That((int)Probe(asm, "PairPendingOrphans", tx, "Pair")!, Is.EqualTo(0));
-            Assert.That((int)Probe(asm, "PairCount", tx, "Pair")!, Is.EqualTo(2), "6 inserted, 2 deleted");
-            for (var i = 2; i <= 6; i += 2)
-                Assert.That((bool)Probe(asm, "PairByAB", tx, "Pair", i * 2, i * 3)!, Is.True, $"row {i} must still resolve");
+            for (var i = 1; i <= 1600; i++) ((dynamic)tx).Instant.Pair.Insert((dynamic)NewPair(asm, i, i, -i, i));
             return Result.Ok();
         });
+        var queue = (HashSet<int>)OpsOf(db, "Pair").GetType().GetField("orphanOffsets", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(OpsOf(db, "Pair"))!;
+
+        Run(db, txType, tx => { for (var i = 1; i <= 20; i++) ((dynamic)tx).Instant.Pair.Delete(i); return Result.Ok(); });
+        Settle(db, txType);
+        var afterSmall = queue.EnsureCapacity(0);
+
+        Run(db, txType, tx => { for (var i = 21; i <= 1500; i++) ((dynamic)tx).Instant.Pair.Delete(i); return Result.Ok(); });
+        Settle(db, txType);
+
+        Assert.That(afterSmall, Is.GreaterThanOrEqualTo(20), "a small sweep keeps its capacity - the next deletes reuse it without allocating");
+        Assert.That(queue.Count, Is.EqualTo(0));
+        Assert.That(queue.EnsureCapacity(0), Is.LessThan(1480), "a sweep past the threshold must not keep ~1.5k slots of capacity around forever");
+        Assert.That(StorageSlots(db, "Pair"), Is.EqualTo(100));
+        foreach (var i in new[] { 1501, 1550, 1600 })
+            Assert.That((bool)ProbeOps(asm, "PairByAB", db, "Pair", i, -i)!, Is.True, $"row {i} must still resolve");
     }
     // ---- an unrevertible failure must not sweep ----
     [Test]
@@ -553,20 +635,24 @@ public class OperationRevertIndexTests {
     [Test]
     public void AFailedRevert_DoesNotSweepTheQueuedOrphans() {
         var (db, txType, asm) = NewDb();
+        SetCleanup(db, new CleanupCollector(CleanupTrigger.PerOperation));
         Run(db, txType, tx => { ((dynamic)tx).Instant.Pair.Insert((dynamic)NewPair(asm, 1, 5, 6, 10)); return Result.Ok(); });
         Run(db, txType, tx => { ((dynamic)tx).Instant.Pair.Insert((dynamic)NewPair(asm, 2, 7, 8, 20)); return Result.Ok(); });
-        Run(db, txType, tx => {
+        // The fault fires on the second change, so the first delete has already applied and
+        // queued its slot; the revert then fails too, leaving that slot in the queue.
+        var failed = Run(db, txType, tx => {
             ((dynamic)tx).Instant.Pair.Delete(1);
-            ArmFault(tx, "Pair", 0);
+            ((dynamic)tx).Instant.Pair.Delete(2);
+            ArmFault(tx, "Pair", 1);
             ArmRevertFault(tx, "Pair");
             return Result.Ok();
         });
-        // The sweep gate is IsOkOrReverted, and ApplyFailed is neither. So the queued slot
-        // must still be there afterwards - proof the sweep did not run.
-        Run(db, txType, tx => {
-            Assert.That((int)Probe(asm, "PairPendingOrphans", tx, "Pair")!, Is.GreaterThan(0),
-                "an unrevertible failure must not reclaim storage - the state is unknown");
-            return Result.Ok();
-        });
+
+        // The sweep gate is IsOkOrReverted, and ApplyFailed is neither - even PerOperation must
+        // not reclaim. Read off the database directly: it's poisoned, so no further Run gets in.
+        Assert.That(failed.GetError().Kind, Is.EqualTo(ErrorKind.ApplyFailed));
+        Settle(db, txType);
+        Assert.That(PendingOrphans(db, "Pair"), Is.GreaterThan(0),
+            "an unrevertible failure must not reclaim storage - the state is unknown");
     }
 }

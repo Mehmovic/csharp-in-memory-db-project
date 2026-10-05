@@ -13,7 +13,7 @@ public sealed class ColdStore : IDisposable {
     private const uint ReadOnlyTxn = 0x20000;
     private const ushort DefaultUnixMode = 0b110_100_100;
     private const uint SafeNoSync = 0x10000;
-    private const string WalFileName = "wal.dat";
+    internal const string WalFileName = "wal.dat";
 
     private readonly MdbxEnvironment env;
     private readonly CheckpointEngine checkpoint;
@@ -35,6 +35,10 @@ public sealed class ColdStore : IDisposable {
 
     public DecodedWalEntry[] PendingWalTail { get; private set; }
 
+    public DecodedWalEntry[] PendingChainPrepares { get; private set; }
+
+    private readonly Dictionary<Guid, bool> localChainMarkers;
+
     public ulong RecoveredLsn { get; }
 
     public bool WasFreshlyCreated { get; }
@@ -45,6 +49,8 @@ public sealed class ColdStore : IDisposable {
         string directoryPath,
         string archiveDirectory,
         DecodedWalEntry[] pendingRecoveryEntries,
+        DecodedWalEntry[] pendingChainPrepares,
+        Dictionary<Guid, bool> localChainMarkers,
         ulong recoveredLsn,
         long evictionBatchThresholdBytes,
         bool wasFreshlyCreated
@@ -53,6 +59,8 @@ public sealed class ColdStore : IDisposable {
         Wal = wal;
         DirectoryPath = directoryPath;
         PendingWalTail = pendingRecoveryEntries;
+        PendingChainPrepares = pendingChainPrepares;
+        this.localChainMarkers = localChainMarkers;
         RecoveredLsn = recoveredLsn;
         WasFreshlyCreated = wasFreshlyCreated;
         checkpoint = new CheckpointEngine(env, wal, archiveDirectory);
@@ -115,8 +123,17 @@ public sealed class ColdStore : IDisposable {
         var checkpointedLsn = checkpointedLsnResult.Unwrap();
 
         var operationEntries = tailEntries.Where(e => e.Kind == WalEntryKind.Operation).ToArray();
-        var maxTailLsn = operationEntries.Length > 0 ? operationEntries.Max(e => e.Lsn) : checkpointedLsn;
+        var chainPrepares = tailEntries.Where(e => e.Kind == WalEntryKind.ChainPrepare).ToArray();
+        var lsnBearing = operationEntries.Concat(chainPrepares).ToArray();
+        var maxTailLsn = lsnBearing.Length > 0 ? lsnBearing.Max(e => e.Lsn) : checkpointedLsn;
         var pendingRecovery = operationEntries.Where(e => e.Lsn > checkpointedLsn).ToArray();
+        var pendingChainPrepares = chainPrepares.Where(e => e.Lsn > checkpointedLsn).ToArray();
+
+        var localChainMarkers = new Dictionary<Guid, bool>();
+        foreach (var entry in tailEntries) {
+            if (entry.Kind == WalEntryKind.ChainCommit) localChainMarkers[entry.ChainId] = true;
+            else if (entry.Kind == WalEntryKind.ChainAbort) localChainMarkers[entry.ChainId] = false;
+        }
 
         return Result<ColdStore>.Ok(
             new ColdStore(
@@ -125,6 +142,8 @@ public sealed class ColdStore : IDisposable {
                 path,
                 archiveDirectory,
                 pendingRecovery,
+                pendingChainPrepares,
+                localChainMarkers,
                 Math.Max(checkpointedLsn, maxTailLsn),
                 evictionBatchThresholdBytes,
                 isFreshDirectory
@@ -132,13 +151,28 @@ public sealed class ColdStore : IDisposable {
         );
     }
 
-    public Result CompleteRecovery() =>
-        CompleteRecoveryAsync().GetAwaiter().GetResult();
+    public void AttachChainResolver(IChainResolver resolver) => attachedChainResolver = resolver;
 
-    public Task<Result> CompleteRecoveryAsync() {
+    private IChainResolver? attachedChainResolver;
+
+    public Result CompleteRecovery(IChainResolver? chainResolver = null) =>
+        CompleteRecoveryAsync(chainResolver).GetAwaiter().GetResult();
+
+    public async Task<Result> CompleteRecoveryAsync(IChainResolver? chainResolver = null) {
+        chainResolver ??= attachedChainResolver;
+        var prepares = PendingChainPrepares;
         var entries = PendingWalTail;
+
+        if (prepares.Length > 0) {
+            if (chainResolver is null) return Result.Error(DbError.ChainResolutionUnavailable());
+            var merged = MergeDecidedChainPrepares(chainResolver, localMarkerSuffices: false);
+            if (merged.IsError()) return merged.Void();
+            entries = merged.Unwrap();
+        }
+
         PendingWalTail = [];
-        if (entries.Length == 0) return Task.FromResult(Result.Ok());
+        PendingChainPrepares = [];
+        if (entries.Length == 0 && prepares.Length == 0) return Result.Ok();
 
         var latest = new Dictionary<(uint TableId, byte[] Key), WalChange>(WalKeyComparer.Instance);
         foreach (var entry in entries)
@@ -150,7 +184,53 @@ public sealed class ColdStore : IDisposable {
         var deletedKeys = latest.Values.Where(c => c.Kind == ChangeKind.Delete)
             .Select(c => (c.TableId, c.Key)).ToArray();
 
-        return checkpoint.RunCheckpoint(RecoveredLsn, tableDbisById, residentRows, deletedKeys, entries);
+        var result = await checkpoint.RunCheckpoint(RecoveredLsn, tableDbisById, residentRows, deletedKeys, entries);
+        if (result.IsError()) {
+            PendingWalTail = entries.Where(e => e.Kind == WalEntryKind.Operation && prepares.All(p => p.Lsn != e.Lsn)).ToArray();
+            PendingChainPrepares = prepares;
+            return result;
+        }
+
+        if (prepares.Length > 0) chainResolver!.Acknowledge(prepares.Select(p => p.ChainId).Distinct());
+        localChainMarkers.Clear();
+        return result;
+    }
+
+    public Result<DecodedWalEntry[]> ResolveReplayTail() =>
+        PendingChainPrepares.Length == 0
+            ? Result<DecodedWalEntry[]>.Ok(PendingWalTail)
+            : MergeDecidedChainPrepares(attachedChainResolver, localMarkerSuffices: true);
+
+    private Result<DecodedWalEntry[]> MergeDecidedChainPrepares(IChainResolver? resolver, bool localMarkerSuffices) {
+        var merged = new List<DecodedWalEntry>(PendingWalTail);
+        foreach (var prepare in PendingChainPrepares) {
+            bool? known = localChainMarkers.TryGetValue(prepare.ChainId, out var marker) ? marker : null;
+
+            bool commit;
+            if (localMarkerSuffices && known is { } local) commit = local;
+            else if (resolver is null) return Result<DecodedWalEntry[]>.Error(DbError.ChainResolutionUnavailable());
+            else {
+                var decision = resolver.Resolve(prepare.ChainId, prepare.ChainParticipants, known);
+                if (decision.IsError()) return decision.Void();
+                commit = decision.Unwrap();
+            }
+
+            if (commit) merged.Add(new DecodedWalEntry(prepare.Lsn, WalEntryKind.Operation, prepare.Changes, prepare.UtcTicks));
+        }
+        return merged.OrderBy(e => e.Lsn).ToArray();
+    }
+
+    // ---- Transaction-chain scope (one participant's share of a chain, held open across the 2PC) ----
+
+    internal bool HasStagedChanges => currentOperationChanges.Count > 0;
+
+    internal Task<DbError?> AppendChainPrepare(ulong lsn, Guid chainId, string[] participants) =>
+        Wal.AppendChainPrepareConfirmed(lsn, chainId, participants, currentOperationChanges.ToArray());
+
+    internal Task<DbError?> EndChainScope(Guid chainId, bool commit) {
+        IsScopeActive = false;
+        currentOperationChanges.Clear();
+        return Wal.AppendChainMarker(commit ? WalEntryKind.ChainCommit : WalEntryKind.ChainAbort, chainId, confirmed: false);
     }
 
     internal void BeginScope() {

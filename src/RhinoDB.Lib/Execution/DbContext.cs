@@ -32,6 +32,8 @@ public class DbContext<TTx> : IRhinoClientLifecycle where TTx : ITransaction {
 
     internal Task DrainAsync() => executionLoop.DrainAsync();
 
+    internal bool TryEnqueueWorkItem(IExecutionWorkItem item) => executionLoop.TryEnqueue(item);
+
     protected internal virtual TTx CreateTransaction() => default!;
 
     protected internal virtual ArchiveRetentionPolicy? ConfiguredArchiveRetention => null;

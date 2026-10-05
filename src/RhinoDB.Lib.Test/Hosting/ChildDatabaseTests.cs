@@ -143,6 +143,48 @@ public class ChildDatabaseTests {
     }
 
     [Test]
+    public async Task DisposeChildAsync_ForAChildNotActivatedSinceARestart_StillDeletesItsDirectory_WithoutActivatingIt() {
+        // Children are lazy: after a restart a child's directory is back on disk long before anything activates it.
+        var childDir = Path.Combine(dir, "Children", nameof(ChildDb), "session-1");
+        var first = await BuildHostAsync(CreateBuilder(dir).AddChildDatabase<ChildDb, DefaultTransaction, string>(o => o.CreateDb = cold => new ChildDb(cold)));
+        (await first.GetOrActivateChildAsync<ChildDb, DefaultTransaction, string>("session-1")).Unwrap();
+        first.GetDatabase<RootDb>().Cold!.Dispose();
+        first.Dispose();
+        Assert.That(Directory.Exists(childDir), Is.True, "precondition: the child's data survives the restart.");
+
+        var created = 0;
+        using var restarted = await BuildHostAsync(CreateBuilder(dir).AddChildDatabase<ChildDb, DefaultTransaction, string>(o => o.CreateDb = cold => {
+            created++;
+            return new ChildDb(cold);
+        }));
+
+        var result = await restarted.DisposeChildAsync<ChildDb, DefaultTransaction, string>("session-1");
+
+        Assert.That(result.IsOk(), Is.True);
+        Assert.That(Directory.Exists(childDir), Is.False, "an inactive child must still be deleted - not silently reported as disposed.");
+        Assert.That(created, Is.EqualTo(0), "it's deleted straight from disk - never activated (no recovery, OnInit or OnStart) just to be thrown away.");
+        restarted.GetDatabase<RootDb>().Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task GetOrActivateChildAsync_ConcurrentCallsForOneKey_ActivateItExactlyOnce() {
+        var created = 0;
+        var builder = CreateBuilder(dir).AddChildDatabase<ChildDb, DefaultTransaction, string>(o => o.CreateDb = cold => {
+            Interlocked.Increment(ref created);
+            return new ChildDb(cold);
+        });
+        using var host = await BuildHostAsync(builder);
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => host.GetOrActivateChildAsync<ChildDb, DefaultTransaction, string>("session-1")));
+
+        Assert.That(results.All(r => r.IsOk()), Is.True);
+        Assert.That(results.Select(r => r.Unwrap()).Distinct().Count(), Is.EqualTo(1));
+        Assert.That(created, Is.EqualTo(1), "two activations must never both open the same directory.");
+        host.GetDatabase<RootDb>().Cold!.Dispose();
+        results[0].Unwrap().Cold!.Dispose();
+    }
+
+    [Test]
     public async Task DisposedChild_RejectsFurtherWorkOnTheStaleReference() {
         var builder = CreateBuilder(dir).AddChildDatabase<ChildDb, DefaultTransaction, string>(options => options.CreateDb = cold => new ChildDb(cold));
         using var host = await BuildHostAsync(builder);

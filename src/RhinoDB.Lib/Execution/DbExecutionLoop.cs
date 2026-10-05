@@ -53,10 +53,15 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
         return PooledOperation<TTx, Result<T>, TArgs>.Enqueue(channel, context, operation, args, mode);
     }
 
+    internal bool TryEnqueue(IExecutionWorkItem item) => !draining && channel.Writer.TryWrite(item);
+
     private async Task RunLoop() {
         await foreach (var item in channel.Reader.ReadAllAsync()) {
-            try { item.Run(); }
-            catch (Exception) { /* Already handled loudly */ }
+            try {
+                if (item is IAsyncExecutionWorkItem asyncItem) await asyncItem.RunAsync();
+                else item.Run();
+            }
+            catch (Exception) { /* best afford, should not be called */ }
         }
     }
 }

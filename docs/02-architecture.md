@@ -125,7 +125,9 @@ the equivalent scan inside the primary-key accessor) was removed entirely.**
 committed storage/indexes only — nothing scans uncommitted `changes` — "it
 will be the user's duty to handle it," to avoid paying that scan on every
 read. A staged `Insert`/`Update`/`Delete` is invisible to reads until
-`Apply()` actually runs, from a later operation. Every mention of the overlay
+`Apply()` actually runs, from a later operation (or, inside a multi-database
+transaction, from that transaction's next step — each step applies as it runs; see
+"Multi-database transactions"). Every mention of the overlay
 below (the Milestone 4 status line, "Reads stay direct, and see the same
 operation's own not-yet-applied writes," the "Real as of Milestone 4"
 paragraph) describes the design as it stood before this date — kept as
@@ -1086,6 +1088,120 @@ in-process call (the caller gets the activated `TChildDb` back and calls its own
 `Run`/`RunConfirmed` directly) — never routed through `IIdcTransport`, which is
 for peer-to-peer IDC between symmetric, independently-deployed databases, a
 different relationship entirely.
+
+**Where a child lives on disk.** Every child gets its own directory under the
+Root's cold path:
+
+```
+{Root ColdPath}/                     ← Host.ColdPath in rdbsettings.json
+                                       (default: %AppData%/RhinoDB/{entry assembly name})
+├── wal.dat, libmdbx files, wal-archive/      ← the Root's own storage
+├── chains.log                                ← multi-database transaction decisions (Root + Children)
+└── Children/{TChildDb type name}/{key}/      ← one child: its own wal.dat, libmdbx files, wal-archive/
+```
+
+`{key}` is `key.ToString()` unless `ChildDatabaseOptions.KeyToDirectoryName` says
+otherwise. Activation recovers whatever the child's previous activation left in its
+WAL before `OnStart` runs, exactly like the Root does at startup.
+
+### Multi-database transactions
+
+User-facing guide (when to use which kind, dangers, commit/WAL/recovery walkthrough):
+[manual/multi-database-transactions.md](manual/multi-database-transactions.md).
+
+One atomic, isolated, durable transaction across the Root and any number of Children
+comes in two kinds, sharing the same commit, two-phase durability and crash recovery:
+
+- **Planned — `ctx.PlanMultiTx()` → `PlannedMultiTx`.** `Add` only records bodies; `Commit` holds every
+  participant (Root first, then Children by path), runs the bodies in `Add` order —
+  a body can consume an earlier body's `TxValue<T>`, in any direction — then commits.
+  Databases are held only for the duration of `Commit`. The default choice.
+- **Locked — `ctx.LockMultiTx(p => p.RootDb().SessionDb(id))` → `LockedMultiTx`.** Every declared
+  database is held from open until `Commit`, `Rollback` or disposal; each
+  `await tx.Run(...)` executes immediately and returns its value to your code, and
+  plain code — I/O included — may run between steps. The cost is the hold itself:
+  nothing else reaches those databases until the transaction ends, so use it rarely
+  and keep it short. Databases must be declared up front (holding them in the fixed
+  order at open is what keeps two open transactions from deadlocking each other). A
+  failed step aborts everything at once and releases the databases. **Never await an
+  ordinary `BeginTx` (or another transaction) on a database your own open locked
+  transaction holds** — it queues behind your hold and can never complete.
+
+```csharp
+await using var tx = (await ctx.LockMultiTx(p => p.RootDb().SessionDb(sessionId))).Unwrap();
+var score = (await tx.Run(sessionId, static (db, t) => Result.Ok(Score(t)))).Unwrap();   // runs now
+var bonus = await rewards.Lookup(score);                                                    // anything, while held
+(await tx.Run(static (db, t, b) => { t.Wallet.Update(...b...); return Result.Ok(); }, bonus)).ThrowIfError();
+await tx.Commit();
+```
+
+**Each step applies as it runs, in both kinds.** A step's writes go into the
+database's tables as soon as the step finishes, so a later step on the same database
+sees them — insert in one step, find it in the next. This is the one place a write is
+visible before commit, and it's done by applying, not by the read-your-own-writes
+overlay that was removed (see Transactions). Nobody else sees those writes early: the
+participant holds the database's loop until the decision, so every other request
+queues behind it. Every step's changes go into one undo journal and share one LSN.
+On abort, the journal reverts all of them, and on commit they land in one WAL entry
+(or one prepare per durable participant). A constraint violation, such as a duplicate key
+against a row an earlier step inserted, fails the offending step rather than `Commit`.
+
+### Settling a finished child — an application-level pattern
+
+The engine guarantees that every transaction — a single `BeginTx` or a
+multi-database transaction (`ctx.PlanMultiTx()`) — is atomic and durable, and that
+a child's data survives crashes and restarts until `DisposeChildAsync` is called.
+Turning a finished child (say, a match that just ended) into a permanent Root record
+is then the **application's** job, because only the application knows when a
+child's data is no longer needed and which children still need settling. Three
+rules make it crash-safe:
+
+1. **Track live children in the Root.** Children are activated lazily and the
+   engine never scans `Children/` for them (a deliberate choice — no upfront
+   directory walk at startup). So after a crash, nothing tells you which sessions
+   ended but were never settled. Keep that list yourself: insert a row (e.g.
+   `ActiveSessions`) when a child is created.
+2. **Settle in one multi-database transaction.** The child body reads the
+   finished session (and marks it settled, if the child tracks that), returning a
+   summary; the Root body, added after it, records the result from that value and
+   flags the `ActiveSessions` row as settled. Bodies run in `Add` order, so the
+   Child → Root data flow happens inside one atomic unit — either everything is
+   recorded or nothing is, so there's no partial settle and no double-record to
+   guard against.
+3. **Dispose, then forget.** Only after the settle committed: `DisposeChildAsync`,
+   then delete the `ActiveSessions` row. Both steps are naturally repeatable, so a
+   crash between them is harmless.
+
+```csharp
+// 1+2. Settle atomically - the child body runs first, the Root body consumes its value.
+var multi = ctx.PlanMultiTx();
+var summary = multi.Add(sessionId, static (db, tx) => SummarizeFinishedSession(tx));   // Result<Summary>
+multi.Add(static (db, tx, s) => {
+    tx.SessionResults.Insert(new SessionResult(s.Id, s.Summary.Value.Winner, s.Summary.Value.Score));
+    tx.ActiveSessions.Update(s.Id, new ActiveSession(s.Id, Settled: true));
+    return Result.Ok();
+}, (Id: sessionId, Summary: summary));
+
+var settled = await multi.Commit();
+if (settled.IsError()) return settled;
+
+// 3. Dispose, then forget.
+var disposed = await host.DisposeChildAsync<SessionDb, SessionDbTransaction, string>(sessionId);
+if (disposed.IsError()) return disposed;
+return await ctx.BeginTx((db, tx) => { tx.ActiveSessions.Delete(sessionId); return Result.Ok(); });
+```
+
+On startup (`OnStart`), walk `ActiveSessions`: a row already flagged settled only
+needs step 3; an unflagged row whose session has actually finished gets the whole
+sequence. `DisposeChildAsync` works on a child that hasn't been activated since the
+restart too: it settles the child's multi-database transaction records and deletes
+its directory straight from disk, without activating it first.
+
+When the settle depends on something outside the databases (a network or file call
+between reading and recording), it can't run inside the transaction: bodies are
+synchronous and hold the participating databases while they run. Read first, do the
+outside work, then commit a multi-database transaction whose bodies re-check that
+what they read hasn't changed and fail if it has.
 
 ## Deployment
 

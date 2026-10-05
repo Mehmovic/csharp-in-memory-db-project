@@ -37,7 +37,7 @@ public sealed class WriteAheadLog : IDisposable {
 
         FileStream fileStream;
         try {
-            fileStream = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, BufferSize, FileOptions.None);
+            fileStream = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read, BufferSize, FileOptions.None);
         } catch (IOException ex) {
             return Result<WriteAheadLog>.Error(DbError.SystemFailure(ex));
         }
@@ -61,7 +61,7 @@ public sealed class WriteAheadLog : IDisposable {
 
         FileStream fileStream;
         try {
-            fileStream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None, BufferSize, FileOptions.None);
+            fileStream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, BufferSize, FileOptions.None);
         } catch (IOException ex) {
             return Result<(WriteAheadLog, DecodedWalEntry[])>.Error(DbError.SystemFailure(ex));
         }
@@ -108,6 +108,41 @@ public sealed class WriteAheadLog : IDisposable {
     internal void AppendOptimistic(ulong lsn, WalEntryKind kind, List<WalChange> changes, ulong utcTicks = CaptureTimestampNow) {
         var frameLength = AppendOnly(lsn, kind, changes, utcTicks);
         if (Interlocked.Add(ref bytesSinceLastFlush, frameLength) >= sizeThresholdBytes) _ = JoinGroupCommit();
+    }
+
+    internal Task<DbError?> AppendChainPrepareConfirmed(ulong lsn, Guid chainId, string[] participants, WalChange[] changes) {
+        AppendFrame(WalRecordCodec.EncodeChainPrepare(lsn, chainId, participants, changes, (ulong)DateTime.UtcNow.Ticks));
+        return JoinGroupCommit();
+    }
+
+    internal Task<DbError?> AppendChainMarker(WalEntryKind kind, Guid chainId, bool confirmed) {
+        var frameLength = AppendFrame(WalRecordCodec.EncodeChainMarker(kind, chainId, (ulong)DateTime.UtcNow.Ticks));
+        if (confirmed) return JoinGroupCommit();
+        if (Interlocked.Add(ref bytesSinceLastFlush, frameLength) >= sizeThresholdBytes) _ = JoinGroupCommit();
+        return Task.FromResult<DbError?>(null);
+    }
+
+    private int AppendFrame(byte[] frame) {
+        lock (appendLock) fileStream.Write(frame, 0, frame.Length);
+        return frame.Length;
+    }
+
+    static public Result<DecodedWalEntry[]> ReadEntriesShared(string path) {
+        if (!File.Exists(path)) return Result<DecodedWalEntry[]>.Ok([]);
+        try {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var bytes = new byte[stream.Length];
+            stream.ReadExactly(bytes, 0, bytes.Length);
+            if (bytes.Length < WalFileHeaderCodec.Size || !WalFileHeaderCodec.TryDecode(bytes, out _))
+                return Result<DecodedWalEntry[]>.Error(DbError.WalCorrupted());
+
+            var scan = WalRecordCodec.Scan(bytes.AsSpan(WalFileHeaderCodec.Size));
+            return scan.Status == WalScanStatus.Corrupted
+                ? Result<DecodedWalEntry[]>.Error(DbError.WalCorrupted())
+                : Result<DecodedWalEntry[]>.Ok(scan.Entries.ToArray());
+        } catch (IOException ex) {
+            return Result<DecodedWalEntry[]>.Error(DbError.SystemFailure(ex));
+        }
     }
 
     private int AppendOnly(ulong lsn, WalEntryKind kind, WalChange[] changes, ulong utcTicks) {
