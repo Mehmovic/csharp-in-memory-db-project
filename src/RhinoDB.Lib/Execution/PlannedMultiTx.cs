@@ -14,10 +14,9 @@ internal
 enum MultiTxCrashPoint {
     AfterFirstDurablePrepare,
     AfterAllDurablePrepares,
+    AfterLocksReleased,
 }
 
-// One transaction across the Root and any number of Children, planned up front: Add only records bodies; Commit holds
-// every participant in the fixed global order, runs the bodies in Add order, then applies.
 public sealed class PlannedMultiTx {
     private readonly RhinoCtx ctx;
     private readonly MultiTxParticipantSet participants;
@@ -245,37 +244,83 @@ static internal class MultiTxCommit {
         RhinoCtx ctx, List<MultiTxParticipant> held, List<MultiTxParticipant> durable, MultiTxCrashPoint? crashAt) {
         var chainId = Guid.NewGuid();
         var ids = durable.Select(p => p.Id).ToArray();
+        var decision = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var written = new List<MultiTxParticipant>(durable.Count);
+        foreach (var participant in durable) {
+            var wrote = await participant.WritePrepareAsync(chainId, ids, decision.Task);
+            if (wrote.IsError()) return await AbortBeforeReleaseAsync(ctx, held, written, chainId, ids, decision, wrote.GetError());
+            written.Add(participant);
+
+            #if DEBUG
+            if (crashAt == MultiTxCrashPoint.AfterFirstDurablePrepare) {
+                await participant.PrepareDurability;
+                return await SimulateCrashAsync(held);
+            }
+            #endif
+        }
 
         #if DEBUG
-        if (crashAt == MultiTxCrashPoint.AfterFirstDurablePrepare) {
-            await durable[0].PrepareDurableAsync(chainId, ids);
+        if (crashAt == MultiTxCrashPoint.AfterAllDurablePrepares) {
+            await Task.WhenAll(durable.Select(p => p.PrepareDurability));
             return await SimulateCrashAsync(held);
         }
         #endif
 
-        var prepared = await Task.WhenAll(durable.Select(p => p.PrepareDurableAsync(chainId, ids)));
-        var failedPrepare = prepared.FirstOrDefault(r => r.IsError());
-        if (failedPrepare.IsError()) {
-            var recorded = ctx.Host?.ChainLog?.Record(chainId, commit: false, ids)
-                ?? Result<bool>.Error(DbError.ChainResolutionUnavailable());
-            if (recorded.IsError()) {
-                var unknown = DbError.MultiTxOutcomeUnknown(recorded.GetError().ToException());
-                foreach (var participant in held) participant.Poison(unknown);
-                return await AbortAllAsync(held, Result.Error(unknown));
-            }
-            return await AbortAllAsync(held, failedPrepare);
+        foreach (var participant in held) {
+            if (participant.HasDurableChanges) await participant.ReleasePreparedAsync();
+            else await participant.CommitPlainAsync(PropagationMode.Optimistic);
         }
 
         #if DEBUG
-        if (crashAt == MultiTxCrashPoint.AfterAllDurablePrepares) return await SimulateCrashAsync(held);
+        if (crashAt == MultiTxCrashPoint.AfterLocksReleased)
+            return Result.Error(DbError.SystemFailure(new InvalidOperationException("Simulated crash (TestOnlySimulateCrashAt) after the locks were released.")));
         #endif
 
-        // Every prepare is durable: committed, whatever happens next - the markers are a recovery shortcut only.
-        foreach (var participant in held) {
-            if (participant.HasDurableChanges) await participant.CommitPreparedAsync();
-            else await participant.CommitPlainAsync(PropagationMode.Optimistic);
+        var failure = await AwaitPreparesAndDependenciesAsync(durable);
+        if (failure is null) {
+            decision.SetResult(true);
+            foreach (var participant in durable) participant.Settle(chainId, commit: true);
+            return Result.Ok();
         }
-        return Result.Ok();
+
+        var outcome = RecordAbort(ctx, chainId, ids) ?? failure.Value;
+        foreach (var participant in held) participant.Poison(outcome);
+        decision.SetResult(false);
+        foreach (var participant in durable) participant.Settle(chainId, commit: false);
+        return Result.Error(outcome);
+    }
+
+    static private async Task<Result> AbortBeforeReleaseAsync(
+        RhinoCtx ctx, List<MultiTxParticipant> held, List<MultiTxParticipant> written, Guid chainId, string[] ids,
+        TaskCompletionSource<bool> decision, DbError failure) {
+        var outcome = failure;
+        if (written.Count > 0 && RecordAbort(ctx, chainId, ids) is { } unknown) {
+            outcome = unknown;
+            foreach (var participant in held) participant.Poison(outcome);
+        }
+        decision.SetResult(false);
+        foreach (var participant in written) participant.Settle(chainId, commit: false);
+        return await AbortAllAsync(held, Result.Error(outcome));
+    }
+
+    static private async Task<DbError?> AwaitPreparesAndDependenciesAsync(List<MultiTxParticipant> durable) {
+        foreach (var participant in durable) {
+            if (await participant.PrepareDurability is { } error) return error;
+        }
+        foreach (var participant in durable) {
+            foreach (var dependency in participant.PrepareDependencies) {
+                if (!await dependency) return DbError.WalDurabilityFailed(new InvalidOperationException(
+                    "This multi-database transaction depended on another one that aborted."));
+            }
+        }
+        return null;
+    }
+
+    // Null when the abort is on record; otherwise the outcome is unknown.
+    static private DbError? RecordAbort(RhinoCtx ctx, Guid chainId, string[] ids) {
+        var recorded = ctx.Host?.ChainLog?.Record(chainId, commit: false, ids) ?? Result<bool>.Error(DbError.ChainResolutionUnavailable());
+        return recorded.IsError() ? DbError.MultiTxOutcomeUnknown(recorded.GetError().ToException()) : null;
     }
 
     #if DEBUG
@@ -354,8 +399,11 @@ internal abstract class MultiTxParticipant {
     public abstract Task<Result> RunStepAsync(int stepIndex);
     public abstract Task<Result> ApplyAsync();
     public abstract Task<Result> CommitPlainAsync(PropagationMode mode);
-    public abstract Task<Result> PrepareDurableAsync(Guid chainId, string[] participantIds);
-    public abstract Task<Result> CommitPreparedAsync();
+    public abstract Task<Result> WritePrepareAsync(Guid chainId, string[] participantIds, Task<bool> decision);
+    public abstract Task<Result> ReleasePreparedAsync();
+    public abstract Task<DbError?> PrepareDurability { get; }
+    public abstract Task<bool>[] PrepareDependencies { get; }
+    public abstract void Settle(Guid chainId, bool commit);
     public abstract Task<Result> AbortAsync();
     #if DEBUG
     public abstract Task<Result> AbandonAsync();
@@ -396,10 +444,21 @@ internal sealed class MultiTxParticipant<TDb, TTx>(Func<Task<Result<(TDb Db, str
 
     public override Task<Result> CommitPlainAsync(PropagationMode mode) => Send(MultiTxInstruction.CommitPlain(mode), finishes: true);
 
-    public override Task<Result> PrepareDurableAsync(Guid chainId, string[] participantIds) =>
-        Send(MultiTxInstruction.PrepareDurable(chainId, participantIds), finishes: false);
+    public override Task<Result> WritePrepareAsync(Guid chainId, string[] participantIds, Task<bool> decision) =>
+        Send(MultiTxInstruction.WritePrepare(chainId, participantIds, decision), finishes: false);
 
-    public override Task<Result> CommitPreparedAsync() => Send(MultiTxInstruction.Of(MultiTxCommand.CommitPrepared), finishes: true);
+    public override Task<Result> ReleasePreparedAsync() => Send(MultiTxInstruction.Of(MultiTxCommand.ReleasePrepared), finishes: true);
+
+    public override Task<DbError?> PrepareDurability => item!.PrepareDurability;
+
+    public override Task<bool>[] PrepareDependencies => item!.PrepareDependencies;
+
+    // Off-loop, once the decision is final: nothing new depends on the chain from here, and the marker can't lie.
+    public override void Settle(Guid chainId, bool commit) {
+        var cold = db!.Cold!;
+        cold.RemovePendingChain(chainId);
+        try { _ = cold.AppendChainMarker(chainId, commit); } catch { /* a marker is only a recovery shortcut */ }
+    }
 
     public override Task<Result> AbortAsync() => Send(MultiTxInstruction.Of(MultiTxCommand.Abort), finishes: true);
 
@@ -421,8 +480,8 @@ internal enum MultiTxCommand {
     RunStep,
     Apply,
     CommitPlain,
-    PrepareDurable,
-    CommitPrepared,
+    WritePrepare,
+    ReleasePrepared,
     Abort,
     #if DEBUG
     Abandon,
@@ -435,6 +494,7 @@ internal sealed class MultiTxInstruction {
     public PropagationMode Mode { get; private init; }
     public Guid ChainId { get; private init; }
     public string[] ParticipantIds { get; private init; } = [];
+    public Task<bool>? Decision { get; private init; }
     public TaskCompletionSource<Result> Reply { get; } = new TaskCompletionSource<Result>(TaskCreationOptions.RunContinuationsAsynchronously);
 
     static public MultiTxInstruction Of(MultiTxCommand command) => new MultiTxInstruction { Command = command };
@@ -444,8 +504,8 @@ internal sealed class MultiTxInstruction {
     static public MultiTxInstruction CommitPlain(PropagationMode mode) =>
         new MultiTxInstruction { Command = MultiTxCommand.CommitPlain, Mode = mode };
 
-    static public MultiTxInstruction PrepareDurable(Guid chainId, string[] participantIds) =>
-        new MultiTxInstruction { Command = MultiTxCommand.PrepareDurable, ChainId = chainId, ParticipantIds = participantIds };
+    static public MultiTxInstruction WritePrepare(Guid chainId, string[] participantIds, Task<bool> decision) =>
+        new MultiTxInstruction { Command = MultiTxCommand.WritePrepare, ChainId = chainId, ParticipantIds = participantIds, Decision = decision };
 }
 
 // Holds the participant's loop from acquisition until the decision; every body and the apply run here, on it.
@@ -459,6 +519,10 @@ internal sealed class MultiTxParticipantWorkItem<TDb, TTx>(TDb db, List<MultiTxS
     public Task<Result> Held => held.Task;
 
     public bool HasDurableChanges { get; private set; }
+
+    public Task<DbError?> PrepareDurability { get; private set; } = Task.FromResult<DbError?>(null);
+
+    public Task<bool>[] PrepareDependencies { get; private set; } = [];
 
     void IExecutionWorkItem.Run() => RunAsync().GetAwaiter().GetResult();
 
@@ -481,8 +545,7 @@ internal sealed class MultiTxParticipantWorkItem<TDb, TTx>(TDb db, List<MultiTxS
         held.TrySetResult(Result.Ok());
 
         var applied = false;
-        var durablyPrepared = false;
-        var chainId = Guid.Empty;
+        var prepareWritten = false;
         while (true) {
             var instruction = await Instructions.Reader.ReadAsync();
             switch (instruction.Command) {
@@ -498,12 +561,18 @@ internal sealed class MultiTxParticipantWorkItem<TDb, TTx>(TDb db, List<MultiTxS
                     instruction.Reply.TrySetResult(Apply(tx, ref applied));
                     continue;
                 }
-                case MultiTxCommand.PrepareDurable: {
-                    chainId = instruction.ChainId;
-                    var error = await cold!.AppendChainPrepare(tx.LastLsn ?? 0, chainId, instruction.ParticipantIds);
-                    if (error is { } durabilityError) db.PoisonDatabase(durabilityError);
-                    else durablyPrepared = true;
-                    instruction.Reply.TrySetResult(error is { } failed ? Result.Error(failed) : Result.Ok());
+                case MultiTxCommand.WritePrepare: {
+                    var (dependsOn, dependencies) = cold!.SnapshotPendingChains();
+                    try {
+                        PrepareDurability = cold.AppendChainPrepare(tx.LastLsn ?? 0, instruction.ChainId, instruction.ParticipantIds, dependsOn);
+                    } catch (Exception ex) {
+                        instruction.Reply.TrySetResult(Result.Error(DbError.WalDurabilityFailed(ex)));
+                        continue;
+                    }
+                    PrepareDependencies = dependencies;
+                    cold.AddPendingChain(instruction.ChainId, instruction.Decision!);
+                    prepareWritten = true;
+                    instruction.Reply.TrySetResult(Result.Ok());
                     continue;
                 }
                 case MultiTxCommand.CommitPlain: {
@@ -513,16 +582,16 @@ internal sealed class MultiTxParticipantWorkItem<TDb, TTx>(TDb db, List<MultiTxS
                     _ = ForwardDurabilityAsync(durability, instruction.Reply);
                     return;
                 }
-                case MultiTxCommand.CommitPrepared: {
+                case MultiTxCommand.ReleasePrepared: {
                     tx.ReleaseRetainedUndo();
-                    _ = cold!.EndChainScope(chainId, commit: true);
+                    cold!.EndChainScope();
                     SweepIfDue(tx);
                     instruction.Reply.TrySetResult(Result.Ok());
                     return;
                 }
                 case MultiTxCommand.Abort: {
                     Undo(tx, applied);
-                    if (durablyPrepared) _ = cold!.EndChainScope(chainId, commit: false);
+                    if (prepareWritten) cold!.EndChainScope();
                     else cold?.EndScope(commit: false, PropagationMode.Optimistic, 0);
                     instruction.Reply.TrySetResult(Result.Ok());
                     return;

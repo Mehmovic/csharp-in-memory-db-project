@@ -202,8 +202,9 @@ undo it for you.
 
 `PropagationMode.Optimistic` (the default) and `Confirmed` mean what they mean for
 `BeginTx`, but **only when at most one database has durable changes** (§6). When two or
-more do, the commit always waits for the disk on every one of them. That's the price
-of atomicity across files, and `mode` doesn't change it.
+more do, `Commit` always replies after the disk has confirmed every one of them. That's
+the price of atomicity across files, and `mode` doesn't change it. The databases
+themselves are released earlier (§6, early lock release).
 
 ## 6. What happens at commit
 
@@ -239,21 +240,46 @@ protocol is needed and it costs the same as an ordinary commit. `mode` applies h
 **Two or more durable databases: two-phase commit.**
 
 1. **Prepare.** Every durable database writes a *prepare* record to its own WAL,
-   holding all its changes and the list of participating databases, and waits until it
-   is on disk. They do this in parallel.
-2. **The commit point.** The moment **every** prepare is on disk, the transaction is
-   committed, even if the process dies one instruction later. Recovery will finish it
-   (§6, below).
-3. **Markers.** Each database then appends a small *commit* marker and unlocks. Markers
-   aren't waited on. They are a shortcut for recovery, not the decision itself.
+   holding all its changes and the list of participating databases.
+2. **Early lock release.** As soon as every prepare is *written* (not yet on disk), all
+   the databases are unlocked and go back to serving other requests. The disk flushes
+   happen in the background, and many transactions' prepares share one flush.
+3. **The decision.** The transaction commits once **every** prepare is on disk **and**
+   every transaction it depends on (below) has committed. Only then does `Commit` reply
+   `Ok`, and each database appends a small *commit* marker. Markers are a shortcut for
+   recovery, not the decision itself.
 
-If any prepare fails to reach the disk, the transaction aborts. The engine first writes
-an **abort** decision to `chains.log` (below) and waits for it to reach the disk. That
-matters: the failed prepare's bytes may still have reached the file, and without the
-recorded abort a restart could find every prepare present and wrongly finish a
-transaction your code was told had failed. If even that decision can't be written, the
-outcome is genuinely unknown. The call returns `MultiTxOutcomeUnknown` and the involved
-databases are poisoned rather than guessing.
+**Dependencies.** Between the unlock and the decision, other requests may read and build
+on the transaction's writes. So anything written on one of its databases in that window
+records the transaction as a *dependency*: a plain `BeginTx`, another multi-database
+transaction's prepare, anything. A write with a dependency only survives if that
+dependency commits. If the dependency aborts, recovery drops the write too, and the same
+goes for writes that depended on *that* write's transaction, across databases. What this
+means for callers:
+
+- **`Optimistic` writes** reply at once, as always. Like any optimistic write, they can be
+  lost in a crash, and now they're also dropped if a dependency aborts.
+- **`Confirmed` writes** reply only after their own flush *and* the commit of every
+  transaction they depend on. If one aborts, they get `WalDurabilityFailed`.
+- **A multi-database transaction never replies `Ok` before the transactions it depends on
+  have committed.**
+
+**If it aborts after the unlock** (a prepare's flush fails, or a dependency aborts), the
+engine can't undo its writes, because others may have built on them. Instead:
+
+1. It writes an **abort** decision to `chains.log` and waits for it to reach the disk.
+   The failed prepare's bytes may still have reached the file, and without the recorded
+   abort a restart could find every prepare present and wrongly finish the transaction.
+2. It **poisons every participating database**: they refuse all further work until a
+   restart, rather than run on memory that's ahead of the disk.
+3. `Commit` returns the error, usually `WalDurabilityFailed`.
+
+On restart, recovery drops the transaction and everything that depended on it. If even
+the abort decision can't be written, the outcome is unknown: the call returns
+`MultiTxOutcomeUnknown` (the databases are poisoned the same way).
+
+A failure *before* the unlock (a step fails, or a prepare can't even be written) is still
+undone in memory exactly as in §6 Applying. Nobody else has seen the writes yet.
 
 ### Files on disk
 
@@ -307,10 +333,19 @@ the reads and writes the transaction needs.
 
 ### Throughput cost
 
-With two or more durable databases, every commit waits for one disk flush per durable
-database (in parallel), even under `Optimistic`. That's far more expensive than a plain
-`BeginTx`. Don't put a multi-database transaction on a hot path that runs per frame or per
-message if separate transactions would do.
+With two or more durable databases, every `Commit` waits for a disk flush on each of them,
+even under `Optimistic`. Early lock release means concurrent transactions share those
+flushes instead of queueing for them, but each one still waits. That's far more expensive
+than a plain `BeginTx`. Don't put a multi-database transaction on a hot path that runs per
+frame or per message if separate transactions would do.
+
+### A failed flush stops the databases
+
+Because the databases are released before the flush (§6), a flush failure after that
+point can't be undone in memory. Every participating database is poisoned and refuses
+work until a restart, which then cleans up the transaction and everything that built on
+it. A failing disk already stops a single database the same way. Here it stops all the
+databases the transaction touched.
 
 ### Hooks can't open them across Children
 
@@ -346,9 +381,12 @@ database yet, recovery decides **commit or abort** in this order:
 1. **A decision already in `chains.log`** wins.
 2. **A local marker** (commit/abort) in this database's own WAL is used next.
 3. Otherwise it **asks the other participants**: it reads their WAL files. If every one
-   of them has the prepare (or a commit marker), the transaction had reached its commit
-   point, so **it is completed, not reverted**. If any one is missing it, or has an abort
-   marker, it never committed and is dropped.
+   of them has the prepare (or a commit marker) **and** every transaction those prepares
+   depend on also commits (decided the same way, recursively), the transaction is
+   **completed, not reverted**. If any prepare is missing, an abort marker exists, or a
+   dependency aborted, it is dropped.
+
+Any other entry that recorded dependencies is kept only if all of them committed.
 
 The decision is then written to `chains.log` (and flushed), so every other participant
 reaches the same answer however late it recovers. The prepare is applied or skipped,
@@ -360,7 +398,8 @@ What that means for your data, by when the crash happened:
 |---|---|
 | before or during the steps | nothing was written to any WAL; no trace |
 | after some, but not all, prepares were on disk | **aborted** on every database |
-| after every prepare was on disk, before the markers | **committed** on every database |
+| after every prepare was on disk, before the markers | **committed** on every database, unless a transaction it depends on aborted |
+| after the unlock, with other writes built on it | those writes share its fate: dropped if it aborted, kept if it committed |
 | after the markers | committed |
 | single durable database, before its entry was on disk | nothing; as with a plain `BeginTx` |
 

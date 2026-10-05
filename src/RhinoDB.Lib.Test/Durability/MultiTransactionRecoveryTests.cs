@@ -42,10 +42,11 @@ public class MultiTransactionRecoveryTests {
         store.Stage(TableIdHash.Compute(Table), ChangeKind.Insert, MemoryPackSerializer.Serialize(key),
             MemoryPackSerializer.Serialize(new Account(key, $"owner-{key}", 10m)));
 
-        var error = await store.AppendChainPrepare(lsn: (ulong)key, chainId, BothParticipants);
+        var error = await store.AppendChainPrepare(lsn: (ulong)key, chainId, BothParticipants, dependsOn: []);
         Assert.That(error, Is.Null);
+        store.EndChainScope();
         // No marker = the process died right after this prepare became durable.
-        if (marker is { } commit) await store.EndChainScope(chainId, commit);
+        if (marker is { } commit) await store.AppendChainMarker(chainId, commit);
     }
 
     static private async Task<(Result Recovery, bool RowPresent)> Recover(string dir, ChainLog? log, string participantId, int key) {

@@ -131,6 +131,20 @@ public class WalRecordCodecTests {
     }
 
     [Test]
+    public void Encode_FromListOverload_WithDependencies_IsByteIdenticalToTheArrayOverload_AndRoundTripsThem() {
+        var changes = TwoChangesAcrossTables();
+        Guid[] dependsOn = [Guid.NewGuid(), Guid.NewGuid()];
+
+        var frameFromArray = WalRecordCodec.Encode(42, WalEntryKind.Operation, changes, dependsOn: dependsOn);
+        var frameFromList = WalRecordCodec.Encode(42, WalEntryKind.Operation, changes.ToList(), dependsOn: dependsOn);
+        WalRecordCodec.TryDecode(frameFromList, out var entry, out _);
+
+        Assert.That(frameFromList, Is.EqualTo(frameFromArray));
+        Assert.That(entry.DependsOn, Is.EqualTo(dependsOn));
+        Assert.That(entry.Changes, Has.Length.EqualTo(2));
+    }
+
+    [Test]
     public void EncodeThenTryDecode_FromListOverload_RoundTripsTheSameAsTheArrayOverload() {
         var frame = WalRecordCodec.Encode(42, WalEntryKind.Operation, TwoChangesAcrossTables().ToList());
 

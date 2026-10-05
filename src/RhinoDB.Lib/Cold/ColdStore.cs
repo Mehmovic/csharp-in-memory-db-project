@@ -39,6 +39,9 @@ public sealed class ColdStore : IDisposable {
 
     private readonly Dictionary<Guid, bool> localChainMarkers;
 
+    private readonly Lock pendingChainsGate = new Lock();
+    private readonly Dictionary<Guid, Task<bool>> pendingChains = [];
+
     public ulong RecoveredLsn { get; }
 
     public bool WasFreshlyCreated { get; }
@@ -162,6 +165,7 @@ public sealed class ColdStore : IDisposable {
         chainResolver ??= attachedChainResolver;
         var prepares = PendingChainPrepares;
         var entries = PendingWalTail;
+        var originalTail = PendingWalTail;
 
         if (prepares.Length > 0) {
             if (chainResolver is null) return Result.Error(DbError.ChainResolutionUnavailable());
@@ -186,7 +190,7 @@ public sealed class ColdStore : IDisposable {
 
         var result = await checkpoint.RunCheckpoint(RecoveredLsn, tableDbisById, residentRows, deletedKeys, entries);
         if (result.IsError()) {
-            PendingWalTail = entries.Where(e => e.Kind == WalEntryKind.Operation && prepares.All(p => p.Lsn != e.Lsn)).ToArray();
+            PendingWalTail = originalTail;
             PendingChainPrepares = prepares;
             return result;
         }
@@ -202,7 +206,7 @@ public sealed class ColdStore : IDisposable {
             : MergeDecidedChainPrepares(attachedChainResolver, localMarkerSuffices: true);
 
     private Result<DecodedWalEntry[]> MergeDecidedChainPrepares(IChainResolver? resolver, bool localMarkerSuffices) {
-        var merged = new List<DecodedWalEntry>(PendingWalTail);
+        var decisions = new Dictionary<Guid, bool>();
         foreach (var prepare in PendingChainPrepares) {
             bool? known = localChainMarkers.TryGetValue(prepare.ChainId, out var marker) ? marker : null;
 
@@ -214,23 +218,59 @@ public sealed class ColdStore : IDisposable {
                 if (decision.IsError()) return decision.Void();
                 commit = decision.Unwrap();
             }
+            decisions[prepare.ChainId] = commit;
+        }
 
-            if (commit) merged.Add(new DecodedWalEntry(prepare.Lsn, WalEntryKind.Operation, prepare.Changes, prepare.UtcTicks));
+        var merged = new List<DecodedWalEntry>(PendingWalTail.Length + PendingChainPrepares.Length);
+        foreach (var entry in PendingWalTail) {
+            var kept = DependenciesCommitted(entry, decisions);
+            if (kept.IsError()) return kept.Void();
+            if (kept.Unwrap()) merged.Add(new DecodedWalEntry(entry.Lsn, entry.Kind, entry.Changes, entry.UtcTicks));
+        }
+        foreach (var prepare in PendingChainPrepares) {
+            if (decisions[prepare.ChainId]) merged.Add(new DecodedWalEntry(prepare.Lsn, WalEntryKind.Operation, prepare.Changes, prepare.UtcTicks));
         }
         return merged.OrderBy(e => e.Lsn).ToArray();
+    }
+
+    // A dependency is always a chain whose prepare sits earlier in this same tail, so it was decided just above.
+    static private Result<bool> DependenciesCommitted(DecodedWalEntry entry, Dictionary<Guid, bool> decisions) {
+        foreach (var dependency in entry.DependsOn) {
+            if (!decisions.TryGetValue(dependency, out var committed)) return Result<bool>.Error(DbError.ChainResolutionUnavailable());
+            if (!committed) return Result<bool>.Ok(false);
+        }
+        return Result<bool>.Ok(true);
     }
 
     // ---- Transaction-chain scope (one participant's share of a chain, held open across the 2PC) ----
 
     internal bool HasStagedChanges => currentOperationChanges.Count > 0;
 
-    internal Task<DbError?> AppendChainPrepare(ulong lsn, Guid chainId, string[] participants) =>
-        Wal.AppendChainPrepareConfirmed(lsn, chainId, participants, currentOperationChanges.ToArray());
+    internal Task<DbError?> AppendChainPrepare(ulong lsn, Guid chainId, string[] participants, Guid[] dependsOn) =>
+        Wal.AppendChainPrepare(lsn, chainId, participants, currentOperationChanges.ToArray(), dependsOn);
 
-    internal Task<DbError?> EndChainScope(Guid chainId, bool commit) {
+    internal void EndChainScope() {
         IsScopeActive = false;
         currentOperationChanges.Clear();
-        return Wal.AppendChainMarker(commit ? WalEntryKind.ChainCommit : WalEntryKind.ChainAbort, chainId, confirmed: false);
+    }
+
+    // Only once the chain's decision is final - recovery trusts a local marker without looking any further.
+    internal Task<DbError?> AppendChainMarker(Guid chainId, bool commit) =>
+        Wal.AppendChainMarker(commit ? WalEntryKind.ChainCommit : WalEntryKind.ChainAbort, chainId, confirmed: false);
+
+    internal (Guid[] Ids, Task<bool>[] Decisions) SnapshotPendingChains() {
+        lock (pendingChainsGate) {
+            if (pendingChains.Count == 0) return ([], []);
+            return (pendingChains.Keys.ToArray(), pendingChains.Values.ToArray());
+        }
+    }
+
+    internal void AddPendingChain(Guid chainId, Task<bool> decision) {
+        lock (pendingChainsGate) pendingChains[chainId] = decision;
+    }
+
+    internal void RemovePendingChain(Guid chainId) {
+        lock (pendingChainsGate) pendingChains.Remove(chainId);
     }
 
     internal void BeginScope() {
@@ -281,16 +321,28 @@ public sealed class ColdStore : IDisposable {
             return Task.FromResult<DbError?>(null);
         }
 
+        var (dependsOn, dependencies) = SnapshotPendingChains();
         Task<DbError?> result;
         if (mode == PropagationMode.Confirmed) {
-            result = Wal.AppendConfirmed(lsn, WalEntryKind.Operation, currentOperationChanges);
+            var own = Wal.AppendConfirmed(lsn, WalEntryKind.Operation, currentOperationChanges, dependsOn: dependsOn);
+            result = dependencies.Length == 0 ? own : AwaitDependencies(own, dependencies);
         } else {
-            Wal.AppendOptimistic(lsn, WalEntryKind.Operation, currentOperationChanges);
+            Wal.AppendOptimistic(lsn, WalEntryKind.Operation, currentOperationChanges, dependsOn: dependsOn);
             result = Task.FromResult<DbError?>(null);
         }
 
         currentOperationChanges.Clear();
         return result;
+    }
+
+    // Confirmed means durable, and a write that depends on an undecided chain only stands if that chain commits.
+    static private async Task<DbError?> AwaitDependencies(Task<DbError?> own, Task<bool>[] dependencies) {
+        if (await own is { } error) return error;
+        foreach (var dependency in dependencies) {
+            if (!await dependency) return DbError.WalDurabilityFailed(new InvalidOperationException(
+                "This write depended on a multi-database transaction that aborted - it won't survive a restart."));
+        }
+        return null;
     }
 
     public ColdTable<TKey, TRow> OpenTable<TKey, TRow>(string name)

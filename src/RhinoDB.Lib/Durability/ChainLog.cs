@@ -120,46 +120,79 @@ public sealed class ChainLog {
 
     private sealed class Resolver(ChainLog log, string self) : IChainResolver {
         public Result<bool> Resolve(Guid chainId, string[] participants, bool? knownDecision) =>
-            log.Resolve(chainId, participants, knownDecision, self);
+            log.Resolve(chainId, participants, knownDecision);
 
         public void Acknowledge(IEnumerable<Guid> chainIds) {
             foreach (var chainId in chainIds) log.Acknowledge(chainId, self);
         }
     }
 
-    private Result<bool> Resolve(Guid chainId, string[] participants, bool? knownDecision, string self) {
-        lock (gate) {
-            if (chains.TryGetValue(chainId, out var existing)) return Result<bool>.Ok(existing.Commit);
-            if (knownDecision is { } known) return RecordUnderGate(chainId, known, participants);
-
-            var commit = true;
-            foreach (var participant in participants) {
-                if (participant == self) continue;
-
-                var entriesResult = WriteAheadLog.ReadEntriesShared(WalPathOf(participant));
-                if (entriesResult.IsError()) return entriesResult.Void();
-
-                var verdict = ParticipantVerdict(entriesResult.Unwrap(), chainId);
-                if (verdict) continue;
-                commit = false;
-                break;
-            }
-            return RecordUnderGate(chainId, commit, participants);
-        }
+    private enum Verdict {
+        Missing,
+        Prepared,
+        Committed,
+        Aborted,
     }
 
-    // true = prepared or committed, false = missing or aborted.
-    static private bool ParticipantVerdict(DecodedWalEntry[] entries, Guid chainId) {
-        var prepared = false;
+    private Result<bool> Resolve(Guid chainId, string[] participants, bool? knownDecision) {
+        lock (gate) return ResolveUnderGate(chainId, participants, knownDecision, new Dictionary<string, DecodedWalEntry[]>(StringComparer.Ordinal));
+    }
+
+    private Result<bool> ResolveUnderGate(Guid chainId, string[] participants, bool? knownDecision, Dictionary<string, DecodedWalEntry[]> wals) {
+        if (chains.TryGetValue(chainId, out var existing)) return Result<bool>.Ok(existing.Commit);
+        if (knownDecision is { } known) return RecordUnderGate(chainId, known, participants);
+
+        foreach (var participant in participants) {
+            if (!wals.TryGetValue(participant, out var entries)) {
+                var read = WriteAheadLog.ReadEntriesShared(WalPathOf(participant));
+                if (read.IsError()) return read.Void();
+                entries = read.Unwrap();
+                wals[participant] = entries;
+            }
+
+            var (verdict, dependsOn) = ParticipantVerdict(entries, chainId);
+            if (verdict == Verdict.Committed) return RecordUnderGate(chainId, true, participants);
+            if (verdict != Verdict.Prepared) return RecordUnderGate(chainId, false, participants);
+
+            foreach (var dependency in dependsOn) {
+                var (dependencyParticipants, dependencyMarker) = Describe(entries, dependency);
+                if (dependencyParticipants is null) return RecordUnderGate(chainId, false, participants);
+                var decided = ResolveUnderGate(dependency, dependencyParticipants, dependencyMarker, wals);
+                if (decided.IsError()) return decided;
+                if (!decided.Unwrap()) return RecordUnderGate(chainId, false, participants);
+            }
+        }
+        return RecordUnderGate(chainId, true, participants);
+    }
+
+    static private (Verdict Verdict, Guid[] DependsOn) ParticipantVerdict(DecodedWalEntry[] entries, Guid chainId) {
+        var verdict = Verdict.Missing;
+        Guid[] dependsOn = [];
         foreach (var entry in entries) {
             if (entry.ChainId != chainId) continue;
             switch (entry.Kind) {
-                case WalEntryKind.ChainAbort: return false;
-                case WalEntryKind.ChainCommit: return true;
-                case WalEntryKind.ChainPrepare: prepared = true; break;
+                case WalEntryKind.ChainAbort: return (Verdict.Aborted, []);
+                case WalEntryKind.ChainCommit: return (Verdict.Committed, []);
+                case WalEntryKind.ChainPrepare:
+                    verdict = Verdict.Prepared;
+                    dependsOn = entry.DependsOn;
+                    break;
             }
         }
-        return prepared;
+        return (verdict, dependsOn);
+    }
+
+    // A dependency's own prepare (for its participants) and any local marker, from the WAL that referenced it.
+    static private (string[]? Participants, bool? Marker) Describe(DecodedWalEntry[] entries, Guid chainId) {
+        string[]? participants = null;
+        bool? marker = null;
+        foreach (var entry in entries) {
+            if (entry.ChainId != chainId) continue;
+            if (entry.Kind == WalEntryKind.ChainPrepare) participants = entry.ChainParticipants;
+            else if (entry.Kind == WalEntryKind.ChainCommit) marker = true;
+            else if (entry.Kind == WalEntryKind.ChainAbort) marker = false;
+        }
+        return (participants, marker);
     }
 
     private void Append(byte[] payload, bool durable) {

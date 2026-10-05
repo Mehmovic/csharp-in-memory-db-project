@@ -226,6 +226,25 @@ successful experiment too, recorded and closed like the coalescing one was.
 - Crash rule: only the fsync'd prefix exists; everything past it is treated as
   never happened.
 
+**Revised 2026-10-05: two-stage group commit, fsync outside the append lock.**
+The original flusher held the append lock through `Flush(flushToDisk: true)`, so
+any append waited for the disk. That was usually hidden: a burst of appends
+won the race against the flush thread taking the lock. But it fully serialized
+multi-database transactions under early lock release (each prepare's append
+waited for the previous fsync). Now:
+
+- An append writes its frame and joins the *collecting* group in one critical
+  section, so a group is only ever cut after all its members' bytes are written.
+- One flusher at a time. Each round cuts the collecting group and pushes the
+  bytes to the OS (`Flush(false)`) under the lock. It then fsyncs outside the lock
+  with `RandomAccess.FlushToDisk` on the handle cached at open. Appends that arrive
+  during the fsync land in the next group and never wait on this one. The flusher
+  loops until no group is left.
+- **Failure is sticky.** After one failed fsync, that group and every later group
+  and Confirmed append report `WalDurabilityFailed`. A failed fsync may have
+  dropped dirty pages, so no later fsync may vouch for entries written after
+  them. Callers already poison the database on the first durability error.
+
 **Sustained-load validation (2026-09-14; diagnostic since removed 2026-09-30)** — Phase 0's
 numbers were all single-burst (fire N concurrently, wait for all, done). A first attempt at a
 sustained-load check used 16 workers each awaiting their own append before issuing their next one

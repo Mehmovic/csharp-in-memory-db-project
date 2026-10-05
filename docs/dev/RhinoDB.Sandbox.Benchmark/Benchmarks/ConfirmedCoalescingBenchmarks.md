@@ -77,3 +77,10 @@ baseline, `20` is chosen specifically to land above the ~15.6 ms tick so the
 result demonstrates the mechanism actually batching rather than being
 dominated by rounding noise - values in between are not benchmarked since
 they demonstrably can't hit their requested target on this platform.
+
+## 2026-10-05 — after the two-stage WAL group commit
+
+`ConcurrentConfirmedInserts` / `Updates` (16 concurrent `Confirmed` writes): **772 µs / 765 µs per batch**
+(~20.8k confirmed tx/sec), down from 1.071 ms / 1.039 ms earlier the same day (~15k/sec) - ~27% faster. The flusher
+no longer holds the append lock through the fsync, so writes that arrive while the disk is busy are appended at once
+and batched into the next fsync instead of waiting behind it.

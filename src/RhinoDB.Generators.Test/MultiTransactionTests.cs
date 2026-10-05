@@ -596,7 +596,9 @@ public class MultiTransactionTests {
         childCold.Wal.TestOnlyBeforeFlush = null;
         Assert.That(result.IsError(), Is.True);
         Assert.That(result.GetError().Kind, Is.EqualTo(ErrorKind.WalDurabilityFailed));
-        Assert.That(await Exists("WalletExists", host, 80), Is.False, "the root had prepared, but the chain failed - its share is reverted live.");
+        // Early lock release: the databases were released before the flush failed, so the chain's writes can't be
+        // reverted under whatever ran since - the participants are poisoned instead, and recovery sorts it out.
+        Assert.That((await Call("InsertMatchDirectly", host, 81)).IsError(), Is.True, "the participants stop rather than run on unrecoverable state.");
         Shutdown(host);
 
         var childWal = WriteAheadLog.ReadEntriesShared(Path.Combine(dir, "Children", "SessionDb", "s1", "wal.dat")).Unwrap();

@@ -104,6 +104,9 @@ means sweep every production file touched in the session and move rationale to `
 
 ## Engine rules that are easy to break
 
+- **No backward compatibility yet — nothing has shipped.** Change on-disk formats (WAL, archive, chains.log),
+  APIs and generated code cleanly everywhere; update the tests that encoded the old shape. No compat kinds,
+  version flags or shims (memory `rhinodb-no-backward-compat-yet`).
 - **Result-returning APIs never throw** — every failure, misuse included, is a `DbError` kind
   (new kinds: a `[GenerateDbError]` exception class in `src/RhinoDB.Core/Exceptions/`
   generates `DbError.X()` + `ErrorKind.X`). Throw only from members that can't return a
@@ -118,8 +121,9 @@ means sweep every production file touched in the session and move rationale to `
   (a second bulk load duplicates rows).
 - **Multi-database transactions** (`PlanMultiTx`/`LockMultiTx`): fixed lock order (Root, then
   Children by path), steps run in call order and **apply per step** (retained undo journal, one
-  LSN per scope), 2PC only with ≥2 durable participants, crash recovery completes anything whose
-  prepares are all on disk. User guide: `docs/manual/multi-database-transactions.md`.
+  LSN per scope), 2PC only with ≥2 durable participants, **early lock release** (locks freed once prepares are
+  written; anything written meanwhile carries `DependsOn` and falls with the chain; post-release failure poisons the
+  participants), crash recovery completes a chain only if all prepares are on disk and all its dependencies commit. User guide: `docs/manual/multi-database-transactions.md`.
 - An operation **returns its result before its trailing sweep** (`PooledOperation.Run`) —
   anything reading table state outside the loop races it.
 - `[Procedure]` (planned, not built): one attribute, two shapes — `(RhinoCtx ctx, ...)` general,

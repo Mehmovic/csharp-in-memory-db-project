@@ -5,10 +5,23 @@ using MemoryPack;
 namespace RhinoDB.Lib.Durability;
 
 [MemoryPackable]
-internal readonly partial struct WalChainPreparePayload(Guid chainId, string[] participants, WalChange[] changes) {
+internal readonly partial struct WalOperationPayload(Guid[] dependsOn, WalChange[] changes) {
+    public Guid[] DependsOn { get; } = dependsOn;
+    public WalChange[] Changes { get; } = changes;
+}
+
+[MemoryPackable]
+internal readonly partial struct WalOperationPayloadFromList(Guid[] dependsOn, List<WalChange> changes) {
+    public Guid[] DependsOn { get; } = dependsOn;
+    public List<WalChange> Changes { get; } = changes;
+}
+
+[MemoryPackable]
+internal readonly partial struct WalChainPreparePayload(Guid chainId, string[] participants, WalChange[] changes, Guid[] dependsOn) {
     public Guid ChainId { get; } = chainId;
     public string[] Participants { get; } = participants;
     public WalChange[] Changes { get; } = changes;
+    public Guid[] DependsOn { get; } = dependsOn;
 }
 
 static public class WalRecordCodec {
@@ -17,15 +30,14 @@ static public class WalRecordCodec {
     private const int ChainIdSize = 16;
 
 
-    static public byte[] Encode(ulong lsn, WalEntryKind kind, WalChange[] changes, ulong utcTicks = Unstamped) =>
-        BuildFrame(lsn, kind, changes.Length == 0 ? [] : MemoryPackSerializer.Serialize(changes), utcTicks);
+    static public byte[] Encode(ulong lsn, WalEntryKind kind, WalChange[] changes, ulong utcTicks = Unstamped, Guid[]? dependsOn = null) =>
+        BuildFrame(lsn, kind, MemoryPackSerializer.Serialize(new WalOperationPayload(dependsOn ?? [], changes)), utcTicks);
 
-    static public byte[] Encode(ulong lsn, WalEntryKind kind, List<WalChange> changes, ulong utcTicks = Unstamped) =>
-        BuildFrame(lsn, kind, changes.Count == 0 ? [] : MemoryPackSerializer.Serialize(changes), utcTicks);
+    static public byte[] Encode(ulong lsn, WalEntryKind kind, List<WalChange> changes, ulong utcTicks = Unstamped, Guid[]? dependsOn = null) =>
+        BuildFrame(lsn, kind, MemoryPackSerializer.Serialize(new WalOperationPayloadFromList(dependsOn ?? [], changes)), utcTicks);
 
-    static public byte[] EncodeChainPrepare(ulong lsn, Guid chainId, string[] participants, WalChange[] changes, ulong utcTicks = Unstamped) =>
-        BuildFrame(lsn, WalEntryKind.ChainPrepare,
-            MemoryPackSerializer.Serialize(new WalChainPreparePayload(chainId, participants, changes)), utcTicks);
+    static public byte[] EncodeChainPrepare(ulong lsn, Guid chainId, string[] participants, WalChange[] changes, ulong utcTicks = Unstamped, Guid[]? dependsOn = null) =>
+        BuildFrame(lsn, WalEntryKind.ChainPrepare, MemoryPackSerializer.Serialize(new WalChainPreparePayload(chainId, participants, changes, dependsOn ?? [])), utcTicks);
 
     static public byte[] EncodeChainMarker(WalEntryKind kind, Guid chainId, ulong utcTicks = Unstamped) {
         if (kind is not (WalEntryKind.ChainCommit or WalEntryKind.ChainAbort))
@@ -71,7 +83,7 @@ static public class WalRecordCodec {
         switch (kind) {
             case WalEntryKind.ChainPrepare: {
                 var prepare = MemoryPackSerializer.Deserialize<WalChainPreparePayload>(payload);
-                entry = new DecodedWalEntry(lsn, kind, prepare.Changes ?? [], utcTicks, prepare.ChainId, prepare.Participants);
+                entry = new DecodedWalEntry(lsn, kind, prepare.Changes ?? [], utcTicks, prepare.ChainId, prepare.Participants, prepare.DependsOn);
                 break;
             }
             case WalEntryKind.ChainCommit or WalEntryKind.ChainAbort: {
@@ -80,8 +92,8 @@ static public class WalRecordCodec {
                 break;
             }
             default: {
-                var changes = payload.IsEmpty ? [] : MemoryPackSerializer.Deserialize<WalChange[]>(payload)!;
-                entry = new DecodedWalEntry(lsn, kind, changes, utcTicks);
+                var operation = MemoryPackSerializer.Deserialize<WalOperationPayload>(payload);
+                entry = new DecodedWalEntry(lsn, kind, operation.Changes ?? [], utcTicks, dependsOn: operation.DependsOn);
                 break;
             }
         }

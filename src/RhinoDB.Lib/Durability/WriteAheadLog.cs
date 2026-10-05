@@ -1,3 +1,5 @@
+using Microsoft.Win32.SafeHandles;
+
 using RhinoDB.Native;
 
 namespace RhinoDB.Lib.Durability;
@@ -9,22 +11,26 @@ public sealed class WriteAheadLog : IDisposable {
     private const ulong CaptureTimestampNow = ulong.MaxValue;
 
     private readonly FileStream fileStream;
+    private readonly SafeFileHandle fileHandle;
     private readonly Timer periodicFlushTimer;
     private readonly long sizeThresholdBytes;
     private readonly Lock appendLock = new Lock();
-    private readonly Lock groupLock = new Lock();
-    private TaskCompletionSource<DbError?>? inFlightGroup;
+    private TaskCompletionSource<DbError?>? currentGroup;
+    private bool flusherRunning;
+    private DbError? failure;
     private long bytesSinceLastFlush;
     private bool disposed;
 
     #if DEBUG
     internal Action? TestOnlyBeforeFlush { get; set; }
+    internal Action? TestOnlyDuringFsync { get; set; }
     #endif
     public Guid DatabaseId { get; }
     public uint Generation { get; }
 
     private WriteAheadLog(FileStream fileStream, Guid databaseId, uint generation, long sizeThresholdBytes, TimeSpan periodicFlushInterval) {
         this.fileStream = fileStream;
+        fileHandle = fileStream.SafeFileHandle;
         DatabaseId = databaseId;
         Generation = generation;
         this.sizeThresholdBytes = sizeThresholdBytes;
@@ -90,42 +96,70 @@ public sealed class WriteAheadLog : IDisposable {
             (new WriteAheadLog(fileStream, header.DatabaseId, header.Generation, sizeThresholdBytes, periodicFlushInterval), scan.Entries.ToArray()));
     }
 
-    internal Task<DbError?> AppendConfirmed(ulong lsn, WalEntryKind kind, WalChange[] changes, ulong utcTicks = CaptureTimestampNow) {
-        AppendOnly(lsn, kind, changes, utcTicks);
-        return JoinGroupCommit();
-    }
+    internal Task<DbError?> AppendConfirmed(ulong lsn, WalEntryKind kind, WalChange[] changes, ulong utcTicks = CaptureTimestampNow, Guid[]? dependsOn = null) =>
+        AppendAndJoin(WalRecordCodec.Encode(lsn, kind, changes, Stamp(utcTicks), dependsOn));
 
-    internal Task<DbError?> AppendConfirmed(ulong lsn, WalEntryKind kind, List<WalChange> changes, ulong utcTicks = CaptureTimestampNow) {
-        AppendOnly(lsn, kind, changes, utcTicks);
-        return JoinGroupCommit();
-    }
+    internal Task<DbError?> AppendConfirmed(ulong lsn, WalEntryKind kind, List<WalChange> changes, ulong utcTicks = CaptureTimestampNow, Guid[]? dependsOn = null) =>
+        AppendAndJoin(WalRecordCodec.Encode(lsn, kind, changes, Stamp(utcTicks), dependsOn));
 
-    internal void AppendOptimistic(ulong lsn, WalEntryKind kind, WalChange[] changes, ulong utcTicks = CaptureTimestampNow) {
-        var frameLength = AppendOnly(lsn, kind, changes, utcTicks);
-        if (Interlocked.Add(ref bytesSinceLastFlush, frameLength) >= sizeThresholdBytes) _ = JoinGroupCommit();
-    }
+    internal void AppendOptimistic(ulong lsn, WalEntryKind kind, WalChange[] changes, ulong utcTicks = CaptureTimestampNow, Guid[]? dependsOn = null) =>
+        AppendWithoutWaiting(WalRecordCodec.Encode(lsn, kind, changes, Stamp(utcTicks), dependsOn));
 
-    internal void AppendOptimistic(ulong lsn, WalEntryKind kind, List<WalChange> changes, ulong utcTicks = CaptureTimestampNow) {
-        var frameLength = AppendOnly(lsn, kind, changes, utcTicks);
-        if (Interlocked.Add(ref bytesSinceLastFlush, frameLength) >= sizeThresholdBytes) _ = JoinGroupCommit();
-    }
+    internal void AppendOptimistic(ulong lsn, WalEntryKind kind, List<WalChange> changes, ulong utcTicks = CaptureTimestampNow, Guid[]? dependsOn = null) =>
+        AppendWithoutWaiting(WalRecordCodec.Encode(lsn, kind, changes, Stamp(utcTicks), dependsOn));
 
-    internal Task<DbError?> AppendChainPrepareConfirmed(ulong lsn, Guid chainId, string[] participants, WalChange[] changes) {
-        AppendFrame(WalRecordCodec.EncodeChainPrepare(lsn, chainId, participants, changes, (ulong)DateTime.UtcNow.Ticks));
-        return JoinGroupCommit();
-    }
+    internal Task<DbError?> AppendChainPrepare(ulong lsn, Guid chainId, string[] participants, WalChange[] changes, Guid[] dependsOn) =>
+        AppendAndJoin(WalRecordCodec.EncodeChainPrepare(lsn, chainId, participants, changes, (ulong)DateTime.UtcNow.Ticks, dependsOn));
 
     internal Task<DbError?> AppendChainMarker(WalEntryKind kind, Guid chainId, bool confirmed) {
-        var frameLength = AppendFrame(WalRecordCodec.EncodeChainMarker(kind, chainId, (ulong)DateTime.UtcNow.Ticks));
-        if (confirmed) return JoinGroupCommit();
-        if (Interlocked.Add(ref bytesSinceLastFlush, frameLength) >= sizeThresholdBytes) _ = JoinGroupCommit();
+        var frame = WalRecordCodec.EncodeChainMarker(kind, chainId, (ulong)DateTime.UtcNow.Ticks);
+        if (confirmed) return AppendAndJoin(frame);
+        AppendWithoutWaiting(frame);
         return Task.FromResult<DbError?>(null);
     }
 
-    private int AppendFrame(byte[] frame) {
-        lock (appendLock) fileStream.Write(frame, 0, frame.Length);
-        return frame.Length;
+    private Task<DbError?> AppendAndJoin(byte[] frame) {
+        Task<DbError?> durable;
+        bool startFlusher;
+        lock (appendLock) {
+            fileStream.Write(frame, 0, frame.Length);
+            bytesSinceLastFlush += frame.Length;
+            durable = JoinUnderLock(out startFlusher);
+        }
+        if (startFlusher) StartFlusher();
+        return durable;
     }
+
+    private void AppendWithoutWaiting(byte[] frame) {
+        var startFlusher = false;
+        lock (appendLock) {
+            fileStream.Write(frame, 0, frame.Length);
+            bytesSinceLastFlush += frame.Length;
+            if (bytesSinceLastFlush >= sizeThresholdBytes) JoinUnderLock(out startFlusher);
+        }
+        if (startFlusher) StartFlusher();
+    }
+
+    private Task<DbError?> RequestFlush() {
+        Task<DbError?> durable;
+        bool startFlusher;
+        lock (appendLock) durable = JoinUnderLock(out startFlusher);
+        if (startFlusher) StartFlusher();
+        return durable;
+    }
+
+    private Task<DbError?> JoinUnderLock(out bool startFlusher) {
+        startFlusher = false;
+        if (failure is { } failed) return Task.FromResult<DbError?>(failed);
+        currentGroup ??= new TaskCompletionSource<DbError?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!flusherRunning) {
+            flusherRunning = true;
+            startFlusher = true;
+        }
+        return currentGroup.Task;
+    }
+
+    private void StartFlusher() => _ = Task.Run(FlushGroups);
 
     static public Result<DecodedWalEntry[]> ReadEntriesShared(string path) {
         if (!File.Exists(path)) return Result<DecodedWalEntry[]>.Ok([]);
@@ -145,22 +179,10 @@ public sealed class WriteAheadLog : IDisposable {
         }
     }
 
-    private int AppendOnly(ulong lsn, WalEntryKind kind, WalChange[] changes, ulong utcTicks) {
-        var stamp = utcTicks == CaptureTimestampNow ? (ulong)DateTime.UtcNow.Ticks : utcTicks;
-        var frame = WalRecordCodec.Encode(lsn, kind, changes, stamp);
-        lock (appendLock) fileStream.Write(frame, 0, frame.Length);
-        return frame.Length;
-    }
-
-    private int AppendOnly(ulong lsn, WalEntryKind kind, List<WalChange> changes, ulong utcTicks) {
-        var stamp = utcTicks == CaptureTimestampNow ? (ulong)DateTime.UtcNow.Ticks : utcTicks;
-        var frame = WalRecordCodec.Encode(lsn, kind, changes, stamp);
-        lock (appendLock) fileStream.Write(frame, 0, frame.Length);
-        return frame.Length;
-    }
+    static private ulong Stamp(ulong utcTicks) => utcTicks == CaptureTimestampNow ? (ulong)DateTime.UtcNow.Ticks : utcTicks;
 
     internal async Task<DbError?> Truncate() {
-        var flushError = await JoinGroupCommit();
+        var flushError = await RequestFlush();
         if (flushError is { } err) return err;
 
         try {
@@ -173,74 +195,69 @@ public sealed class WriteAheadLog : IDisposable {
             return DbError.WalDurabilityFailed(ex);
         }
 
-        Interlocked.Exchange(ref bytesSinceLastFlush, 0);
+        lock (appendLock) bytesSinceLastFlush = 0;
         return null;
     }
 
     private void TriggerPeriodicFlushIfPending() {
         try {
-            if (Volatile.Read(ref bytesSinceLastFlush) > 0)
-                _ = JoinGroupCommit();
+            bool pending;
+            lock (appendLock) pending = bytesSinceLastFlush > 0;
+            if (pending) _ = RequestFlush();
         } catch {
             // An exception escaping a Timer callback terminates the whole process
         }
     }
 
-    private Task<DbError?> JoinGroupCommit() {
-        lock (groupLock) {
-            if (inFlightGroup is { } existing) return existing.Task;
+    private void FlushGroups() {
+        while (true) {
+            DbError? error = null;
+            #if DEBUG
+            try { TestOnlyBeforeFlush?.Invoke(); } catch (Exception ex) { error = DbError.WalDurabilityFailed(ex); }
+            #endif
 
-            var tcs = new TaskCompletionSource<DbError?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            inFlightGroup = tcs;
-            _ = Task.Run(() => RunFlush(tcs));
-            return tcs.Task;
-        }
-    }
-
-    private void RunFlush(TaskCompletionSource<DbError?> tcs) {
-    #if DEBUG
-        if (TestOnlyBeforeFlushInvocationFailed(tcs)) return;
-    #endif
-        
-        DbError? error = null;
-
-        lock (appendLock) {
-            try {
-                fileStream.Flush(flushToDisk: true);
-                Interlocked.Exchange(ref bytesSinceLastFlush, 0);
-            } catch (Exception ex) {
-                error = DbError.WalDurabilityFailed(ex);
-            }
-
-            lock (groupLock) { if (ReferenceEquals(inFlightGroup, tcs)) inFlightGroup = null; }
-        }
-
-        tcs.SetResult(error);
-    }
-
-    #if DEBUG
-    private bool TestOnlyBeforeFlushInvocationFailed(TaskCompletionSource<DbError?> tcs) {
-        try {
-            TestOnlyBeforeFlush?.Invoke();
-            return false;
-        } catch (Exception ex) {
+            TaskCompletionSource<DbError?>? group;
             lock (appendLock) {
-                lock (groupLock) { if (ReferenceEquals(inFlightGroup, tcs)) inFlightGroup = null; }
+                group = currentGroup;
+                currentGroup = null;
+                if (group is null) {
+                    flusherRunning = false;
+                    return;
+                }
+                if (error is null && failure is null) {
+                    try {
+                        fileStream.Flush(flushToDisk: false);
+                    } catch (Exception ex) {
+                        error = DbError.WalDurabilityFailed(ex);
+                    }
+                }
+                bytesSinceLastFlush = 0;
+                error ??= failure;
+                if (error is { } failed) failure ??= failed;
             }
-            tcs.SetResult(DbError.WalDurabilityFailed(ex));
-            return true;
+
+            if (error is null) {
+                try {
+                    #if DEBUG
+                    TestOnlyDuringFsync?.Invoke();
+                    #endif
+                    RandomAccess.FlushToDisk(fileHandle);
+                } catch (Exception ex) {
+                    error = DbError.WalDurabilityFailed(ex);
+                    lock (appendLock) failure ??= error;
+                }
+            }
+
+            group.SetResult(error);
         }
     }
-    #endif
 
     public void Dispose() {
         if (disposed) return;
         disposed = true;
         periodicFlushTimer.Dispose();
 
-        Task<DbError?>? pending;
-        lock (groupLock) pending = inFlightGroup?.Task;
-        pending?.GetAwaiter().GetResult();
+        RequestFlush().GetAwaiter().GetResult();
 
         lock (appendLock) fileStream.Flush(flushToDisk: true);
         fileStream.Dispose();

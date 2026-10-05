@@ -161,3 +161,18 @@ awaited no-op round trip, cross-thread wake included) 3.07 µs and 32 B allocate
 
 Not covered by any benchmark yet: multi-database transactions (planned/locked, 1 vs 2 durable
 participants) and Child activation/auto-load cost.
+
+**2026-10-05, after ELR + the two-stage WAL group commit:** Instant 3.047 / 2.939 ms (~3.3M / ~3.4M ops/sec, unchanged
+within noise); Persistent Optimistic inserts / updates 9.839 / 9.522 ms (~1.02M / ~1.05M ops/sec) and **7.17 / 7.10 MB**
+per 10k batch vs. 8.684 / 8.755 ms and 6.72 / 6.64 MB in the morning run. The allocation rise (~45 B/op) is real and comes
+from the WAL format change: every entry now serializes a `WalOperationPayload` wrapper, and `WalRecordCodec.Encode(List)`
+copies the staged `List<WalChange>` with `ToArray()` to build it. The ~10% time difference is inside the Persistent rows'
+8-10% StdDev, so unconfirmed - but it lines up with that extra copy; serializing the list straight into the payload is the
+obvious follow-up.
+
+**2026-10-05, ToArray removed** (`WalRecordCodec.Encode(List)` now serializes a `WalOperationPayloadFromList` twin -
+MemoryPack writes `List<T>` and `T[]` identically, guarded by the byte-equality codec tests): Persistent Optimistic
+inserts / updates **6.71 / 6.64 MB** per 10k batch - back to the morning's 6.72 / 6.64 MB. Time 9.977 / 9.495 ms, i.e.
+unchanged by the fix, so the copy was not what made these rows ~10% slower than the morning run (8.68 / 8.76 ms). That gap
+has now shown up in three runs but stays inside one StdDev (0.4-0.8 ms); if it's real, the candidates are the per-write
+`SnapshotPendingChains` lock in `ColdStore.EndScope` and the WAL append path now taking `appendLock` for the byte counter.

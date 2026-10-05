@@ -1,3 +1,5 @@
+using System.Reflection;
+
 using RhinoDB.Core;
 using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Tables;
@@ -306,4 +308,128 @@ public class WriteAheadLogTests {
             "Every entry acknowledged as durable must actually be present on disk - a late joiner incorrectly sharing an already-flushed group's completion would silently lose entries here.");
         Assert.That(scan.Entries.Select(e => e.Lsn), Is.EquivalentTo(Enumerable.Range(1, OperationCount).Select(i => (long)i)));
     }
+
+#if DEBUG
+    // ---- Two-stage group commit: the fsync runs outside the append lock ----
+    // TestOnlyDuringFsync runs after a group is cut, outside the lock, where the fsync happens. Set by reflection so
+    // this file compiles before it exists.
+
+    static private void SetDuringFsync(WriteAheadLog wal, Action? hook) {
+        var property = typeof(WriteAheadLog).GetProperty("TestOnlyDuringFsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.That(property, Is.Not.Null, "WriteAheadLog.TestOnlyDuringFsync doesn't exist yet.");
+        property!.SetValue(wal, hook);
+    }
+
+    [Test]
+    public async Task AnAppendDuringAnFsync_IsNotBlockedByIt() {
+        using var wal = CreateWal();
+        using var fsyncGate = new ManualResetEventSlim(false);
+        using var fsyncEntered = new ManualResetEventSlim(false);
+        SetDuringFsync(wal, () => { fsyncEntered.Set(); fsyncGate.Wait(TimeSpan.FromSeconds(10)); });
+        try {
+            var first = wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange());
+            Assert.That(fsyncEntered.Wait(TimeSpan.FromSeconds(5)), Is.True, "the first group's fsync never started.");
+
+            var optimistic = Task.Run(() => wal.AppendOptimistic(2, WalEntryKind.Operation, OneChange(2)));
+            var confirmedCall = Task.Factory.StartNew(() => wal.AppendConfirmed(3, WalEntryKind.Operation, OneChange(3)));
+
+            Assert.That(optimistic.Wait(TimeSpan.FromSeconds(2)), Is.True, "an append must not wait for another group's fsync.");
+            Assert.That(confirmedCall.Wait(TimeSpan.FromSeconds(2)), Is.True, "the Confirmed call itself returns at once - only its task waits.");
+
+            fsyncGate.Set();
+            Assert.That(await first, Is.Null);
+            Assert.That(await confirmedCall.Result, Is.Null);
+        } finally {
+            fsyncGate.Set();
+            SetDuringFsync(wal, null);
+        }
+    }
+
+    [Test]
+    public async Task AConfirmedAppendMadeDuringAnFsync_IsCoveredByALaterFsync_NotThatOne() {
+        using var wal = CreateWal();
+        using var fsyncGate = new ManualResetEventSlim(false);
+        using var fsyncEntered = new ManualResetEventSlim(false);
+        var fsyncs = 0;
+        SetDuringFsync(wal, () => {
+            if (Interlocked.Increment(ref fsyncs) != 1) return;
+            fsyncEntered.Set();
+            fsyncGate.Wait(TimeSpan.FromSeconds(10));
+        });
+        try {
+            var first = wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange());
+            Assert.That(fsyncEntered.Wait(TimeSpan.FromSeconds(5)), Is.True);
+
+            var second = wal.AppendConfirmed(2, WalEntryKind.Operation, OneChange(2));
+            var fsyncsWhenSecondCompleted = second.ContinueWith(_ => Volatile.Read(ref fsyncs), TaskContinuationOptions.ExecuteSynchronously);
+
+            Assert.That(second, Is.Not.SameAs(first), "its bytes may not be in the fsync already running - it belongs to the next group.");
+            fsyncGate.Set();
+            Assert.That(await first, Is.Null);
+            Assert.That(await second, Is.Null);
+            Assert.That(await fsyncsWhenSecondCompleted, Is.GreaterThanOrEqualTo(2), "reported durable only by an fsync that started after it was written.");
+        } finally {
+            fsyncGate.Set();
+            SetDuringFsync(wal, null);
+        }
+    }
+
+    [Test]
+    public async Task ConfirmedAppendsMadeDuringAnFsync_ShareTheNextOne() {
+        using var wal = CreateWal();
+        using var fsyncGate = new ManualResetEventSlim(false);
+        using var fsyncEntered = new ManualResetEventSlim(false);
+        var fsyncs = 0;
+        SetDuringFsync(wal, () => {
+            if (Interlocked.Increment(ref fsyncs) != 1) return;
+            fsyncEntered.Set();
+            fsyncGate.Wait(TimeSpan.FromSeconds(10));
+        });
+        try {
+            var first = wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange());
+            Assert.That(fsyncEntered.Wait(TimeSpan.FromSeconds(5)), Is.True);
+
+            var waiting = Enumerable.Range(2, 9).Select(i => wal.AppendConfirmed((ulong)i, WalEntryKind.Operation, OneChange(i))).ToArray();
+
+            Assert.That(waiting.Distinct().Count(), Is.EqualTo(1), "everything written during one fsync is batched into the next.");
+            fsyncGate.Set();
+            Assert.That(await first, Is.Null);
+            Assert.That(await waiting[0], Is.Null);
+            Assert.That(Volatile.Read(ref fsyncs), Is.EqualTo(2), "two groups, two fsyncs - not one per append.");
+        } finally {
+            fsyncGate.Set();
+            SetDuringFsync(wal, null);
+        }
+    }
+
+    [Test]
+    public async Task AFailedFsync_IsSticky_EveryLaterGroupFailsToo() {
+        // A failed fsync may have dropped dirty pages: a later "successful" fsync must not vouch for entries written
+        // after bytes that may be gone.
+        using var wal = CreateWal();
+        using var fsyncGate = new ManualResetEventSlim(false);
+        using var fsyncEntered = new ManualResetEventSlim(false);
+        var fsyncs = 0;
+        SetDuringFsync(wal, () => {
+            if (Interlocked.Increment(ref fsyncs) != 1) return;
+            fsyncEntered.Set();
+            fsyncGate.Wait(TimeSpan.FromSeconds(10));
+            throw new IOException("injected fsync failure");
+        });
+        try {
+            var first = wal.AppendConfirmed(1, WalEntryKind.Operation, OneChange());
+            Assert.That(fsyncEntered.Wait(TimeSpan.FromSeconds(5)), Is.True);
+            var second = wal.AppendConfirmed(2, WalEntryKind.Operation, OneChange(2));
+            fsyncGate.Set();
+
+            Assert.That((await first)?.Kind, Is.EqualTo(ErrorKind.WalDurabilityFailed));
+            Assert.That((await second)?.Kind, Is.EqualTo(ErrorKind.WalDurabilityFailed), "the group after a failed fsync fails too.");
+            Assert.That((await wal.AppendConfirmed(3, WalEntryKind.Operation, OneChange(3)))?.Kind, Is.EqualTo(ErrorKind.WalDurabilityFailed),
+                "and so does every later Confirmed append.");
+        } finally {
+            fsyncGate.Set();
+            SetDuringFsync(wal, null);
+        }
+    }
+#endif
 }
