@@ -116,3 +116,5 @@ RhinoHostBuilder.Create()
 
 The callback runs once, off the database's thread. The poisoned database still refuses
 all work, so it's your job to stop the process when you're ready.
+
+All timing and port settings mentioned here live in `rdbsettings.json`; see [configuration](configuration.md) for the full list.

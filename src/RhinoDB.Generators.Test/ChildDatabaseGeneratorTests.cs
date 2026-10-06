@@ -65,6 +65,7 @@ public class ChildDatabaseGeneratorTests {
             public static class TestHelpers {
                 public static async Task<bool> Run(string configDir) {
                     var builder = RhinoHostBuilder.Create(configDir)
+                    .OnUnrecoverableError(UnrecoverableErrorPolicy.Callback(_ => { }))
                         .AddGeneratedChildDatabases()
                         .AddDatabase<RootDb, RootDbTransaction>(o => o.CreateDb = cold => new RootDb(cold));
                     var hostResult = await builder.BuildAsync();

@@ -37,20 +37,7 @@ public sealed class FrozenSchemaGenerator : IIncrementalGenerator {
     );
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
-        var configProtocol = context.AdditionalTextsProvider
-            .Where(static t => Path.GetFileName(t.Path) == "rdbsettings.json")
-            .Collect()
-            .Select(static (texts, ct) => {
-                if (texts.Length == 0) return ClientProtocolKind.Raw;
-                var text = texts[0].GetText(ct)?.ToString();
-                if (string.IsNullOrEmpty(text)) return ClientProtocolKind.Raw;
-                try {
-                    var parsedConfig = GeneratorConfigLoader.Parse(text!);
-                    return ClientProtocolParser.Parse(parsedConfig.ClientProtocol);
-                } catch {
-                    return ClientProtocolKind.Raw;
-                }
-            });
+        var configProtocol = RhinoSettings.Provider(context).Select(static (settings, _) => settings.ClientProtocol);
 
         var results = context.SyntaxProvider
             .ForAttributeWithMetadataName(

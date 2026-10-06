@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace RhinoDB.SchemaContracts;
 
 public sealed class ArchiveRetentionConfig {
@@ -5,7 +7,9 @@ public sealed class ArchiveRetentionConfig {
     public string? Interval { get; set; }
     public string? KeepFor { get; set; }
 
+    [JsonIgnore]
     public TimeSpan? ResolvedInterval => Parse(Interval, "Server.ArchiveRetention.Interval");
+    [JsonIgnore]
     public TimeSpan? ResolvedKeepFor => Parse(KeepFor, "Server.ArchiveRetention.KeepFor");
 
     static private TimeSpan? Parse(string? value, string label) {

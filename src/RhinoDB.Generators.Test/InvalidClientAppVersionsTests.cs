@@ -158,6 +158,7 @@ public class InvalidClientAppVersionsTests {
                 public static class TestHelpers {
                     public static async Task<(bool Low, bool High)> Run(string configDir) {
                         var builder = RhinoHostBuilder.Create(configDir)
+                    .OnUnrecoverableError(UnrecoverableErrorPolicy.Callback(_ => { }))
                             .AddGeneratedClientCompat()
                             .AddDatabase<RootDb, RootDbTransaction>(o => o.CreateDb = cold => new RootDb(cold));
                         var hostResult = await builder.BuildAsync();

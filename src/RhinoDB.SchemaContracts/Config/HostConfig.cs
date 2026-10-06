@@ -8,4 +8,5 @@ public sealed class HostConfig {
     public string? WalPruneOlderThan { get; set; }
     public int HttpPort { get; set; } = 7777;
     public bool? HttpEnabled { get; set; }
+    public UnrecoverableErrorConfig UnrecoverableError { get; set; } = new UnrecoverableErrorConfig();
 }

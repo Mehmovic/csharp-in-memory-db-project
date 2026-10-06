@@ -3,17 +3,17 @@ using System.Net.WebSockets;
 using System.Text.Json;
 
 using RhinoDB.Core;
-using RhinoDB.Core.Rpc;
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Execution;
 using RhinoDB.Lib.Hosting;
 using RhinoDB.Lib.Realtime;
 using RhinoDB.Lib.Server.Realtime;
+using RhinoDB.Lib.Server.Test.Wire;
 using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Lib.Server.Test;
 
-// Real WebSocket client, real dispatch through RhinoHostBuilder.AddRpcCommand, real Kestrel - the
+// Real WebSocket client, real generated [Procedure] handlers (Wire/WireSchema.cs), real Kestrel - the
 // actual bar for Phase 3 per the plan ("extract the interface from two real implementations,"
 // here: from one real implementation plus a real client, not from mocks on either side). Frame/
 // Rpc encoding is hand-rolled client-side (not reusing WsTransport/RpcFrameCodec's internal types)
@@ -72,9 +72,9 @@ public class WsTransportTests {
         return buffer;
     }
 
-    static private byte[] EncodeRpcRequest(uint commandHash, uint requestId, byte[] body) {
+    static private byte[] EncodeRpcRequest(uint procedureHash, uint requestId, byte[] body) {
         var buffer = new byte[8 + body.Length];
-        BinaryPrimitives.WriteUInt32LittleEndian(buffer, commandHash);
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer, procedureHash);
         BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(4), requestId);
         body.CopyTo(buffer, 8);
         return buffer;
@@ -113,47 +113,157 @@ public class WsTransportTests {
         return (host, client);
     }
 
-    [Test]
-    public async Task RpcFrame_ForARegisteredCommand_DispatchesAndEchoesTheBodyBack() {
-        var commandHash = NameHash.Compute("Echo");
-        var builder = RhinoHostBuilder.Create(dir)
-            .AddRpcCommand(commandHash, (_, body, _) => Task.FromResult(Result<ReadOnlyMemory<byte>>.Ok(body)));
+    // RpcResult: requestId u32 | kind u8 | customCode u16 | body
+    private readonly record struct RpcReply(uint RequestId, ErrorKind Kind, ushort CustomCode, byte[] Body);
 
-        var (host, client) = await ConnectAsync(builder);
-        using var _ = host;
-        using var __ = client;
+    static private RpcReply DecodeReply(byte[] payload) => new RpcReply(
+        BinaryPrimitives.ReadUInt32LittleEndian(payload),
+        (ErrorKind)payload[4],
+        BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(5)),
+        payload[7..]);
 
-        var requestBody = "hello"u8.ToArray();
-        await client.SendAsync(
-            EncodeFrame((ushort)FrameType.Rpc, EncodeRpcRequest(commandHash, requestId: 42, requestBody)),
-            WebSocketMessageType.Binary, true, CancellationToken.None);
+    private readonly List<Lib.Procedures.ProcedureFault> faults = [];
+    private int unrecoverable;
 
+    private async Task<(RhinoHost Host, ClientWebSocket Client)> ConnectToWireDbAsync() {
+        WriteConfig(dir, 0);
+        var hostResult = await RhinoHostBuilder.Create(dir)
+            .AddGeneratedProcedures()
+            .OnProcedureFault(faults.Add)
+            .OnUnrecoverableError(UnrecoverableErrorPolicy.Callback(_ => Interlocked.Increment(ref unrecoverable)))
+            .AddDatabase<WireDb, WireDbTransaction>(options => options.CreateDb = cold => new WireDb(cold))
+            .BuildAsync();
+
+        var host = hostResult.Unwrap();
+        var client = new ClientWebSocket();
+        await client.ConnectAsync(new Uri($"ws://127.0.0.1:{host.NetworkPort}/rt"), CancellationToken.None);
+        await SendHelloAsync(client);
+        return (host, client);
+    }
+
+    static private async Task<RpcReply> CallAsync(ClientWebSocket client, uint procedureHash, uint requestId, byte[] args) {
+        await client.SendAsync(EncodeFrame((ushort)FrameType.Rpc, EncodeRpcRequest(procedureHash, requestId, args)), WebSocketMessageType.Binary, true, CancellationToken.None);
         var (type, payload) = await ReceiveFrameAsync(client);
-
         Assert.That(type, Is.EqualTo((ushort)FrameType.RpcResult));
-        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(payload), Is.EqualTo(42u), "the response must echo back the SAME request_id, not the command hash.");
-        Assert.That(payload[4], Is.EqualTo((byte)ErrorKind.None), "ErrorKind.None (0) means success.");
-        Assert.That(payload[5..], Is.EqualTo(requestBody));
-        host.GetDatabase<FakeDb>().Cold!.Dispose();
+        return DecodeReply(payload);
     }
 
     [Test]
-    public async Task RpcFrame_ForAnUnregisteredCommandHash_RespondsWithUnknownRpcCommandErrorKind() {
-        var (host, client) = await ConnectAsync(RhinoHostBuilder.Create(dir));
+    public async Task ATransactionProcedure_RepliesWithTheHeaderOnly_AndAGeneralProcedure_WithItsEncodedValue() {
+        var (host, client) = await ConnectToWireDbAsync();
         using var _ = host;
         using var __ = client;
 
-        await client.SendAsync(
-            EncodeFrame((ushort)FrameType.Rpc, EncodeRpcRequest(commandHash: 0xDEADBEEF, requestId: 7, [])),
-            WebSocketMessageType.Binary, true, CancellationToken.None);
+        var first = await CallAsync(client, GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Add.Hash, 42,
+            GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Add.EncodeArgs(1, 5));
+        await CallAsync(client, GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Add.Hash, 43,
+            GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Add.EncodeArgs(1, 3));
+        var read = await CallAsync(client, GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Get.Hash, 44,
+            GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Get.EncodeArgs(1));
 
-        var (type, payload) = await ReceiveFrameAsync(client);
+        Assert.That(first.RequestId, Is.EqualTo(42u), "the reply echoes the request id, not the procedure hash.");
+        Assert.That(first.Kind, Is.EqualTo(ErrorKind.None));
+        Assert.That(first.CustomCode, Is.Zero);
+        Assert.That(first.Body, Is.Empty, "a transaction-only procedure returns no value - its changes reach clients through their views.");
+        Assert.That(GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Get.DecodeResult(read.Body), Is.EqualTo(8), "both adds committed.");
+        host.GetDatabase<WireDb>().Cold!.Dispose();
+    }
 
-        Assert.That(type, Is.EqualTo((ushort)FrameType.RpcResult));
-        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(payload), Is.EqualTo(7u));
-        Assert.That(payload[4], Is.EqualTo((byte)ErrorKind.UnknownRpcCommand),
-            "a dispatch-table miss must surface as UnknownRpcCommandException's own ErrorKind, not a generic failure.");
-        host.GetDatabase<FakeDb>().Cold!.Dispose();
+    [Test]
+    public async Task TheConnectionsSession_ReachesTheProcedureContext() {
+        var (host, client) = await ConnectToWireDbAsync();
+        using var _ = host;
+        using var __ = client;
+
+        var reply = await CallAsync(client, GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_AppVersion.Hash, 1, []);
+
+        Assert.That(GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_AppVersion.DecodeResult(reply.Body), Is.EqualTo(1u), "the Hello's app version.");
+        host.GetDatabase<WireDb>().Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task ACustomError_ReachesTheClient_AsKindAndCode_WithNoBody() {
+        var (host, client) = await ConnectToWireDbAsync();
+        using var _ = host;
+        using var __ = client;
+
+        var reply = await CallAsync(client, GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Reject.Hash, 7,
+            GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Reject.EncodeArgs(4242));
+
+        Assert.That(reply, Is.EqualTo(reply with { RequestId = 7, Kind = ErrorKind.Custom, CustomCode = 4242 }));
+        Assert.That(reply.Body, Is.Empty);
+        host.GetDatabase<WireDb>().Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task AnEngineKind_ReachesTheClient_AsServerUnavailable_AndDoesNotTakeTheEngineDown() {
+        var (host, client) = await ConnectToWireDbAsync();
+        using var _ = host;
+        using var __ = client;
+
+        var reply = await CallAsync(client, GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_EngineDown.Hash, 8, []);
+
+        Assert.That(reply.Kind, Is.EqualTo(ErrorKind.ServerUnavailable));
+        Assert.That(reply.CustomCode, Is.Zero);
+        Assert.That(unrecoverable, Is.Zero, "a kind a procedure returns is its outcome - only the engine's own failures are unrecoverable.");
+        host.GetDatabase<WireDb>().Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task AProcedureThatThrows_IsProcedureFailed_WithoutItsMessage_AndTheConnectionKeepsServing() {
+        var (host, client) = await ConnectToWireDbAsync();
+        using var _ = host;
+        using var __ = client;
+
+        var crashed = await CallAsync(client, GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Crash.Hash, 9, []);
+        var next = await CallAsync(client, GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Add.Hash, 10,
+            GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Add.EncodeArgs(2, 1));
+
+        Assert.That(crashed.Kind, Is.EqualTo(ErrorKind.ProcedureFailed));
+        Assert.That(crashed.Body, Is.Empty, "no exception text, ever - the reply is exactly the 7-byte header.");
+        Assert.That(faults.Single().Exception.Message, Does.Contain("secret internals"), "the server's log keeps it.");
+        Assert.That(next.Kind, Is.EqualTo(ErrorKind.None));
+        host.GetDatabase<WireDb>().Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task AnUnknownProcedureHash_IsUnknownProcedure() {
+        var (host, client) = await ConnectToWireDbAsync();
+        using var _ = host;
+        using var __ = client;
+
+        var reply = await CallAsync(client, 0xDEADBEEF, 7, []);
+
+        Assert.That(reply.RequestId, Is.EqualTo(7u));
+        Assert.That(reply.Kind, Is.EqualTo(ErrorKind.UnknownProcedure));
+        host.GetDatabase<WireDb>().Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task ArgsThatDontDecode_AreProcedureArgsInvalid() {
+        var (host, client) = await ConnectToWireDbAsync();
+        using var _ = host;
+        using var __ = client;
+
+        var reply = await CallAsync(client, GeneratedProcedures.RhinoDB_Lib_Server_Test_Wire_WireProcedures_Add.Hash, 11, [1, 2]);
+
+        Assert.That(reply.Kind, Is.EqualTo(ErrorKind.ProcedureArgsInvalid));
+        host.GetDatabase<WireDb>().Cold!.Dispose();
+    }
+
+    [Test]
+    public async Task AnRpcFrameShorterThanItsHeader_ClosesTheConnectionAsAProtocolError() {
+        var (host, client) = await ConnectToWireDbAsync();
+        using var _ = host;
+        using var __ = client;
+
+        await client.SendAsync(EncodeFrame((ushort)FrameType.Rpc, [1, 2, 3]), WebSocketMessageType.Binary, true, CancellationToken.None);
+        var result = await client.ReceiveAsync(new byte[256], CancellationToken.None);
+
+        Assert.That(result.MessageType, Is.EqualTo(WebSocketMessageType.Close));
+        Assert.That(client.CloseStatus, Is.EqualTo(WebSocketCloseStatus.ProtocolError));
+        await client.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
+        host.GetDatabase<WireDb>().Cold!.Dispose();
     }
 
     [Test]

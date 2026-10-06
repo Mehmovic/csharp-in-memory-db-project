@@ -176,6 +176,73 @@ public class RhinoHostOptionsTests {
         Assert.That(result.HttpPort, Is.EqualTo(9000));
     }
 
+    // ---- the Network, Durability and Host.UnrecoverableError sections ----
+
+    [Test]
+    public void FromConfig_WithoutTheNewSections_UsesTheirDefaults() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir }).Unwrap();
+
+        Assert.Multiple(() => {
+            Assert.That(result.Transport, Is.EqualTo(NetworkTransportKind.WebSocket));
+            Assert.That(result.ColdStore, Is.EqualTo(Cold.ColdStoreSettings.Default));
+            Assert.That(result.ColdStore.WalFlushThresholdBytes, Is.EqualTo(4 * 1024 * 1024));
+            Assert.That(result.ColdStore.WalFlushInterval, Is.EqualTo(TimeSpan.FromMilliseconds(100)));
+            Assert.That(result.UnrecoverableShutdownBudget, Is.EqualTo(TimeSpan.FromSeconds(5)));
+            Assert.That(result.UnrecoverableExitWatchdog, Is.EqualTo(TimeSpan.FromSeconds(7)));
+        });
+    }
+
+    [Test]
+    public void Load_ReadsTheDurabilityAndUnrecoverableErrorSettingsFromARealFile() {
+        File.WriteAllText(Path.Combine(dir, GeneratorConfigLoader.ConfigFileName), $$"""
+            {
+              "Host": { "ColdPath": {{System.Text.Json.JsonSerializer.Serialize(dir)}}, "UnrecoverableError": { "ShutdownBudget": "00:00:02", "ExitWatchdog": "00:00:03" } },
+              "Network": { "Transport": "WebSocket" },
+              "Durability": { "WalFlushThresholdBytes": 65536, "WalFlushInterval": "00:00:00.250", "EvictionBatchThresholdBytes": 1024 }
+            }
+            """);
+
+        var result = RhinoHostOptions.Load(dir).Unwrap();
+
+        Assert.Multiple(() => {
+            Assert.That(result.ColdStore.WalFlushThresholdBytes, Is.EqualTo(65536));
+            Assert.That(result.ColdStore.WalFlushInterval, Is.EqualTo(TimeSpan.FromMilliseconds(250)));
+            Assert.That(result.ColdStore.EvictionBatchThresholdBytes, Is.EqualTo(1024));
+            Assert.That(result.UnrecoverableShutdownBudget, Is.EqualTo(TimeSpan.FromSeconds(2)));
+            Assert.That(result.UnrecoverableExitWatchdog, Is.EqualTo(TimeSpan.FromSeconds(3)));
+        });
+    }
+
+    [Test]
+    public void FromConfig_WithAnUnknownTransport_ReturnsAnError_NotAnException() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir }, network: new NetworkConfig { Transport = "Udp" });
+
+        Assert.That(result.IsError(), Is.True);
+        Assert.That(result.GetError().Kind, Is.EqualTo(ErrorKind.SystemFailure));
+    }
+
+    [Test]
+    public void FromConfig_WithAnInvalidWalFlushInterval_ReturnsAnError() {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir }, durability: new DurabilityConfig { WalFlushInterval = "soon" });
+
+        Assert.That(result.IsError(), Is.True);
+    }
+
+    [TestCase(0L)]
+    [TestCase(-1L)]
+    public void FromConfig_WithANonPositiveWalFlushThreshold_ReturnsAnError(long threshold) {
+        var result = RhinoHostOptions.FromConfig(new HostConfig { ColdPath = dir }, durability: new DurabilityConfig { WalFlushThresholdBytes = threshold });
+
+        Assert.That(result.IsError(), Is.True);
+    }
+
+    [Test]
+    public void FromConfig_WithAnInvalidShutdownBudget_ReturnsAnError() {
+        var host = new HostConfig { ColdPath = dir, UnrecoverableError = new UnrecoverableErrorConfig { ShutdownBudget = "later" } };
+
+        Assert.That(RhinoHostOptions.FromConfig(host).IsError(), Is.True);
+    }
+
     // ---- Load: reads the real rdbsettings.json file ----
 
     [Test]

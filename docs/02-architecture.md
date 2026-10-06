@@ -1074,6 +1074,18 @@ direct HTTP/WebSocket host (mature libraries used as-is, not reinvented) rather
 than a full framework, to avoid paying for controller/DI/middleware overhead that
 this project has no use for.
 
+### Procedures (added 2026-10-06)
+
+Clients call `[Procedure]` methods: static methods in one of two shapes, picked by the first parameter.
+Transaction-only (`{Db}TxCtx`, Root or singleton Child) runs as exactly one synchronous transaction; general
+(`RhinoCtx`) is async and opens as many transactions as it needs. `ProcedureGenerator` emits each one's handler
+(decode args in the project's `ClientProtocol`, call, encode the value), its client-side twins and
+`AddGeneratedProcedures()`. Dispatch is `RhinoHost.DispatchProcedureAsync`, routed by `NameHash`. A procedure's
+returned or thrown errors are its request's outcome, never an engine-health signal; clients get only a kind and a
+custom code, with engine kinds collapsed to `ServerUnavailable`. User guide:
+[manual/procedures.md](manual/procedures.md). Every setting, including the transport that decides which delivery
+modes compile (RHINO040), lives in `rdbsettings.json`: [manual/configuration.md](manual/configuration.md).
+
 ### Root/Child database hosting (added 2026-10-04)
 
 A process still hosts exactly one **Root** database (`AddDatabase`, unchanged — see

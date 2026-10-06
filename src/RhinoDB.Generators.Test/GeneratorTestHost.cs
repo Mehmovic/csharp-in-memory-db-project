@@ -14,13 +14,18 @@ using RhinoDB.SchemaContracts;
 namespace RhinoDB.Generators.Test;
 
 // Compiles a small source snippet through the real TableGenerator, emits it to
-// an in-memory assembly, and loads it into a collectible AssemblyLoadContext -
+// an in-memory assembly, and loads it into its own AssemblyLoadContext -
 // tests assert real behavior against the generated types (via `dynamic`, since
 // they don't exist at this project's own compile time), not a snapshot/string
 // compare of the generated source.
 static internal class GeneratorTestHost {
     static private readonly ImmutableArray<MetadataReference> References = BuildReferences();
     static private readonly ImmutableArray<IIncrementalGenerator> SerializationGenerators = BuildSerializationGenerators();
+
+    // DEBUG for the TestOnly* hooks, plus what a real net11.0 build defines - MemoryPack's generated formatters pick their
+    // interface shape with #if NET7_0_OR_GREATER, and without it they don't compile.
+    static private readonly string[] PreprocessorSymbols =
+        ["DEBUG", "NET", "NETCOREAPP", .. Enumerable.Range(5, 7).Select(major => $"NET{major}_0_OR_GREATER")];
 
     static public (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoad(
         string source, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
@@ -68,6 +73,28 @@ static internal class GeneratorTestHost {
         string source, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
         CompileAndLoad(source, SerializationGenerators, testName, ImmutableArray<AdditionalText>.Empty);
 
+    // Real MemoryPack/MessagePack generators plus a chosen ClientProtocol - for wire-format tests that compare RhinoDB's
+    // hand-written envelopes against what the real serializers produce for an equivalent type.
+    static public (Assembly Assembly, ImmutableArray<Diagnostic> GeneratorDiagnostics) CompileAndLoadWithSerializationGeneratorsAndClientProtocol(
+        string source, ClientProtocolKind clientProtocol, [System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
+        CompileAndLoad(source, SerializationGenerators, testName,
+            ImmutableArray.Create<AdditionalText>(new InMemoryAdditionalText("rdbsettings.json", $$$"""{"Generator": {"ClientProtocol": "{{{clientProtocol}}}"}}""")));
+
+    // Runs every RhinoDB generator and returns their diagnostics without emitting or throwing - for tests that expect
+    // a generator to reject the source.
+    static public ImmutableArray<Diagnostic> GeneratorDiagnostics(string source, string? configJson = null) {
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
+        var compilation = CSharpCompilation.Create($"Diag_{Guid.NewGuid():N}", [CSharpSyntaxTree.ParseText(source, parseOptions)], References,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var additionalTexts = configJson is null
+            ? ImmutableArray<AdditionalText>.Empty
+            : ImmutableArray.Create<AdditionalText>(new InMemoryAdditionalText("rdbsettings.json", configJson));
+        var generators = new IIncrementalGenerator[] { new TableGenerator(), new CustomTypeGenerator(), new LifecycleHookGenerator(), new ProcedureGenerator(), new ChildDatabaseGenerator(), new TransactionSugarGenerator() };
+        var driver = CSharpGeneratorDriver.Create(generators).AddAdditionalTexts(additionalTexts);
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out var diagnostics);
+        return diagnostics;
+    }
+
     // Runs DbErrorGenerator alone over a source snippet and returns its emitted trees by hint
     // name. DbErrorGenerator has no [Table] fixture to compile against, so it cannot go through
     // CompileAndLoad - and re-deriving a driver here would duplicate the reference set.
@@ -95,7 +122,7 @@ static internal class GeneratorTestHost {
     /// </summary>
     static public Dictionary<string, string> RunTableGenerator(string source, string testName) {
         var assemblyName = $"Gen_{testName}_{Guid.NewGuid():N}";
-        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: ["DEBUG"]);
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: PreprocessorSymbols);
         var tree = CSharpSyntaxTree.ParseText(source, parseOptions);
         var compilation = CSharpCompilation.Create(assemblyName, [tree], References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -119,7 +146,7 @@ static internal class GeneratorTestHost {
         // uses whatever options it is given - defaulting to no symbols. Without the second one
         // every `#if DEBUG` in generated code is compiled out and the TestOnly* fault hooks
         // silently disappear.
-        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: ["DEBUG"]);
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest, preprocessorSymbols: PreprocessorSymbols);
         var tree = CSharpSyntaxTree.ParseText(source, parseOptions);
 
         var compilation = CSharpCompilation.Create(
@@ -128,8 +155,8 @@ static internal class GeneratorTestHost {
             References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        var generators = ImmutableArray.Create<IIncrementalGenerator>(new TableGenerator(), new CustomTypeGenerator(), new FrozenSchemaGenerator(), new LifecycleHookGenerator(), new RpcCommandGenerator(), new ChildDatabaseGenerator(), new TransactionSugarGenerator()).AddRange(extraGenerators);
-        var driver = CSharpGeneratorDriver.Create(generators.ToArray()).AddAdditionalTexts(additionalTexts);
+        var generators = ImmutableArray.Create<IIncrementalGenerator>(new TableGenerator(), new CustomTypeGenerator(), new FrozenSchemaGenerator(), new LifecycleHookGenerator(), new ProcedureGenerator(), new ChildDatabaseGenerator(), new TransactionSugarGenerator()).AddRange(extraGenerators);
+        var driver = CSharpGeneratorDriver.Create(generators.Select(g => g.AsSourceGenerator()), additionalTexts, parseOptions);
         driver.RunGeneratorsAndUpdateCompilation(compilation, out var driverOutput, out var generatorDiagnostics);
 
         // Re-parse the driver output with DEBUG declared. The driver parses the trees a
@@ -154,7 +181,11 @@ static internal class GeneratorTestHost {
         }
 
         peStream.Position = 0;
-        var context = new AssemblyLoadContext(assemblyName, isCollectible: true);
+        // Not collectible, on purpose. Generated code rents ArrayPool<UndoRecord<Row>>.Shared / ArrayPool<TRow>.Shared over
+        // types from this assembly, and SharedArrayPool<T> keeps a [ThreadStatic] cache: unloading a collectible context then
+        // hits dotnet/runtime#134931 (freed thread-static data corrupts the GC handle table), which crashed the test host on
+        // Linux in ~1 run of 5 (0 in 20 without unloading). Revisit once the runtime fix ships.
+        var context = new AssemblyLoadContext(assemblyName, isCollectible: false);
         return (context.LoadFromStream(peStream), generatorDiagnostics);
     }
 
@@ -246,6 +277,20 @@ static internal class GeneratorTestHost {
         var method = type.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException($"Method '{methodName}' not found on '{typeName}'.");
         return method.Invoke(null, args);
+    }
+
+    // Runs one DiagnosticAnalyzer over a source snippet with an optional in-memory rdbsettings.json, returning only
+    // the analyzer's own diagnostics (compiler errors in the snippet are not this helper's concern).
+    static public ImmutableArray<Diagnostic> RunAnalyzer(Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer analyzer, string source, string? settingsJson = null) {
+        var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest));
+        var compilation = CSharpCompilation.Create($"Analyzer_{Guid.NewGuid():N}", [tree], References,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var additionalFiles = settingsJson is null
+            ? ImmutableArray<AdditionalText>.Empty
+            : ImmutableArray.Create<AdditionalText>(new InMemoryAdditionalText("rdbsettings.json", settingsJson));
+        var options = new Microsoft.CodeAnalysis.Diagnostics.AnalyzerOptions(additionalFiles);
+        return Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzerExtensions.WithAnalyzers(compilation, [analyzer], options)
+            .GetAnalyzerDiagnosticsAsync().GetAwaiter().GetResult();
     }
 
     private sealed class InMemoryAdditionalText(string path, string text) : AdditionalText {

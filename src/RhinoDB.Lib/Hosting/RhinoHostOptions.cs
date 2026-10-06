@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 
+using RhinoDB.Lib.Cold;
 using RhinoDB.SchemaContracts;
 
 namespace RhinoDB.Lib.Hosting;
@@ -22,6 +23,10 @@ public sealed class RhinoHostOptions {
     public int HttpPort { get; private init; } = 7777;
     public bool HttpEnabled { get; private init; }
     public uint ServerVersion { get; private init; }
+    public NetworkTransportKind Transport { get; private init; } = NetworkTransportKind.WebSocket;
+    public ColdStoreSettings ColdStore { get; private init; } = ColdStoreSettings.Default;
+    public TimeSpan UnrecoverableShutdownBudget { get; private init; } = TimeSpan.FromSeconds(5);
+    public TimeSpan UnrecoverableExitWatchdog { get; private init; } = TimeSpan.FromSeconds(7);
 
     static public Result<RhinoHostOptions> Load(string configDirectory) {
         RhinoDbConfig config;
@@ -31,10 +36,11 @@ public sealed class RhinoHostOptions {
             return Result<RhinoHostOptions>.Error(DbError.SystemFailure(ex));
         }
 
-        return FromConfig(config.Host, config.Server.PackedVersion);
+        return FromConfig(config.Host, config.Server.PackedVersion, config.Durability, config.Network);
     }
 
-    static public Result<RhinoHostOptions> FromConfig(HostConfig host, uint serverVersion = 0) {
+    static public Result<RhinoHostOptions> FromConfig(
+        HostConfig host, uint serverVersion = 0, DurabilityConfig? durability = null, NetworkConfig? network = null) {
         if (!TryParseMode(host.Mode, out var mode))
             return Result<RhinoHostOptions>.Error(DbError.SystemFailure(new ArgumentException(
                 $"Unknown Host.Mode '{host.Mode}' - expected run, replay, migrate, wal-prune, or wal-migrate.")));
@@ -48,6 +54,18 @@ public sealed class RhinoHostOptions {
             var resolved = ResolveUtcTicks(pruneText, "Host.WalPruneOlderThan");
             if (resolved.IsError()) return resolved.Void();
             walPruneOlderThanUtcTicks = resolved.Unwrap();
+        }
+
+        NetworkTransportKind transport;
+        ColdStoreSettings coldStore;
+        TimeSpan shutdownBudget, exitWatchdog;
+        try {
+            transport = NetworkTransportParser.Parse((network ?? new NetworkConfig()).Transport);
+            coldStore = ColdStoreSettings.FromConfig(durability ?? new DurabilityConfig());
+            shutdownBudget = host.UnrecoverableError.ResolvedShutdownBudget;
+            exitWatchdog = host.UnrecoverableError.ResolvedExitWatchdog;
+        } catch (GeneratorConfigException ex) {
+            return Result<RhinoHostOptions>.Error(DbError.SystemFailure(ex));
         }
 
         var coldPath = string.IsNullOrWhiteSpace(host.ColdPath) ? DefaultColdPath() : host.ColdPath;
@@ -64,6 +82,10 @@ public sealed class RhinoHostOptions {
             HttpPort = host.HttpPort,
             HttpEnabled = host.HttpEnabled ?? (mode == RhinoRunMode.Run),
             ServerVersion = serverVersion,
+            Transport = transport,
+            ColdStore = coldStore,
+            UnrecoverableShutdownBudget = shutdownBudget,
+            UnrecoverableExitWatchdog = exitWatchdog,
         };
     }
 

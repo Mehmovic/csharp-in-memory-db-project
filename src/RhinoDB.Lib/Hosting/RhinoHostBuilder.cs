@@ -1,11 +1,10 @@
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Execution;
+using RhinoDB.Lib.Procedures;
 using RhinoDB.Lib.Realtime;
 
 namespace RhinoDB.Lib.Hosting;
-
-public delegate Task<Result<ReadOnlyMemory<byte>>> RpcCommandHandler(RhinoHost host, ReadOnlyMemory<byte> body, CancellationToken ct);
 
 public sealed record RestRequest(string Method, string Route, IReadOnlyDictionary<string, string> Query, ReadOnlyMemory<byte> Body);
 public sealed record RestResponse(int StatusCode, ReadOnlyMemory<byte> Body) {
@@ -17,11 +16,12 @@ public sealed class RhinoHostBuilder {
     private readonly string configDirectory;
     private IDatabaseRegistration? registration;
     private readonly Dictionary<Type, object> tableCompatAdapters = [];
-    private readonly Dictionary<uint, RpcCommandHandler> rpcCommands = [];
+    private readonly Dictionary<uint, ProcedureDescriptor> procedures = [];
     private readonly Dictionary<(string Method, string Route), RestCommandHandler> restCommands = [];
     private readonly Dictionary<Type, IChildDatabaseRegistry> childRegistrations = [];
     private Func<uint, bool>? isAppVersionInvalid;
     private UnrecoverableErrorPolicy unrecoverableErrorPolicy = UnrecoverableErrorPolicy.ExitProcess;
+    private Action<ProcedureFault> onProcedureFault = ProcedureFaults.WriteToStandardError;
     public event Action<ArchiveRetentionRunReport>? OnRetentionRun;
 
     private RhinoHostBuilder(string configDirectory) {
@@ -50,8 +50,15 @@ public sealed class RhinoHostBuilder {
         return this;
     }
 
-    public RhinoHostBuilder AddRpcCommand(uint commandHash, RpcCommandHandler handler) {
-        return !rpcCommands.TryAdd(commandHash, handler) ? throw new ArgumentException($"An RPC command with hash {commandHash} is already registered.", nameof(commandHash)) : this;
+    public RhinoHostBuilder AddProcedure(ProcedureDescriptor procedure) {
+        return !procedures.TryAdd(procedure.Hash, procedure)
+            ? throw new ArgumentException($"A procedure with hash {procedure.Hash} is already registered ('{procedures[procedure.Hash].Name}').", nameof(procedure))
+            : this;
+    }
+
+    public RhinoHostBuilder OnProcedureFault(Action<ProcedureFault> handler) {
+        onProcedureFault = handler;
+        return this;
     }
 
     public RhinoHostBuilder AddRestCommand(string method, string route, RestCommandHandler handler) {
@@ -101,12 +108,13 @@ public sealed class RhinoHostBuilder {
         if (result.IsError()) return result.Void();
         var builtDb = result.Unwrap();
 
-        var unrecoverableErrorHandler = new UnrecoverableErrorHandler(unrecoverableErrorPolicy);
+        var unrecoverableErrorHandler = new UnrecoverableErrorHandler(
+            unrecoverableErrorPolicy, shutdownBudget: reg.Options.UnrecoverableShutdownBudget, exitWatchdog: reg.Options.UnrecoverableExitWatchdog);
         var rootName = $"{builtDb.GetType().Name} (Root)";
         ((IHostedDatabase)builtDb).OnPoisoned = error => unrecoverableErrorHandler.Trigger(rootName, error);
 
         foreach (var childRegistration in childRegistrations.Values) {
-            childRegistration.AttachRootColdPath(reg.ColdPath);
+            childRegistration.AttachRootColdPath(reg.ColdPath, reg.Options.ColdStore);
             if (reg.ChainLog is { } chainLog) childRegistration.AttachChainLog(chainLog);
             childRegistration.AttachUnrecoverableErrorHandler(unrecoverableErrorHandler);
         }
@@ -127,7 +135,7 @@ public sealed class RhinoHostBuilder {
         if (policy is not null)
             collector = reg.StartArchiveCollector(builtDb, policy, report => OnRetentionRun?.Invoke(report));
 
-        var host = new RhinoHost(builtDb, tableCompatAdapters, rpcCommands, restCommands, childRegistrations, isAppVersionInvalid ?? (_ => false), reg.ServerVersion, reg.ChainLog, collector);
+        var host = new RhinoHost(builtDb, tableCompatAdapters, procedures, onProcedureFault, restCommands, childRegistrations, isAppVersionInvalid ?? (_ => false), reg.ServerVersion, reg.ChainLog, collector);
         unrecoverableErrorHandler.Shutdown = host.ShutdownForUnrecoverableErrorAsync;
 
         TryLoadNetworkHostProvider();
@@ -162,6 +170,7 @@ public sealed class RhinoHostBuilder {
         RhinoRunMode Mode { get; }
         uint ServerVersion { get; }
         ChainLog? ChainLog { get; }
+        RhinoHostOptions Options { get; }
     }
 
     private sealed class DatabaseRegistration<TDb, TTx>(DatabaseOptions<TDb, TTx> options)
@@ -176,6 +185,7 @@ public sealed class RhinoHostBuilder {
         public uint ServerVersion => parsedOptions?.ServerVersion ?? 0;
         public RhinoRunMode Mode => parsedOptions?.Mode ?? RhinoRunMode.Run;
         public ChainLog? ChainLog { get; private set; }
+        public RhinoHostOptions Options => parsedOptions ?? throw new InvalidOperationException("Options were read before RunAsync parsed them.");
         public string ColdPath => parsedOptions?.ColdPath ?? throw new InvalidOperationException("ColdPath was read before RunAsync resolved it.");
 
         public ArchiveRetentionPolicy? ConfiguredRetention() => builtDb?.ConfiguredArchiveRetention;
@@ -239,7 +249,7 @@ public sealed class RhinoHostBuilder {
         Func<TDb, Result>? migrateWalArchive,
         IChainResolver chainResolver
     ) where TDb : DbContext<TTx> where TTx : ITransaction {
-        var coldResult = ColdStore.Open(options.ColdPath);
+        var coldResult = ColdStore.Open(options.ColdPath, options.ColdStore);
         if (coldResult.IsError()) return coldResult.Void();
         var cold = coldResult.Unwrap();
         cold.AttachChainResolver(chainResolver);
@@ -336,7 +346,8 @@ public sealed class RhinoHostBuilder {
 public sealed class RhinoHost : IDisposable {
     private readonly object database;
     private readonly IReadOnlyDictionary<Type, object> tableCompatAdapters;
-    private readonly IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands;
+    private readonly IReadOnlyDictionary<uint, ProcedureDescriptor> procedures;
+    private readonly Action<ProcedureFault> onProcedureFault;
     private readonly IReadOnlyDictionary<(string Method, string Route), RestCommandHandler> restCommands;
     private readonly IReadOnlyDictionary<Type, IChildDatabaseRegistry> childRegistrations;
     private readonly Func<uint, bool> isAppVersionInvalid;
@@ -348,13 +359,14 @@ public sealed class RhinoHost : IDisposable {
 
     internal RhinoHost(
         object database, IReadOnlyDictionary<Type, object> tableCompatAdapters,
-        IReadOnlyDictionary<uint, RpcCommandHandler> rpcCommands,
+        IReadOnlyDictionary<uint, ProcedureDescriptor> procedures, Action<ProcedureFault> onProcedureFault,
         IReadOnlyDictionary<(string Method, string Route), RestCommandHandler> restCommands,
         IReadOnlyDictionary<Type, IChildDatabaseRegistry> childRegistrations, Func<uint, bool> isAppVersionInvalid,
         uint serverVersion, ChainLog? chainLog, IDisposable? collector) {
         this.database = database;
         this.tableCompatAdapters = tableCompatAdapters;
-        this.rpcCommands = rpcCommands;
+        this.procedures = procedures;
+        this.onProcedureFault = onProcedureFault;
         this.restCommands = restCommands;
         this.childRegistrations = childRegistrations;
         this.isAppVersionInvalid = isAppVersionInvalid;
@@ -381,10 +393,29 @@ public sealed class RhinoHost : IDisposable {
             ? (TableCompatOptions<TRow>)options
             : null;
 
-    public async Task<Result<ReadOnlyMemory<byte>>> DispatchRpcAsync(uint commandHash, ReadOnlyMemory<byte> body, CancellationToken ct) {
-        if (!rpcCommands.TryGetValue(commandHash, out var handler))
-            return Result<ReadOnlyMemory<byte>>.Error(DbError.UnknownRpcCommand());
-        return await handler(this, body, ct);
+    public IReadOnlyCollection<ProcedureDescriptor> Procedures => (IReadOnlyCollection<ProcedureDescriptor>)procedures.Values;
+
+    public async Task<Result<ReadOnlyMemory<byte>>> DispatchProcedureAsync(uint hash, Session session, ReadOnlyMemory<byte> body, CancellationToken ct) {
+        if (!procedures.TryGetValue(hash, out var procedure))
+            return Result<ReadOnlyMemory<byte>>.Error(DbError.UnknownProcedure());
+
+        Result<ReadOnlyMemory<byte>> result;
+        try {
+            result = await procedure.Handler(this, session, body, ct);
+        } catch (Exception ex) {
+            result = Result<ReadOnlyMemory<byte>>.Error(DbError.ProcedureFailed(ex));
+        }
+
+        if (result.IsError() && result.GetError() is { Kind: ErrorKind.ProcedureFailed or ErrorKind.ProcedureArgsInvalid } fault)
+            ReportFault(procedure, fault, session);
+        return result;
+    }
+
+    private void ReportFault(ProcedureDescriptor procedure, DbError fault, Session session) {
+        try {
+            var exception = fault.ToException();
+            onProcedureFault(new ProcedureFault(procedure.Name, procedure.Hash, fault.Kind, exception.InnerException ?? exception, session));
+        } catch { /* a logging hook must never turn a request fault into a crash */ }
     }
 
     public IEnumerable<(string Method, string Route)> RegisteredRestCommands => restCommands.Keys;

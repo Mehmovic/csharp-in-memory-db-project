@@ -4,6 +4,7 @@ using System.Net.WebSockets;
 
 using RhinoDB.Core;
 using RhinoDB.Lib.Hosting;
+using RhinoDB.Lib.Procedures;
 using RhinoDB.Lib.Realtime;
 
 namespace RhinoDB.Lib.Server.Realtime;
@@ -76,24 +77,41 @@ public sealed class WsTransport(RhinoHost host) : IRealtimeTransport {
     }
 
     static private (WebSocketCloseStatus Status, string Description) CloseStatusFor(DbError error) {
-        var status = error.Kind == ErrorKind.SystemFailure ? WebSocketCloseStatus.InternalServerError : WebSocketCloseStatus.PolicyViolation;
-        var description = error.Kind == ErrorKind.Custom ? $"{error.Kind}:{error.CustomCode}" : error.Kind.ToString();
+        var (kind, customCode) = ClientErrors.ForClient(error);
+        var status = kind is ErrorKind.SystemFailure or ErrorKind.ServerUnavailable ? WebSocketCloseStatus.InternalServerError : WebSocketCloseStatus.PolicyViolation;
+        var description = kind == ErrorKind.Custom ? $"{kind}:{customCode}" : kind.ToString();
         return (status, description);
     }
 
     private async Task HandleFrameAsync(Session session, Frame frame, CancellationToken ct) {
         if (frame.Type == FrameType.Rpc) {
-            var request = RpcFrameCodec.DecodeRequest(frame.Payload);
-            var dispatchResult = await host.DispatchRpcAsync(request.CommandHash, request.Body, ct);
-            var (kind, body) = dispatchResult.IsOk()
-                ? (ErrorKind.None, dispatchResult.Unwrap())
-                : (dispatchResult.GetError().Kind, ReadOnlyMemory<byte>.Empty);
-            var resultPayload = RpcFrameCodec.EncodeResult(request.RequestId, kind, body);
+            if (!RpcFrameCodec.TryDecodeRequest(frame.Payload, out var request)) {
+                if (connections.TryGetValue(session.ConnectionId, out var socket))
+                    await socket.CloseAsync(WebSocketCloseStatus.ProtocolError, "An Rpc frame needs an 8-byte header: procedure hash, request id.", ct);
+                return;
+            }
+
+            Result<ReadOnlyMemory<byte>> dispatchResult;
+            try {
+                dispatchResult = await host.DispatchProcedureAsync(request.ProcedureHash, session, request.Body, ct);
+            } catch (Exception ex) {
+                dispatchResult = Result<ReadOnlyMemory<byte>>.Error(DbError.ProcedureFailed(ex));
+            }
+
+            var (kind, customCode, body) = dispatchResult.IsOk()
+                ? (ErrorKind.None, (ushort)0, dispatchResult.Unwrap())
+                : ToClient(dispatchResult.GetError());
+            var resultPayload = RpcFrameCodec.EncodeResult(request.RequestId, kind, customCode, body);
             await SendAsync(session.ConnectionId, new Frame(FrameType.RpcResult, resultPayload), Delivery.ReliableOrdered, ct);
             return;
         }
 
         await SendAsync(session.ConnectionId, new Frame(FrameType.Ack, frame.Payload), Delivery.ReliableOrdered, ct);
+    }
+
+    static private (ErrorKind Kind, ushort CustomCode, ReadOnlyMemory<byte> Body) ToClient(DbError error) {
+        var (kind, customCode) = ClientErrors.ForClient(error);
+        return (kind, customCode, ReadOnlyMemory<byte>.Empty);
     }
 
     public async ValueTask SendAsync(ConnectionId connectionId, Frame frame, Delivery delivery, CancellationToken ct) {

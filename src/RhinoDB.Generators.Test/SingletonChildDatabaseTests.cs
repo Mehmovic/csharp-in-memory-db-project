@@ -51,6 +51,7 @@ public class SingletonChildDatabaseTests {
         public static class TestHelpers {
             public static async Task<RhinoHost> BuildWithoutTouchingTheSingleton(string dir) =>
                 (await RhinoHostBuilder.Create(dir)
+                    .OnUnrecoverableError(UnrecoverableErrorPolicy.Callback(_ => { }))
                     .AddGeneratedChildDatabases()
                     .AddDatabase<RootDb, RootDbTransaction>(o => o.CreateDb = cold => new RootDb(cold))
                     .BuildAsync()).Unwrap();
@@ -113,6 +114,7 @@ public class SingletonChildDatabaseTests {
             public static async Task<RhinoHost> BuildWithCustomChildLoad(string dir) {
                 CustomLoads = 0;
                 return (await RhinoHostBuilder.Create(dir)
+                    .OnUnrecoverableError(UnrecoverableErrorPolicy.Callback(_ => { }))
                     .AddDatabase<RootDb, RootDbTransaction>(o => o.CreateDb = cold => new RootDb(cold))
                     .AddChildDatabase<SessionDb, SessionDbTransaction, string>(o => {
                         o.CreateDb = cold => new SessionDb(cold);
@@ -369,6 +371,7 @@ public class SingletonChildDatabaseTests {
             public static class Helpers {
                 public static async Task<bool> Run(string dir) {
                     var host = (await RhinoHostBuilder.Create(dir)
+                    .OnUnrecoverableError(UnrecoverableErrorPolicy.Callback(_ => { }))
                         .AddGeneratedChildDatabases()
                         .AddDatabase<RootDb, RootDbTransaction>(o => o.CreateDb = cold => new RootDb())
                         .BuildAsync()).Unwrap();

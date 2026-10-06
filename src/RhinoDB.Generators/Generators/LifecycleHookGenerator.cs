@@ -125,9 +125,9 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
                 .AddRange(nested.Left.Right)
                 .AddRange(nested.Right));
 
-        var combined = emitTargets.Combine(allHooks);
+        var combined = emitTargets.Combine(allHooks).Combine(LibAccess.OverrideModifier(context));
 
-        context.RegisterSourceOutput(combined, static (spc, pair) => Emit(spc, pair.Left, pair.Right));
+        context.RegisterSourceOutput(combined, static (spc, input) => Emit(spc, input.Left.Left, input.Left.Right, input.Right));
     }
 
     static private IncrementalValueProvider<ImmutableArray<HookModel>> HookProviderForKind(
@@ -231,7 +231,7 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
         return results.ToImmutable();
     }
 
-    static private void Emit(SourceProductionContext context, ImmutableArray<DatabaseModel> databases, ImmutableArray<HookModel> hooks) {
+    static private void Emit(SourceProductionContext context, ImmutableArray<DatabaseModel> databases, ImmutableArray<HookModel> hooks, string overrideModifier) {
         foreach (var hook in hooks)
             if (hook.Diagnostic is not null) context.ReportDiagnostic(hook.Diagnostic);
 
@@ -243,7 +243,7 @@ public sealed class LifecycleHookGenerator : IIncrementalGenerator {
                 if (!resolved.TryGetValue((kind, database.FullName), out var methodReference)) continue;
                 var paramList = TakesSession(kind) ? "Session session" : "";
                 var ctxArgs = TakesSession(kind) ? "session.Identity, session" : "Identity.System";
-                body.AppendLine($"    protected override Task<Result> {OverrideMethodNameFor(kind)}({paramList}) => {methodReference}(new RhinoCtx(this, {ctxArgs}));");
+                body.AppendLine($"    {overrideModifier} override Task<Result> {OverrideMethodNameFor(kind)}({paramList}) => {methodReference}(new RhinoCtx(this, {ctxArgs}));");
             }
             if (body.Length == 0) continue;
 

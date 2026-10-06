@@ -3,6 +3,37 @@
     "SourceParentDirectory": "RhinoContracts",
     "TargetParentDirectory": "RhinoDB",
     "SchemaDescriptorPath": "RhinoContracts/Descriptor.json",
-    "MigrationsOutputDirectory": "Migrations"
+    "MigrationsOutputDirectory": "Migrations",
+    "ClientProtocol": "Raw",
+    "DisableContractAutoPreBuild": true
+  },
+  "Server": {
+    "Version": "0.0.0",
+    "ArchiveRetention": {
+      "Enabled": false,
+      "Interval": null,
+      "KeepFor": null
+    }
+  },
+  "Host": {
+    "ColdPath": null,
+    "Mode": "run",
+    "ReplayUpToLsn": null,
+    "WalKeepGenerations": null,
+    "WalPruneOlderThan": null,
+    "HttpPort": 7777,
+    "HttpEnabled": null,
+    "UnrecoverableError": {
+      "ShutdownBudget": "00:00:05",
+      "ExitWatchdog": "00:00:07"
+    }
+  },
+  "Network": {
+    "Transport": "WebSocket"
+  },
+  "Durability": {
+    "WalFlushThresholdBytes": 4194304,
+    "WalFlushInterval": "00:00:00.100",
+    "EvictionBatchThresholdBytes": 4194304
   }
 }

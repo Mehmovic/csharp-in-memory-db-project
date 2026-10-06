@@ -24,6 +24,8 @@
     <ItemGroup>
         <ProjectReference Include="..\RhinoDB.Lib\RhinoDB.Lib.csproj"/>
         <ProjectReference Include="..\RhinoDB.Lib.Server\RhinoDB.Lib.Server.csproj"/>
+        <ProjectReference Include="..\RhinoDB.Generators\RhinoDB.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+        <ProjectReference Include="..\RhinoDB.SchemaContracts\RhinoDB.SchemaContracts.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
     </ItemGroup>
 
 </Project>

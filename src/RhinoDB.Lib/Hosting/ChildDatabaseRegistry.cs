@@ -26,7 +26,7 @@ static public class SingletonChild {
 internal interface IChildDatabaseRegistry {
     bool IsSingleton { get; }
     Task<Result> ActivateSingletonAsync();
-    void AttachRootColdPath(string rootColdPath);
+    void AttachRootColdPath(string rootColdPath, ColdStoreSettings settings);
     void AttachChainLog(ChainLog chainLog);
     void AttachUnrecoverableErrorHandler(UnrecoverableErrorHandler handler);
     IEnumerable<ColdStore> ActiveColdStores();
@@ -42,6 +42,7 @@ internal sealed class ChildDatabaseRegistry<TChildDb, TTx, TKey>(ChildDatabaseOp
     private readonly ConcurrentDictionary<TKey, TChildDb> active = new ConcurrentDictionary<TKey, TChildDb>();
     private readonly SemaphoreSlim lifecycleGate = new SemaphoreSlim(1, 1);
     private string? baseDirectory;
+    private ColdStoreSettings coldStoreSettings = ColdStoreSettings.Default;
     private ChainLog? chainLog;
     private UnrecoverableErrorHandler? unrecoverableErrorHandler;
 
@@ -50,8 +51,10 @@ internal sealed class ChildDatabaseRegistry<TChildDb, TTx, TKey>(ChildDatabaseOp
     public async Task<Result> ActivateSingletonAsync() =>
         (await GetOrActivateAsync((TKey)(object)SingletonChild.Key, CancellationToken.None)).Void();
 
-    public void AttachRootColdPath(string rootColdPath) =>
+    public void AttachRootColdPath(string rootColdPath, ColdStoreSettings settings) {
         baseDirectory = Path.Combine(rootColdPath, ChildrenDirectoryName, typeof(TChildDb).Name);
+        coldStoreSettings = settings;
+    }
 
     public void AttachChainLog(ChainLog log) => chainLog = log;
 
@@ -80,7 +83,7 @@ internal sealed class ChildDatabaseRegistry<TChildDb, TTx, TKey>(ChildDatabaseOp
     private async Task<Result<TChildDb>> ActivateUnderGateAsync(TKey key, Func<ColdStore, TChildDb> createDb) {
         var dir = Path.Combine(baseDirectory!, DirectoryNameFor(key));
         Directory.CreateDirectory(dir);
-        var coldResult = ColdStore.Open(dir);
+        var coldResult = ColdStore.Open(dir, coldStoreSettings);
         if (coldResult.IsError()) return coldResult.Void();
         var cold = coldResult.Unwrap();
         if (chainLog is not null) cold.AttachChainResolver(chainLog.ResolverFor(ParticipantIdFor(key)));

@@ -21,7 +21,7 @@ internal sealed class DbExecutionLoop<TTx> where TTx : ITransaction {
 
     public void Resume() {
         if (runLoopTask is not null) return;
-        runLoopTask = Task.Factory.StartNew(RunLoop, TaskCreationOptions.LongRunning);
+        runLoopTask = Task.Factory.StartNew(RunLoop, TaskCreationOptions.LongRunning).Unwrap();
     }
 
     public void BeginDraining() {

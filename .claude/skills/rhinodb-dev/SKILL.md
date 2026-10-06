@@ -142,8 +142,25 @@ means sweep every production file touched in the session and move rationale to `
   participants), crash recovery completes a chain only if all prepares are on disk and all its dependencies commit. User guide: `docs/manual/multi-database-transactions.md`.
 - An operation **returns its result before its trailing sweep** (`PooledOperation.Run`) —
   anything reading table state outside the loop races it.
-- `[Procedure]` (planned, not built): one attribute, two shapes — `(RhinoCtx ctx, ...)` general,
-  `(SomeDbTransaction tx, ...)` transaction-only (Root or singleton Child only). `[Transformer]` is dropped.
+- **`[Procedure]`** (`ProcedureGenerator`, RHINO041-046): one attribute, two shapes picked by the first parameter -
+  `(RhinoCtx ctx, ...)` async general (may return `Result<T>`, caller-only), `({Db}TxCtx ctx, ...)` synchronous
+  transaction-only returning `Result` only - RHINO047, like a SpacetimeDB reducer; data reaches clients through views
+  (Root or singleton Child; the
+  generated `readonly ref struct` has `Tx`, `Session`, `Identity`, `Timestamp`, `ServerVersion`, `Random`). The
+  generator can't see generated types, so it matches `{Db}TxCtx` **by name**. Args envelopes are hand-written per
+  `ClientProtocol` (`ProcedureEnvelope`), byte-identical to the real MemoryPack/MessagePack types - MemoryPack's and
+  MessagePack's generators never see another generator's output, so "synthesize a type for them" doesn't work.
+  **Error contract:** a procedure's returned or thrown error is that request's outcome; only the engine's poison sites
+  are unrecoverable. Clients get kind + custom code only (`ClientErrors`, engine kinds -> `ServerUnavailable`).
+  `[RpcCommand]` is gone. Guide: `docs/manual/procedures.md`.
+- **Every setting lives in `rdbsettings.json`** (`RhinoDbConfig`: Generator, Server, Host, Network, Durability), read by
+  the host at startup and by generators/analyzers at compile time - generators go through `RhinoSettings.Provider`
+  (a value-equal `RhinoSettingsSnapshot`), never their own parse. Compile-time checks on settings are analyzers, e.g.
+  `DeliveryTransportAnalyzer` (RHINO040: no `Delivery.Unreliable` on WebSocket). New option: add it to the config
+  class (non-null default, `[JsonIgnore]` on computed members), the repo's `rdbsettings.json` files and
+  `docs/manual/configuration.md`.
+- **Generated overrides of `protected internal` DbContext members** use `LibAccess.OverrideModifier` - `protected` in a
+  normal assembly, `protected internal` in a friend of RhinoDB.Lib (its test projects).
 
 ## Writing tests — patterns that work
 
@@ -167,6 +184,20 @@ means sweep every production file touched in the session and move rationale to `
   and check the message for the `RHINOxxx`/`CSxxxx` id — and make sure that id is the *only* reason
   (e.g. a Child with no Persistent table used to fail for an unrelated ctor error).
 - New diagnostic ids: register them in `src/RhinoDB.Generators/AnalyzerReleases.Unshipped.md`.
+- **Diagnostics without throwing:** `GeneratorTestHost.GeneratorDiagnostics(source, configJson)`; analyzers:
+  `GeneratorTestHost.RunAnalyzer(analyzer, source, settingsJson)`.
+- **Real MemoryPack/MessagePack generators:** `CompileAndLoadWithSerializationGeneratorsAndClientProtocol`. The host
+  passes net11-style preprocessor symbols (`NET7_0_OR_GREATER`...) to the driver - MemoryPack's output doesn't compile
+  without them.
+- **`GeneratorTestHost` loads compiled fixtures into NON-collectible contexts on purpose** (dotnet/runtime#134931: unloading
+  a collectible context whose types back `ArrayPool<T>.Shared` thread-statics corrupts the GC handle table - it crashed the
+  Linux test host ~1 run in 5). Don't switch it back until the runtime fix ships.
+- **Draining waits for the loop:** `DbExecutionLoop` keeps the *unwrapped* task of its async `RunLoop`; never hand out the
+  outer `Task<Task>` of `StartNew(async ...)` - `DisposeChildAsync` closes the ColdStore (munmap) right after `DrainAsync`.
+- **Procedures under test:** dispatch like the transport does, `host.DispatchProcedureAsync(hash, session, body, ct)`,
+  with args from the generated `GeneratedProcedures.{Ns}_{Class}_{Method}.EncodeArgs(...)` (see `ProcedureTests`).
+  `RhinoDB.Lib.Server.Test` references the real generators as analyzers and has a real schema (`Wire/WireSchema.cs`)
+  for over-the-socket tests.
 
 ## Benchmarks
 

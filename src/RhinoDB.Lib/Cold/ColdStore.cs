@@ -70,11 +70,17 @@ public sealed class ColdStore : IDisposable {
         evictionBatch = new EvictionBatch(evictionBatchThresholdBytes);
     }
 
+    static public Result<ColdStore> Open(string path, ColdStoreSettings settings) =>
+        Open(path, evictionBatchThresholdBytes: settings.EvictionBatchThresholdBytes,
+            walFlushThresholdBytes: settings.WalFlushThresholdBytes, walFlushInterval: settings.WalFlushInterval);
+
     static public Result<ColdStore> Open(
         string path,
         nint sizeUpperBytes = -1,
         nint sizeNowBytes = -1,
-        long evictionBatchThresholdBytes = EvictionBatch.DefaultSizeThresholdBytes
+        long evictionBatchThresholdBytes = EvictionBatch.DefaultSizeThresholdBytes,
+        long walFlushThresholdBytes = DurabilityConfig.DefaultWalFlushThresholdBytes,
+        TimeSpan walFlushInterval = default
     ) {
         var isFreshDirectory = !Directory.Exists(path) || !Directory.EnumerateFileSystemEntries(path).Any();
 
@@ -101,14 +107,14 @@ public sealed class ColdStore : IDisposable {
         var tailEntries = Array.Empty<DecodedWalEntry>();
 
         if (File.Exists(walPath)) {
-            var openResult = WriteAheadLog.Open(walPath);
+            var openResult = WriteAheadLog.Open(walPath, walFlushThresholdBytes, walFlushInterval);
             if (openResult.IsError()) {
                 env.Dispose();
                 return Result<ColdStore>.Error(openResult.GetError());
             }
             (wal, tailEntries) = openResult.Unwrap();
         } else {
-            var createResult = WriteAheadLog.Create(walPath, Guid.NewGuid(), 0);
+            var createResult = WriteAheadLog.Create(walPath, Guid.NewGuid(), 0, walFlushThresholdBytes, walFlushInterval);
             if (createResult.IsError()) {
                 env.Dispose();
                 return Result<ColdStore>.Error(createResult.GetError());

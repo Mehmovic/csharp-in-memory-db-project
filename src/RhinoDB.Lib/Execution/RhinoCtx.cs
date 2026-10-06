@@ -10,11 +10,17 @@ public sealed class RhinoCtx {
     private readonly object? directDb;
     private readonly RhinoHost? host;
     private uint? serverVersion;
+    private LazyRhinoRandom random;
 
     public Identity Identity { get; }
     public Session? Session { get; }
 
     public uint ServerVersion => serverVersion ??= host?.ServerVersion ?? throw InvalidServerVersionException;
+
+    // Seeded once per request, on first use; the seed stays inside the engine (see LazyRhinoRandom).
+    public ref RhinoRandom Random => ref random.Value;
+
+    internal ulong? RandomSeed => random.Seed;
 
     internal RhinoHost? Host => host;
     
@@ -52,6 +58,31 @@ public sealed class RhinoCtx {
         var childResult = await ResolveChildAsync<TChildDb, TTx, TKey>(key);
         if (childResult.IsError()) return childResult.Void();
         return await childResult.Unwrap().Run(static (ctx, tx, b) => b((TChildDb)ctx, tx), body);
+    }
+
+    // Args forms: a static lambda plus its inputs, so a body that needs request values allocates no closure.
+    public Task<Result> BeginTx<TDb, TTx, TArgs>(Func<TDb, TTx, TArgs, Result> body, TArgs args) where TDb : DbContext<TTx> where TTx : ITransaction {
+        var db = ResolveRoot<TDb>();
+        return db.Run(static (ctx, tx, s) => s.Body((TDb)ctx, tx, s.Args), (Body: body, Args: args)).AsTask();
+    }
+
+    public Task<Result<T>> BeginTx<TDb, TTx, TArgs, T>(Func<TDb, TTx, TArgs, Result<T>> body, TArgs args) where TDb : DbContext<TTx> where TTx : ITransaction {
+        var db = ResolveRoot<TDb>();
+        return db.Run(static (ctx, tx, s) => s.Body((TDb)ctx, tx, s.Args), (Body: body, Args: args)).AsTask();
+    }
+
+    public async Task<Result> BeginTx<TChildDb, TTx, TKey, TArgs>(TKey key, Func<TChildDb, TTx, TArgs, Result> body, TArgs args)
+        where TChildDb : DbContext<TTx> where TTx : ITransaction where TKey : notnull {
+        var childResult = await ResolveChildAsync<TChildDb, TTx, TKey>(key);
+        if (childResult.IsError()) return childResult.Void();
+        return await childResult.Unwrap().Run(static (ctx, tx, s) => s.Body((TChildDb)ctx, tx, s.Args), (Body: body, Args: args));
+    }
+
+    public async Task<Result<T>> BeginTx<TChildDb, TTx, TKey, TArgs, T>(TKey key, Func<TChildDb, TTx, TArgs, Result<T>> body, TArgs args)
+        where TChildDb : DbContext<TTx> where TTx : ITransaction where TKey : notnull {
+        var childResult = await ResolveChildAsync<TChildDb, TTx, TKey>(key);
+        if (childResult.IsError()) return childResult.Void();
+        return await childResult.Unwrap().Run(static (ctx, tx, s) => s.Body((TChildDb)ctx, tx, s.Args), (Body: body, Args: args));
     }
 
     public PlannedMultiTx PlanMultiTx() => new PlannedMultiTx(this);

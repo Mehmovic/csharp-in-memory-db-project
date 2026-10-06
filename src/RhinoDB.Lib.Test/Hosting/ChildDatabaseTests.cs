@@ -185,6 +185,35 @@ public class ChildDatabaseTests {
     }
 
     [Test]
+    public async Task DisposeChildAsync_WaitsForTheOperationInFlight_BeforeClosingAndDeletingTheChild() {
+        // Closing the ColdStore unmaps libmdbx - doing it under a running operation is a use-after-unmap, not just lost work.
+        var builder = CreateBuilder(dir).AddChildDatabase<ChildDb, DefaultTransaction, string>(options => options.CreateDb = cold => new ChildDb(cold));
+        using var host = await BuildHostAsync(builder);
+        var child = (await host.GetOrActivateChildAsync<ChildDb, DefaultTransaction, string>("session-1")).Unwrap();
+        var childDir = Path.Combine(dir, "Children", nameof(ChildDb), "session-1");
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var operation = child.Run(_ => {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(10));
+            return Result.Ok();
+        }).AsTask();
+        Assert.That(entered.Wait(TimeSpan.FromSeconds(5)), Is.True, "the operation never started.");
+
+        var dispose = host.DisposeChildAsync<ChildDb, DefaultTransaction, string>("session-1");
+        await Task.Delay(200);
+
+        Assert.That(dispose.IsCompleted, Is.False, "the child was disposed while an operation was still running on it.");
+        Assert.That(Directory.Exists(childDir), Is.True);
+
+        release.Set();
+        Assert.That((await dispose.WaitAsync(TimeSpan.FromSeconds(5))).IsOk(), Is.True);
+        Assert.That((await operation).IsOk(), Is.True, "the in-flight operation finished normally before the child closed.");
+        Assert.That(Directory.Exists(childDir), Is.False);
+        host.GetDatabase<RootDb>().Cold!.Dispose();
+    }
+
+    [Test]
     public async Task DisposedChild_RejectsFurtherWorkOnTheStaleReference() {
         var builder = CreateBuilder(dir).AddChildDatabase<ChildDb, DefaultTransaction, string>(options => options.CreateDb = cold => new ChildDb(cold));
         using var host = await BuildHostAsync(builder);
