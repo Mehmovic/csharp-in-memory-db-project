@@ -40,6 +40,30 @@ gets its diff source from the same ring"). Actual order became Stages 1-5
 → Stage 6, not Stages 1-5 → Stage 7+8 directly as the paragraph above still
 describes.
 
+## Current status (updated 2026-10-06)
+
+| Stage | Status |
+|---|---|
+| 1-5, 5.5: storage, indexes, transactions, cold storage, WAL durability | ✅ done |
+| 7: networking / hosting | 🟡 mostly built (see Stage 7): host, WebSocket transport, handshake, REST commands, procedures, Root/Child hosting. Missing: anything that pushes data to clients, which is Stage 8 |
+| 8: subscribe-and-diff client access | ⏳ designed, not built: **the next big piece** |
+| 6: IDC | ⏳ designed, not built, after Stage 7+8 |
+| 9+: soccer manager game | not started |
+
+Built alongside Stage 7 rather than as stages of their own (details in [Architecture](02-architecture.md) and the
+user guides in [manual/](manual/)):
+- **Multi-database transactions:** `PlanMultiTx` / `LockMultiTx` across the Root and its Children; two-phase commit
+  with crash recovery and early lock release ([guide](manual/multi-database-transactions.md)).
+- **Root/Child hosting:** keyed Children activated on demand, singleton Children that live like the Root.
+- **Fail fast:** an unrecoverable engine error exits the process for the supervisor to restart
+  ([guide](manual/operations.md)).
+- **One settings file**, `rdbsettings.json`, read by the host and by the generators and analyzers
+  ([guide](manual/configuration.md)).
+- **Prefs:** a per-process durable key/value store for server bookkeeping, like Unity's `PlayerPrefs`
+  ([guide](manual/prefs.md)).
+
+**Next:** Stage 8 (subscriptions and diffs to clients), then the client SDK generator, then a proof-of-concept game.
+
 ## Stage 1 — Storage engine ✅ done
 
 `DenseArray<T>` — dense packed struct array, swap-remove delete, chunked growth
@@ -865,17 +889,32 @@ implementation since the shape affects the declarative surface):
 Per-table delivery-guarantee declaration (`Reliable` vs. lossy), per-connection
 sender loop with opportunistic last-write-per-key merge.
 
-## Stage 7 — Networking / hosting ⏳ not started, built together with Stage 8
+## Stage 7 — Networking / hosting 🟡 mostly built (2026-10-02 → 2026-10-06), finished together with Stage 8
 
-Minimal direct HTTP/WebSocket host. Built together with Stage 8 (not before
-it, and not after — the two ship as one push, per the 2026-09-13 build-order
-decision at the top of this doc): the goal of this combined push is a fully
-working HTTP + WebSocket layer with the *real* Stage 8 subscribe-and-diff
-client model behind it, proven against a tiny real game, before any IDC work
-starts. Not a stub or a raw request/response placeholder — the full model
-described in Stage 8 below.
+Minimal direct HTTP/WebSocket host. Planned to ship together with Stage 8 (the 2026-09-13 build-order decision at the
+top of this doc): a fully working HTTP + WebSocket layer with the *real* subscribe-and-diff client model behind it,
+proven against a tiny real game, before any IDC work starts.
 
-## Stage 8 — View/Table-only client access, subscribe-and-diff ⏳ designed, not built, built together with Stage 7
+**Built:**
+- `RhinoDB.Lib.Server`: a minimal Kestrel host started by `RhinoHostBuilder.BuildAsync` in `run` mode, with a
+  `/health` endpoint. Nothing outside it references ASP.NET Core; a permanent test checks that.
+- `IRealtimeTransport` + `WsTransport`: binary frames (`type u16 | payload`), a `Hello` frame carrying the client's
+  app version (rejected per `[InvalidClientAppVersions]` before `OnClientConnect` runs), sessions, connect/disconnect
+  hooks.
+- REST commands (`AddRestCommand`) for request/response data outside the realtime connection.
+- **`[Procedure]`**, the client-callable write path. A transaction-only shape returns `Result` only (like a
+  SpacetimeDB reducer), and a general shape may return a value to the caller only. Arguments travel in the project's
+  `ClientProtocol`. Clients get an error kind plus a custom code, never text ([guide](manual/procedures.md)).
+- Client wire protocol (Part F): per-project `ClientProtocol` (`Raw` / `VersionedMemoryPack` / `MessagePack`),
+  per-table client migration and downgrade chains, compat adapters.
+- `Network.Transport` in `rdbsettings.json`; `Delivery.Unreliable` is a compile error on WebSocket (RHINO040).
+
+**Not built (needs Stage 8):** pushing data to clients. `Subscribe` / `DiffBatch` / `Resume` frames exist in the
+enum but are only acknowledged. The reply-ordering rule is already decided: a procedure's `RpcResult` is sent with,
+or right after, the caller's own update for that transaction, never before it; updates in commit order, replies in
+request order. Per-connection JSON/binary body encoding and auth (every session is anonymous today) are also open.
+
+## Stage 8 — View/Table-only client access, subscribe-and-diff ⏳ designed, not built — next
 
 Decided 2026-09-07, queued here rather than folded into Stage 5. Clients never
 fetch via an ad-hoc RPC query — the only client-facing read path is subscribing

@@ -1086,6 +1086,15 @@ custom code, with engine kinds collapsed to `ServerUnavailable`. User guide:
 [manual/procedures.md](manual/procedures.md). Every setting, including the transport that decides which delivery
 modes compile (RHINO040), lives in `rdbsettings.json`: [manual/configuration.md](manual/configuration.md).
 
+### Prefs (added 2026-10-06)
+
+`RhinoPrefs` is a per-process durable key/value store for the server's own bookkeeping (season number, flags, job
+timestamps), like Unity's `PlayerPrefs`. It lives in a reserved libmdbx table (`__rhino_prefs`) in the Root's store,
+created when the store opens, outside the WAL, transactions, migrations, replay and clients. Reads are synchronous
+(sliding-expiry cache, then a read-only libmdbx transaction); writes are async, one write transaction plus an env sync
+each, or one per batch. Reached as `host.Prefs` / `ctx.Prefs`, deliberately absent from `{Db}TxCtx`. User guide:
+[manual/prefs.md](manual/prefs.md).
+
 ### Root/Child database hosting (added 2026-10-04)
 
 A process still hosts exactly one **Root** database (`AddDatabase`, unchanged — see

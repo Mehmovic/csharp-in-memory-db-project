@@ -36,11 +36,16 @@ public sealed class RhinoHostOptions {
             return Result<RhinoHostOptions>.Error(DbError.SystemFailure(ex));
         }
 
-        return FromConfig(config.Host, config.Server.PackedVersion, config.Durability, config.Network);
+        return FromConfig(config.Host, config.Server.PackedVersion, config.Durability, config.Network, config.Prefs);
     }
 
     static public Result<RhinoHostOptions> FromConfig(
-        HostConfig host, uint serverVersion = 0, DurabilityConfig? durability = null, NetworkConfig? network = null) {
+        HostConfig host,
+        uint serverVersion = 0,
+        DurabilityConfig? durability = null,
+        NetworkConfig? network = null,
+        PrefsConfig? prefs = null
+    ) {
         if (!TryParseMode(host.Mode, out var mode))
             return Result<RhinoHostOptions>.Error(DbError.SystemFailure(new ArgumentException(
                 $"Unknown Host.Mode '{host.Mode}' - expected run, replay, migrate, wal-prune, or wal-migrate.")));
@@ -61,7 +66,7 @@ public sealed class RhinoHostOptions {
         TimeSpan shutdownBudget, exitWatchdog;
         try {
             transport = NetworkTransportParser.Parse((network ?? new NetworkConfig()).Transport);
-            coldStore = ColdStoreSettings.FromConfig(durability ?? new DurabilityConfig());
+            coldStore = ColdStoreSettings.FromConfig(durability ?? new DurabilityConfig(), prefs);
             shutdownBudget = host.UnrecoverableError.ResolvedShutdownBudget;
             exitWatchdog = host.UnrecoverableError.ResolvedExitWatchdog;
         } catch (GeneratorConfigException ex) {

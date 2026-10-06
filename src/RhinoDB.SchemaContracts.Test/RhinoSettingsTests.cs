@@ -34,6 +34,7 @@ public class RhinoSettingsTests {
             Assert.That(root.GetProperty("Host").GetProperty("UnrecoverableError").GetProperty("ShutdownBudget").GetString(), Is.EqualTo("00:00:05"));
             Assert.That(root.GetProperty("Host").GetProperty("UnrecoverableError").GetProperty("ExitWatchdog").GetString(), Is.EqualTo("00:00:07"));
             Assert.That(root.GetProperty("Server").GetProperty("ArchiveRetention").GetProperty("Enabled").GetBoolean(), Is.False);
+            Assert.That(root.GetProperty("Prefs").GetProperty("CacheDuration").GetString(), Is.EqualTo("00:30:00"));
         });
     }
 

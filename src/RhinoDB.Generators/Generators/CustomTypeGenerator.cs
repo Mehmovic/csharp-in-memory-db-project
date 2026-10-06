@@ -132,6 +132,12 @@ public sealed class CustomTypeGenerator : IIncrementalGenerator {
 
         SchemaWalk.EmitProtocolWrapperMethods(sb, type, clientProtocol);
 
+        // Lets library code encode this type generically (RhinoPrefs.Get<T>/SetAsync<T>); the hash tells types apart on disk.
+        sb.AppendLine("#pragma warning disable CA2255");
+        sb.AppendLine("    [global::System.Runtime.CompilerServices.ModuleInitializer]");
+        sb.AppendLine($"    internal static void RegisterCodec() => global::RhinoDB.Core.CustomTypes.CustomTypeCodec<{type}>.Register({NameHash.Compute(type.Replace("global::", ""))}u, SerializeRow, DeserializeRow);");
+        sb.AppendLine("#pragma warning restore CA2255");
+
         sb.AppendLine("}");
         return sb.ToString();
     }

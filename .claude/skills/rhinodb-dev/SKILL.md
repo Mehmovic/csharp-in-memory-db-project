@@ -159,6 +159,12 @@ means sweep every production file touched in the session and move rationale to `
   `DeliveryTransportAnalyzer` (RHINO040: no `Delivery.Unreliable` on WebSocket). New option: add it to the config
   class (non-null default, `[JsonIgnore]` on computed members), the repo's `rdbsettings.json` files and
   `docs/manual/configuration.md`.
+- **`RhinoPrefs`** (`host.Prefs` / `ctx.Prefs`, guide `docs/manual/prefs.md`): one per process in the Root's ColdStore,
+  table `__rhino_prefs` outside WAL/transactions. Writes run their libmdbx write txn synchronously inside `Task.Run`
+  (txns are thread-bound). libmdbx: a not-found `mdbx_del` or an empty commit makes `mdbx_txn_commit` return -1
+  (MDBX_RESULT_TRUE) - check existence first and skip empty commits. `[CustomType]`s self-register a codec in
+  `CustomTypeCodec<T>` via a generated `[ModuleInitializer]`; `ColdStore.Prefs` is internal, so code in a user/test
+  assembly reaches prefs through `RhinoCtx.Prefs`.
 - **Generated overrides of `protected internal` DbContext members** use `LibAccess.OverrideModifier` - `protected` in a
   normal assembly, `protected internal` in a friend of RhinoDB.Lib (its test projects).
 

@@ -6,4 +6,5 @@ public sealed class RhinoDbConfig {
     public HostConfig Host { get; set; } = new HostConfig();
     public NetworkConfig Network { get; set; } = new NetworkConfig();
     public DurabilityConfig Durability { get; set; } = new DurabilityConfig();
+    public PrefsConfig Prefs { get; set; } = new PrefsConfig();
 }

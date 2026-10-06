@@ -1,4 +1,5 @@
 using RhinoDB.Lib.Hosting;
+using RhinoDB.Lib.Prefs;
 using RhinoDB.Lib.Realtime;
 
 namespace RhinoDB.Lib.Execution;
@@ -21,6 +22,12 @@ public sealed class RhinoCtx {
     public ref RhinoRandom Random => ref random.Value;
 
     internal ulong? RandomSeed => random.Seed;
+
+    // The process's durable key/value store (the Root's) - also in lifecycle hooks, which run before the host exists.
+    public RhinoPrefs Prefs => host is not null
+        ? host.Prefs
+        : (directDb as IHostedDatabase)?.Cold?.Prefs
+          ?? throw new InvalidOperationException("Prefs need a database with cold storage - this context's database has none.");
 
     internal RhinoHost? Host => host;
     

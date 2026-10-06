@@ -5,6 +5,15 @@ Windows service. When the engine hits an error it can't recover from in place, i
 **exits with a non-zero code**, and restarting it is the supervisor's job. A fresh
 process recovers everything durable from disk.
 
+## Requirements
+
+- **A little-endian machine.** x64, x86, Arm64 and Arm32 all are; that covers every
+  platform Microsoft ships .NET for. RhinoDB's stores (libmdbx files, WAL, prefs) keep numbers
+  in the machine's native byte order, so on a big-endian machine (such as IBM s390x) the
+  store refuses to open with `ByteOrderUnsupported`. Moving a store between two
+  little-endian machines (a backup, a restore, replaying an archive elsewhere) is fine. What
+  goes over the network is defined explicitly and doesn't depend on the machine.
+
 ## What counts as unrecoverable
 
 A database becomes **poisoned** when the engine can no longer trust that what it holds

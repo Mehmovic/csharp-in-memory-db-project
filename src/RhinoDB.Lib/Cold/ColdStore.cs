@@ -1,6 +1,7 @@
 using MemoryPack;
 
 using RhinoDB.Lib.Durability;
+using RhinoDB.Lib.Prefs;
 using RhinoDB.Lib.Execution;
 using RhinoDB.Lib.Tables;
 using RhinoDB.Native;
@@ -26,6 +27,9 @@ public sealed class ColdStore : IDisposable {
     private readonly List<EvictionCandidate> appliedEvictions = [];
 
     internal readonly WriteAheadLog Wal;
+    private readonly Lock prefsLock = new Lock();
+    private RhinoPrefs? prefs;
+    private TimeSpan prefsCacheDuration = ColdStoreSettings.Default.PrefsCacheDuration;
 
     public bool IsScopeActive { get; private set; }
 
@@ -70,9 +74,27 @@ public sealed class ColdStore : IDisposable {
         evictionBatch = new EvictionBatch(evictionBatchThresholdBytes);
     }
 
-    static public Result<ColdStore> Open(string path, ColdStoreSettings settings) =>
-        Open(path, evictionBatchThresholdBytes: settings.EvictionBatchThresholdBytes,
+    static public Result<ColdStore> Open(string path, ColdStoreSettings settings) {
+        var opened = Open(path, evictionBatchThresholdBytes: settings.EvictionBatchThresholdBytes,
             walFlushThresholdBytes: settings.WalFlushThresholdBytes, walFlushInterval: settings.WalFlushInterval);
+        if (opened.TryUnwrap(out var store)) store.prefsCacheDuration = settings.PrefsCacheDuration;
+        return opened;
+    }
+
+    // One per store, created on first use. Exposed as host.Prefs / ctx.Prefs for the Root's store only.
+    internal RhinoPrefs Prefs {
+        get {
+            lock (prefsLock) return prefs ??= new RhinoPrefs(this, prefsCacheDuration);
+        }
+    }
+
+    // A decision, not an accident: native-order data on a big-endian machine would read back as garbage, so refuse first.
+    static internal Result EnsureSupportedByteOrder(bool isLittleEndian) =>
+        isLittleEndian ? Result.Ok() : Result.Error(DbError.ByteOrderUnsupported());
+
+    internal MdbxEnvironment Environment => env;
+
+    internal uint PrefsTable { get; private set; }
 
     static public Result<ColdStore> Open(
         string path,
@@ -82,6 +104,9 @@ public sealed class ColdStore : IDisposable {
         long walFlushThresholdBytes = DurabilityConfig.DefaultWalFlushThresholdBytes,
         TimeSpan walFlushInterval = default
     ) {
+        var byteOrder = EnsureSupportedByteOrder(BitConverter.IsLittleEndian);
+        if (byteOrder.IsError()) return Result<ColdStore>.Error(byteOrder.GetError());
+
         var isFreshDirectory = !Directory.Exists(path) || !Directory.EnumerateFileSystemEntries(path).Any();
 
         var rcCreate = MdbxEnvironment.Create(out var env);
@@ -122,6 +147,13 @@ public sealed class ColdStore : IDisposable {
             wal = createResult.Unwrap();
         }
 
+        var prefsTableResult = RhinoPrefs.CreateTable(env);
+        if (prefsTableResult.IsError()) {
+            wal.Dispose();
+            env.Dispose();
+            return Result<ColdStore>.Error(prefsTableResult.GetError());
+        }
+
         var checkpointEngine = new CheckpointEngine(env, wal, archiveDirectory);
         var checkpointedLsnResult = checkpointEngine.ReadCheckpointedLsn();
         if (checkpointedLsnResult.IsError()) {
@@ -144,8 +176,7 @@ public sealed class ColdStore : IDisposable {
             else if (entry.Kind == WalEntryKind.ChainAbort) localChainMarkers[entry.ChainId] = false;
         }
 
-        return Result<ColdStore>.Ok(
-            new ColdStore(
+        var store = new ColdStore(
                 env,
                 wal,
                 path,
@@ -156,8 +187,9 @@ public sealed class ColdStore : IDisposable {
                 Math.Max(checkpointedLsn, maxTailLsn),
                 evictionBatchThresholdBytes,
                 isFreshDirectory
-            )
-        );
+            );
+        store.PrefsTable = prefsTableResult.Unwrap();
+        return Result<ColdStore>.Ok(store);
     }
 
     public void AttachChainResolver(IChainResolver resolver) => attachedChainResolver = resolver;
@@ -549,6 +581,7 @@ public sealed class ColdStore : IDisposable {
     }
 
     public void Dispose() {
+        lock (prefsLock) prefs?.Close();
         Wal.Dispose();
         env.Dispose();
     }

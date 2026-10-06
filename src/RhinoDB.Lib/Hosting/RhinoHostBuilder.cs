@@ -1,6 +1,7 @@
 using RhinoDB.Lib.Cold;
 using RhinoDB.Lib.Durability;
 using RhinoDB.Lib.Execution;
+using RhinoDB.Lib.Prefs;
 using RhinoDB.Lib.Procedures;
 using RhinoDB.Lib.Realtime;
 
@@ -380,6 +381,10 @@ public sealed class RhinoHost : IDisposable {
     public bool IsAppVersionInvalid(uint version) => isAppVersionInvalid(version);
 
     public uint ServerVersion => serverVersion;
+
+    // The process's durable key/value store, kept in the Root database's cold storage (docs/manual/prefs.md).
+    public RhinoPrefs Prefs => ((IHostedDatabase)database).Cold?.Prefs
+        ?? throw new InvalidOperationException("Prefs need the Root database's cold storage - this Root was created without one.");
 
     internal ChainLog? ChainLog => chainLog;
 

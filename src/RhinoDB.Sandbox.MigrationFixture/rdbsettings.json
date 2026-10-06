@@ -35,5 +35,8 @@
     "WalFlushThresholdBytes": 4194304,
     "WalFlushInterval": "00:00:00.100",
     "EvictionBatchThresholdBytes": 4194304
+  },
+  "Prefs": {
+    "CacheDuration": "00:30:00"
   }
 }

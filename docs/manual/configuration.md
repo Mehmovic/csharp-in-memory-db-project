@@ -51,6 +51,9 @@ The only settings that stay in code are the ones that are code: callbacks such a
     "WalFlushThresholdBytes": 4194304,
     "WalFlushInterval": "00:00:00.100",
     "EvictionBatchThresholdBytes": 4194304
+  },
+  "Prefs": {
+    "CacheDuration": "00:30:00"
   }
 }
 ```
@@ -106,6 +109,12 @@ These apply to the Root and to every Child database.
 | `WalFlushThresholdBytes` | `4194304` (4 MiB) | `Optimistic` writes are flushed to disk once this many bytes are buffered... |
 | `WalFlushInterval` | `00:00:00.100` | ...or after this long, whichever comes first. This is the window of `Optimistic` writes a crash can lose. `Confirmed` writes always wait for their own fsync. |
 | `EvictionBatchThresholdBytes` | `4194304` (4 MiB) | How many bytes of evicted rows are batched before being written to cold storage. |
+
+## `Prefs`: the durable key/value store (startup)
+
+| Option | Default | Meaning |
+|---|---|---|
+| `CacheDuration` | `00:30:00` | How long a prefs value stays in memory after its last use, unless its `Set` passes its own `cacheFor`. See [prefs](prefs.md). |
 
 ## Errors
 
