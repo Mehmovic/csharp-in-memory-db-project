@@ -1,4 +1,4 @@
-# RhinoDB
+# C# RhinoDB
 
 **An in-memory transactional database for game servers, written in C# (.NET 11).** Single
 writer per database, in-memory tables with libmdbx cold storage, a write-ahead log,
